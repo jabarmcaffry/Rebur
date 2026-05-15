@@ -234,9 +234,9 @@ runtime.events.on("physics", (dt) => {
 
 ---
 
-# Server-Authoritative ECS Pipeline (NEW)
+# Server-Authoritative ECS Pipeline
 
-The runtime now includes an optional server-authoritative ECS (Entity Component System) pipeline that can be enabled via `runtime.useEcsPipeline = true`. This is a major architectural enhancement designed to support multiplayer-ready games with clean separation between mutation and rendering.
+The runtime uses a server-authoritative ECS (Entity Component System) pipeline as the canonical simulation path. All game state flows through this pipeline with fixed system ordering for deterministic behavior. This architecture is designed for multiplayer-ready games with clean separation between mutation and rendering.
 
 ## Pipeline Overview
 
@@ -287,14 +287,13 @@ The creator-facing API (`obj.position.x = 5`, `game.spawn(...)`, etc.) remains u
 2. **Emits a Command** with `{ kind, entityId, payload, origin: { script, line } }`
 3. **Returns values** consistent with the old API (reads from last committed snapshot)
 
-This means scripts work identically whether ECS is enabled or not.
+This means existing scripts work without any changes.
 
-## Enabling the ECS Pipeline
+## Usage
 
 ```typescript
 const runtime = new GameRuntime(snapshot, scripts, username, avatarColor);
-runtime.useEcsPipeline = true;  // Enable before start()
-runtime.start();
+runtime.start(); // ECS pipeline is automatically initialized
 ```
 
 ## Component Definitions
@@ -354,15 +353,17 @@ Every command carries an `origin` (script name, line number, API path). When a s
 2. Rewrites the stack as `[ScriptName:line] Object.position.set: ...`
 3. Uses OOP vocabulary — ECS terms never leak to creators
 
-## Migration Path
+## Architecture Benefits
 
-The ECS pipeline is gated by the `useEcsPipeline` flag. Both paths produce identical behavior for existing games. To migrate:
+The ECS architecture provides several benefits for scaling:
 
-1. Enable `useEcsPipeline = true`
-2. Test all game scripts work correctly
-3. Report any edge cases (read-after-write timing, etc.)
+1. **Deterministic simulation** - Fixed system order ensures consistent behavior across clients
+2. **Network-ready** - Server-authoritative model means adding real multiplayer only requires implementing the transport layer
+3. **Cache-friendly** - Component data is stored in contiguous arrays for better CPU cache utilization
+4. **Easy debugging** - Command tracing maps all mutations back to their source
+5. **Parallel-ready** - Systems can be parallelized since they operate on independent component queries
 
-## Out of Scope (v1)
+## Future Work
 
 - Real network transport (WebSocket/WebRTC) — still in-process via `network.ts`
 - Client-side prediction & reconciliation — deferred
