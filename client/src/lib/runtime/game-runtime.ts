@@ -54,6 +54,26 @@ import {
   type MotorState,
   MOTOR_SLOT_OFFSETS,
 } from "./player/motors";
+
+// ECS Pipeline imports
+import {
+  createPipeline,
+  type PipelineHandles,
+  CommandBus,
+  defineCommand,
+  CommandGroups,
+  World,
+  Transform,
+  Velocity,
+  Visual,
+  Physics,
+  AutoBehavior,
+  LegacyHandle,
+  InputState,
+  WorldPhysics,
+  getLatestSnapshot,
+  type EntityId,
+} from "./ecs";
 import { runPickupSweep, runTouchSweep, clearContact, type TouchSystemContext } from "./objects/touch-system";
 import { 
   initializeModuleScripts, 
@@ -224,6 +244,11 @@ export class GameRuntime {
   _ragdollPos: Record<string, Vec3> | null = null;
   private _ragdollVel: Record<string, Vec3> | null = null;
   private _ragdollUntil = 0;
+
+  // ECS Pipeline (gated by useEcsPipeline flag)
+  useEcsPipeline = false;
+  private _ecsPipeline: PipelineHandles | null = null;
+  private _ecsEntityMap = new Map<string, EntityId>(); // legacyId -> EntityId
 
   constructor(snap: GameObject[], scripts: Script[], username: string, avatarColor: string) {
     // Initialize input
@@ -850,6 +875,169 @@ export class GameRuntime {
     this.onLog?.(line); 
   }
 
+  /**
+   * Initialize the ECS pipeline and sync all existing objects into the ECS world.
+   * Call this before start() if useEcsPipeline is true.
+   */
+  initEcsPipeline(): void {
+    if (this._ecsPipeline) return; // Already initialized
+    
+    this._ecsPipeline = createPipeline();
+    const { server } = this._ecsPipeline;
+    const world = server.world;
+    
+    // Initialize world physics singleton (entity 0)
+    const worldEntity = 0 as unknown as EntityId;
+    world.set(worldEntity, WorldPhysics, {
+      gravity: this.physics.gravity,
+      airDrag: this.physics.airDrag,
+    });
+    world.set(worldEntity, InputState, {
+      moveX: 0,
+      moveZ: 0,
+      jump: false,
+      keys: {},
+      prevKeys: {},
+      cameraForward: { x: 0, y: 0, z: -1 },
+    });
+    
+    // Sync all existing RuntimeObjects into the ECS world
+    for (const ro of this._all.values()) {
+      this.syncObjectToEcs(ro);
+    }
+    
+    this.pushLog("[ECS] Pipeline initialized with " + this._ecsEntityMap.size + " entities");
+  }
+
+  /**
+   * Sync a RuntimeObject to the ECS world.
+   * Creates an entity if it doesn't exist, otherwise updates components.
+   */
+  private syncObjectToEcs(ro: RuntimeObject): EntityId {
+    if (!this._ecsPipeline) throw new Error("ECS pipeline not initialized");
+    
+    const world = this._ecsPipeline.server.world;
+    let eid = this._ecsEntityMap.get(ro.id);
+    
+    if (!eid) {
+      eid = world.create();
+      this._ecsEntityMap.set(ro.id, eid);
+    }
+    
+    // Sync Transform
+    world.set(eid, Transform, {
+      position: { ...ro.position },
+      rotation: { ...ro.rotation },
+      scale: { ...ro.scale },
+    });
+    
+    // Sync Velocity
+    world.set(eid, Velocity, { ...ro.velocity });
+    
+    // Sync Visual
+    world.set(eid, Visual, {
+      color: ro.color,
+      visible: ro.visible,
+      transparency: ro.transparency,
+      primitiveType: ro.primitiveType,
+    });
+    
+    // Sync Physics
+    world.set(eid, Physics, {
+      anchored: ro.anchored,
+      canCollide: ro.canCollide,
+      mass: ro.mass,
+      friction: ro.friction,
+      gravity: ro.gravity,
+    });
+    
+    // Sync AutoBehavior if any auto-properties exist
+    if (ro.autoRotateY !== undefined || ro.autoBob || ro.autoSpin || ro.autoMove || ro.autoFollow) {
+      world.set(eid, AutoBehavior, {
+        autoRotateY: ro.autoRotateY,
+        autoBob: ro.autoBob,
+        autoSpin: ro.autoSpin,
+        autoMove: ro.autoMove,
+        autoFollow: ro.autoFollow,
+      });
+    }
+    
+    // Sync LegacyHandle
+    world.set(eid, LegacyHandle, {
+      legacyId: ro.id,
+      name: ro.name,
+    });
+    
+    return eid;
+  }
+
+  /**
+   * Sync ECS state back to RuntimeObjects after a tick.
+   * Reads from the committed snapshot.
+   */
+  private syncEcsToObjects(): void {
+    if (!this._ecsPipeline) return;
+    
+    const snapshot = getLatestSnapshot(this._ecsPipeline.server.world);
+    if (!snapshot) return;
+    
+    for (const [eid, entitySnap] of Object.entries(snapshot.entities)) {
+      const legacyId = (entitySnap as any).legacyId;
+      if (!legacyId) continue;
+      
+      const ro = this._all.get(legacyId);
+      if (!ro) continue;
+      
+      // Update position, rotation, velocity from ECS
+      ro.position.x = entitySnap.position.x;
+      ro.position.y = entitySnap.position.y;
+      ro.position.z = entitySnap.position.z;
+      ro.rotation.x = entitySnap.rotation.x;
+      ro.rotation.y = entitySnap.rotation.y;
+      ro.rotation.z = entitySnap.rotation.z;
+      ro.velocity.x = entitySnap.velocity.x;
+      ro.velocity.y = entitySnap.velocity.y;
+      ro.velocity.z = entitySnap.velocity.z;
+      ro.visible = entitySnap.visible;
+      ro.transparency = entitySnap.transparency;
+    }
+  }
+
+  /**
+   * Step the ECS pipeline.
+   * Called from the main step() method when useEcsPipeline is true.
+   */
+  private stepEcsPipeline(dt: number): void {
+    if (!this._ecsPipeline) return;
+    
+    const { server } = this._ecsPipeline;
+    
+    // Push current input state as a command
+    const inputCmd = defineCommand<"input.update", {
+      moveX: number;
+      moveZ: number;
+      jump: boolean;
+      keys: Record<string, boolean>;
+      cameraForward: Vec3;
+    }>("input.update", CommandGroups.Input);
+    
+    server.commands.enqueue(
+      inputCmd.create({
+        moveX: this.input.moveX,
+        moveZ: this.input.moveZ,
+        jump: this.input.jump,
+        keys: { ...this.input.keys },
+        cameraForward: { ...this.cameraForward },
+      }, { origin: { script: "runtime", apiPath: "input.update" } })
+    );
+    
+    // Step the server simulation
+    server.step(dt);
+    
+    // Sync ECS state back to RuntimeObjects
+    this.syncEcsToObjects();
+  }
+
   private buildState(): RuntimeState {
     if (this._stateApi) return this._stateApi;
     this._stateApi = {
@@ -1044,6 +1232,11 @@ export class GameRuntime {
   }
 
   start() { 
+    // Initialize ECS pipeline if enabled
+    if (this.useEcsPipeline) {
+      this.initEcsPipeline();
+    }
+    
     void this.runScripts(); 
     this._events.emit("start", [], (e, fn) => this.pushLog(`internal start error: ${formatErr(e)}`)); 
     this._events.emit("playerSpawned", [this.player], (e, fn) => this.pushLog(`internal playerSpawned error: ${formatErr(e)}`)); 
@@ -1133,7 +1326,12 @@ export class GameRuntime {
 
     // ANIMATION PHASE
     this._tweens.step(dt);
-    this.updateAutoProperties(dt);
+    if (this.useEcsPipeline && this._ecsPipeline) {
+      // Run ECS pipeline for animation (and other systems)
+      this.stepEcsPipeline(dt);
+    } else {
+      this.updateAutoProperties(dt);
+    }
     this._events.emit("animation", [dt, this.time], (e, fn) => this.pushLog(`runService.animation error: ${formatErr(e)}`));
 
     // REPLICATION PHASE

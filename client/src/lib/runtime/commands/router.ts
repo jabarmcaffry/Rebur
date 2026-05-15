@@ -7,6 +7,8 @@ export const CommandGroups = {
   Script: "script",
   Lifecycle: "lifecycle",
   Physics: "physics",
+  Animation: "animation",
+  Collision: "collision",
 } as const;
 
 export type CommandGroup = (typeof CommandGroups)[keyof typeof CommandGroups];

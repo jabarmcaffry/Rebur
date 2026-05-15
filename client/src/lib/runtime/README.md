@@ -60,6 +60,40 @@ runtime/
 ├── utils/                      # Utilities
 │   └── helpers.ts              # Pure helper functions
 │
+├── ecs/                        # NEW: Server-Authoritative ECS Pipeline
+│   ├── index.ts                # Pipeline entry point + exports
+│   ├── world.ts                # Entity store, component tables
+│   ├── components.ts           # Canonical component definitions
+│   ├── system.ts               # System definition + scheduler
+│   └── systems/                # Fixed-order ECS systems
+│       ├── input-intake-system.ts
+│       ├── script-command-system.ts
+│       ├── animation-system.ts
+│       ├── physics-system.ts
+│       ├── collision-system.ts
+│       ├── lifecycle-system.ts
+│       ├── state-commit-system.ts
+│       ├── replication-system.ts
+│       └── trace-flush-system.ts
+│
+├── commands/                   # NEW: Command Event System
+│   ├── command.ts              # Command definition factory
+│   ├── bus.ts                  # Command queue with validation
+│   └── router.ts               # Command group routing
+│
+├── authority/                  # NEW: Server Authority Layer
+│   ├── server-sim.ts           # Authoritative world simulation
+│   ├── client-view.ts          # Read-only snapshot mirror
+│   └── transport.ts            # Network abstraction
+│
+├── oop/                        # NEW: OOP Facade Layer
+│   ├── facade.ts               # Re-exports for API builder
+│   └── proxies.ts              # Object proxies -> commands
+│
+├── trace/                      # NEW: Debug Tracing
+│   ├── trace-map.ts            # Command -> system provenance
+│   └── error-translator.ts     # ECS errors -> OOP messages
+│
 └── [Standalone Modules]
     ├── api.ts                  # Emitter, Callable, Tags, Tasks
     ├── compile.ts              # Script → async function factory
@@ -197,3 +231,139 @@ runtime.events.on("physics", (dt) => {
   console.log("[v0] Physics phase:", dt);
 });
 ```
+
+---
+
+# Server-Authoritative ECS Pipeline (NEW)
+
+The runtime now includes an optional server-authoritative ECS (Entity Component System) pipeline that can be enabled via `runtime.useEcsPipeline = true`. This is a major architectural enhancement designed to support multiplayer-ready games with clean separation between mutation and rendering.
+
+## Pipeline Overview
+
+```
+User Code (OOP API)
+   ↓ (facade translates calls to intents)
+Command Events            ← lightweight intent layer
+   ↓
+Event Grouping            ← routing / batching layer
+   ↓
+ECS Systems               ← simulation core (fixed-order)
+   ↓
+State Commit              ← single source of truth (server)
+   ↓
+Render  /  Network        ← clients are pure consumers
+   ↓
+Trace Mapping             ← debug overlay, OOP-shaped errors
+```
+
+## Authority Model
+
+- **Server** (in-process today, real WebSocket later) owns state
+- **Clients** only emit Command Events ("intents"); never mutate state directly
+- **Server** runs ECS at fixed timestep, commits, then broadcasts snapshots
+- **Render** reads the last committed snapshot — no client-side prediction in v1
+
+## Fixed System Order
+
+Systems run in this exact order every tick:
+
+| Order | System | Purpose |
+|-------|--------|---------|
+| 1 | `InputIntakeSystem` | Drains client input commands |
+| 2 | `ScriptCommandSystem` | Drains user-script commands (move, setProp, spawn, destroy, tween) |
+| 3 | `AnimationSystem` | Auto-properties, tweens |
+| 4 | `PhysicsSystem` | Gravity, motors, velocity integration |
+| 5 | `CollisionSystem` | Player↔object, object↔object resolution |
+| 6 | `LifecycleSystem` | Spawn/destroy queue flush, parent/child reindex |
+| 7 | `StateCommitSystem` | Writes to canonical world snapshot |
+| 8 | `ReplicationSystem` | Diff + broadcast snapshot to clients |
+| 9 | `TraceFlushSystem` | Finalize per-tick trace records for debugging |
+
+## OOP Facade
+
+The creator-facing API (`obj.position.x = 5`, `game.spawn(...)`, etc.) remains unchanged. Under the hood:
+
+1. **Proxy captures** the call site (via compile.ts source maps)
+2. **Emits a Command** with `{ kind, entityId, payload, origin: { script, line } }`
+3. **Returns values** consistent with the old API (reads from last committed snapshot)
+
+This means scripts work identically whether ECS is enabled or not.
+
+## Enabling the ECS Pipeline
+
+```typescript
+const runtime = new GameRuntime(snapshot, scripts, username, avatarColor);
+runtime.useEcsPipeline = true;  // Enable before start()
+runtime.start();
+```
+
+## Component Definitions
+
+```typescript
+// Transform (position, rotation, scale)
+world.set(eid, Transform, {
+  position: { x: 0, y: 0, z: 0 },
+  rotation: { x: 0, y: 0, z: 0 },
+  scale: { x: 1, y: 1, z: 1 },
+});
+
+// Velocity
+world.set(eid, Velocity, { x: 0, y: 0, z: 0 });
+
+// Visual (rendering properties)
+world.set(eid, Visual, {
+  color: "#ffffff",
+  visible: true,
+  transparency: 0,
+  primitiveType: "cube",
+});
+
+// Physics (collision and motion)
+world.set(eid, Physics, {
+  anchored: false,
+  canCollide: true,
+  mass: 1,
+  friction: 0.4,
+  gravity: false,
+});
+
+// AutoBehavior (animation properties)
+world.set(eid, AutoBehavior, {
+  autoRotateY: 1.5,
+  autoBob: { amplitude: 0.5, speed: 1 },
+  autoSpin: { x: 0, y: 1, z: 0 },
+});
+```
+
+## Command Types
+
+Commands are emitted by the OOP facade and processed by the ScriptCommandSystem:
+
+| Group | Commands |
+|-------|----------|
+| Script | `transform.setPosition`, `transform.setRotation`, `transform.setScale`, `visual.setColor`, `visual.setVisible`, `visual.setTransparency`, `physics.setAnchored`, `physics.setCanCollide`, `physics.setVelocity` |
+| Lifecycle | `entity.spawn`, `entity.destroy` |
+| Animation | `animation.tween`, `animation.setAutoRotateY`, `animation.setAutoBob`, `animation.setAutoSpin` |
+| Input | `input.update` |
+
+## Trace Mapping
+
+Every command carries an `origin` (script name, line number, API path). When a system throws or asserts:
+
+1. `error-translator.ts` looks up the originating command
+2. Rewrites the stack as `[ScriptName:line] Object.position.set: ...`
+3. Uses OOP vocabulary — ECS terms never leak to creators
+
+## Migration Path
+
+The ECS pipeline is gated by the `useEcsPipeline` flag. Both paths produce identical behavior for existing games. To migrate:
+
+1. Enable `useEcsPipeline = true`
+2. Test all game scripts work correctly
+3. Report any edge cases (read-after-write timing, etc.)
+
+## Out of Scope (v1)
+
+- Real network transport (WebSocket/WebRTC) — still in-process via `network.ts`
+- Client-side prediction & reconciliation — deferred
+- Rollback netcode / lag compensation
