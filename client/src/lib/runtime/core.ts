@@ -1,4 +1,4 @@
-// core.ts
+// old core.ts ignore this as we splitted into indpendent code parts in runtime folder this is just referance.
 import type { GameObject, Script } from "@shared/schema";
 import { TweenManager } from "./tween";
 import { HierarchyIndex } from "./hierarchy";
