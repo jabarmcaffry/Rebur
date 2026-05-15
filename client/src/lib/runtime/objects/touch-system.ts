@@ -512,7 +512,7 @@ export function wakeBody(objectId: string, ctx: TouchSystemContext): void {
  */
 export function isBodySleeping(objectId: string, ctx: TouchSystemContext): boolean {
   const body = ctx.bodies.get(objectId);
-  return body?.state === "sleeping" ?? false;
+  return body !== undefined && body.state === "sleeping";
 }
 
 // ============================================================================

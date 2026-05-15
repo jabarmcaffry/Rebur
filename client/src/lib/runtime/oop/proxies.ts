@@ -144,11 +144,23 @@ export interface ObjectProxyDeps {
 // Vec3 Proxy Helper
 // ============================================================================
 
+type ObjectOverlay = {
+  position?: Vec3;
+  rotation?: Vec3;
+  scale?: Vec3;
+  velocity?: Vec3;
+  color?: string;
+  visible?: boolean;
+  transparency?: number;
+  anchored?: boolean;
+  canCollide?: boolean;
+};
+
 function createVec3Proxy(
   deps: ObjectProxyDeps,
   entity: number,
   propertyName: "position" | "rotation" | "scale" | "velocity",
-  overlay: { [key: string]: Vec3 | undefined },
+  overlay: ObjectOverlay,
   command: ReturnType<typeof defineCommand<string, { [key: string]: Vec3 }>>,
 ): Vec3 {
   const readFn = (): Vec3 => {

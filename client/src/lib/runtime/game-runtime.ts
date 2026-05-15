@@ -76,7 +76,7 @@ import {
   getLatestSnapshot,
   type EntityId,
 } from "./ecs";
-import { runPickupSweep, runTouchSweep, clearContact, type TouchSystemContext } from "./objects/touch-system";
+import { runPickupSweep, runTouchSweep, clearContact, type LegacyTouchContext } from "./objects/touch-system";
 import { 
   initializeModuleScripts, 
   requireModule, 
@@ -1363,7 +1363,7 @@ export class GameRuntime {
 
   /** Run pickup sweep using extracted module */
   private _runPickupSweep() {
-    const ctx: TouchSystemContext = {
+    const ctx: LegacyTouchContext = {
       playerContacts: this._playerContacts,
       emitObjectEvent: (id, event, args) => this.emitObjectEvent(id, event, args),
       pushLog: (line) => this.pushLog(line),
@@ -1376,7 +1376,7 @@ export class GameRuntime {
 
   /** Run touch sweep using extracted module */
   private _runTouchSweep() {
-    const ctx: TouchSystemContext = {
+    const ctx: LegacyTouchContext = {
       playerContacts: this._playerContacts,
       emitObjectEvent: (id, event, args) => this.emitObjectEvent(id, event, args),
       pushLog: (line) => this.pushLog(line),
