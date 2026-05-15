@@ -68,6 +68,9 @@ export class World {
   /** Iterate every entity that has all listed components. */
   query<A>(a: ComponentDef<A>): IterableIterator<[EntityId, A]>;
   query<A, B>(a: ComponentDef<A>, b: ComponentDef<B>): IterableIterator<[EntityId, A, B]>;
+  query<A, B, C>(a: ComponentDef<A>, b: ComponentDef<B>, c: ComponentDef<C>): IterableIterator<[EntityId, A, B, C]>;
+  query<A, B, C, D>(a: ComponentDef<A>, b: ComponentDef<B>, c: ComponentDef<C>, d: ComponentDef<D>): IterableIterator<[EntityId, A, B, C, D]>;
+  query<A, B, C, D, E>(a: ComponentDef<A>, b: ComponentDef<B>, c: ComponentDef<C>, d: ComponentDef<D>, e: ComponentDef<E>): IterableIterator<[EntityId, A, B, C, D, E]>;
   *query(...defs: ComponentDef<unknown>[]): IterableIterator<unknown[]> {
     const tables = defs.map((d) => this.tables.get(d.id));
     if (tables.some((t) => !t)) return;

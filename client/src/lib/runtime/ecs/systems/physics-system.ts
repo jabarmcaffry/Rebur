@@ -4,7 +4,7 @@
  * Runs after animation, before collision resolution.
  */
 import { defineSystem } from "../system";
-import { defineComponent } from "../world";
+import { defineComponent, type EntityId } from "../world";
 import { Transform, Velocity, Physics, Player, InputState, LegacyHandle } from "../components";
 import type { Vec3 } from "../../types";
 
@@ -67,7 +67,7 @@ export const PhysicsSystem = defineSystem({
   side: "server",
   run({ world, dt }) {
     // Get world physics settings from entity 0.
-    const worldEntity = 0 as unknown as ReturnType<typeof world.create>;
+    const worldEntity = 0 as EntityId;
     const worldPhysics = world.get(worldEntity, WorldPhysics) ?? {
       gravity: 9.81,
       airDrag: 0,
@@ -76,25 +76,32 @@ export const PhysicsSystem = defineSystem({
     
     // Collect all gravity sources for custom gravity calculation.
     const gravitySources: { position: Vec3; strength: number; radius: number }[] = [];
-    for (const [eid, transform, gravSource] of world.query(Transform, GravitySource)) {
-      gravitySources.push({
-        position: transform.position,
-        strength: gravSource.strength,
-        radius: gravSource.radius,
-      });
+    for (const [eid, gravSource] of world.query(GravitySource)) {
+      const transform = world.get(eid, Transform);
+      if (transform) {
+        gravitySources.push({
+          position: transform.position,
+          strength: gravSource.strength,
+          radius: gravSource.radius,
+        });
+      }
     }
     
-    // Process player entity first (has Player component).
-    for (const [eid, player, playerPhys, transform, velocity] of world.query(
-      Player, PlayerPhysics, Transform, Velocity
-    )) {
+    // Process player entity (has Player component).
+    for (const [eid, player] of world.query(Player)) {
+      const playerPhys = world.get(eid, PlayerPhysics);
+      const transform = world.get(eid, Transform);
+      const velocity = world.get(eid, Velocity);
+      
+      if (!playerPhys || !transform || !velocity) continue;
+      
       if (player.ragdoll) {
         // Ragdolled: scrub horizontal control velocity.
         velocity.x *= 1 - Math.min(1, dt * 2);
         velocity.z *= 1 - Math.min(1, dt * 2);
       } else if (inputState) {
         // Calculate gravity vector for player position.
-        let gravityVec = computeGravity(transform.position, gravitySources, worldPhysics.gravity);
+        const gravityVec = computeGravity(transform.position, gravitySources, worldPhysics.gravity);
         const gMag = vec3Length(gravityVec);
         
         // Update player up direction (slerp toward anti-gravity).
@@ -105,7 +112,10 @@ export const PhysicsSystem = defineSystem({
         playerPhys.up.x += (desiredUp.x - playerPhys.up.x) * slerpT;
         playerPhys.up.y += (desiredUp.y - playerPhys.up.y) * slerpT;
         playerPhys.up.z += (desiredUp.z - playerPhys.up.z) * slerpT;
-        playerPhys.up = vec3Normalize(playerPhys.up);
+        const upNorm = vec3Normalize(playerPhys.up);
+        playerPhys.up.x = upNorm.x;
+        playerPhys.up.y = upNorm.y;
+        playerPhys.up.z = upNorm.z;
         
         // Project camera forward onto plane perpendicular to up.
         const cf = inputState.cameraForward;
@@ -128,7 +138,10 @@ export const PhysicsSystem = defineSystem({
         playerPhys.moveForward.x += (fx - playerPhys.moveForward.x) * fwdBlend;
         playerPhys.moveForward.y += (fy - playerPhys.moveForward.y) * fwdBlend;
         playerPhys.moveForward.z += (fz - playerPhys.moveForward.z) * fwdBlend;
-        playerPhys.moveForward = vec3Normalize(playerPhys.moveForward);
+        const fwdNorm = vec3Normalize(playerPhys.moveForward);
+        playerPhys.moveForward.x = fwdNorm.x;
+        playerPhys.moveForward.y = fwdNorm.y;
+        playerPhys.moveForward.z = fwdNorm.z;
         
         // Calculate right vector.
         const right = vec3Cross(playerPhys.moveForward, playerPhys.up);
@@ -175,8 +188,8 @@ export const PhysicsSystem = defineSystem({
       world.set(eid, PlayerPhysics, playerPhys);
     }
     
-    // Process all non-player objects with physics + transform + velocity.
-    for (const [eid, physics, transform, velocity] of world.query(Physics, Transform, Velocity)) {
+    // Process all non-player objects with physics.
+    for (const [eid, physics] of world.query(Physics)) {
       // Skip if this is the player entity.
       if (world.has(eid, Player)) continue;
       
@@ -185,6 +198,10 @@ export const PhysicsSystem = defineSystem({
       
       // Skip motor-pinned objects - their position is driven by the rig.
       if (world.has(eid, MotorPinned)) continue;
+      
+      const transform = world.get(eid, Transform);
+      const velocity = world.get(eid, Velocity);
+      if (!transform || !velocity) continue;
       
       // Calculate gravity for this object.
       const gravityVec = computeGravity(transform.position, gravitySources, worldPhysics.gravity);

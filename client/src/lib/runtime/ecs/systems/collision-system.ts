@@ -50,24 +50,27 @@ export const CollisionSystem = defineSystem({
   side: "server",
   run({ world }) {
     // Process player vs object collisions first.
-    for (const [playerEid, player, playerPhys, playerTransform, playerVelocity] of world.query(
-      Player, PlayerPhysics, Transform, Velocity
-    )) {
+    for (const [playerEid, player] of world.query(Player)) {
+      const playerPhys = world.get(playerEid, PlayerPhysics);
+      const playerTransform = world.get(playerEid, Transform);
+      const playerVelocity = world.get(playerEid, Velocity);
+      
+      if (!playerPhys || !playerTransform || !playerVelocity) continue;
+      
       const playerRadius = playerPhys.collisionRadius;
       const playerHalfHeight = playerPhys.collisionHalfHeight;
       const up = playerPhys.up;
       
       // Check player against all collidable objects.
-      for (const [objEid, physics, transform, velocity] of world.query(Physics, Transform, Velocity)) {
+      for (const [objEid, physics] of world.query(Physics)) {
         // Skip self.
         if (objEid === playerEid) continue;
         
         // Skip non-collidable.
         if (!physics.canCollide) continue;
         
-        // Skip non-Workspace entities (check via legacy handle container or tag).
-        const legacy = world.get(objEid, LegacyHandle);
-        // For now, assume all objects can collide with player.
+        const transform = world.get(objEid, Transform);
+        if (!transform) continue;
         
         // Capsule vs AABB collision.
         const result = resolvePlayerVsAABB(
@@ -117,11 +120,15 @@ export const CollisionSystem = defineSystem({
       collision: { canCollide: boolean; category: number; mask: number; contacts: Set<number> };
     }> = [];
     
-    for (const [eid, physics, transform, velocity] of world.query(Physics, Transform, Velocity)) {
+    for (const [eid, physics] of world.query(Physics)) {
       // Skip player entities.
       if (world.has(eid, Player)) continue;
       
       if (!physics.canCollide) continue;
+      
+      const transform = world.get(eid, Transform);
+      const velocity = world.get(eid, Velocity);
+      if (!transform || !velocity) continue;
       
       let collision = world.get(eid, CollisionState);
       if (!collision) {
@@ -245,8 +252,8 @@ function resolvePlayerVsAABB(
   up: Vec3,
   objPos: Vec3,
   objScale: Vec3,
-  objRotation: Vec3,
-  friction: number
+  _objRotation: Vec3,
+  _friction: number
 ): {
   collided: boolean;
   grounded: boolean;
@@ -277,11 +284,6 @@ function resolvePlayerVsAABB(
     x: playerPos.x - up.x * (playerHalfHeight - playerRadius),
     y: playerPos.y - up.y * (playerHalfHeight - playerRadius),
     z: playerPos.z - up.z * (playerHalfHeight - playerRadius),
-  };
-  const capTop = {
-    x: playerPos.x + up.x * (playerHalfHeight - playerRadius),
-    y: playerPos.y + up.y * (playerHalfHeight - playerRadius),
-    z: playerPos.z + up.z * (playerHalfHeight - playerRadius),
   };
   
   // Find closest point on capsule line segment to AABB.

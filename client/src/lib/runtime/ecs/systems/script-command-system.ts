@@ -22,8 +22,8 @@ interface SetAnchoredPayload { anchored: boolean }
 interface SetCanCollidePayload { canCollide: boolean }
 interface TweenPayload { properties: Record<string, number>; duration: number; easing?: string }
 interface SetAutoRotateYPayload { speed: number | undefined }
-interface SetAutoBobPayload { amplitude?: number; speed?: number } | undefined
-interface SetAutoSpinPayload { x?: number; y?: number; z?: number } | undefined
+type SetAutoBobPayload = { amplitude?: number; speed?: number } | undefined
+type SetAutoSpinPayload = { x?: number; y?: number; z?: number } | undefined
 
 export const ScriptCommandSystem = defineSystem({
   id: "script-commands",
