@@ -1,5 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
+import { createServer as createHttpsServer } from "https";
+import { readFileSync, existsSync } from "fs";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
@@ -40,8 +42,21 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Create HTTP server first
-  const httpServer = createServer(app);
+  // Create HTTP or HTTPS server
+  let httpServer;
+  const isCodespaces = process.env.CODESPACES === "true";
+  const useHttps = !isCodespaces && existsSync('cert.pem') && existsSync('key.pem');
+  if (useHttps) {
+    const options = {
+      key: readFileSync('key.pem'),
+      cert: readFileSync('cert.pem'),
+    };
+    httpServer = createHttpsServer(options, app);
+    log('using HTTPS');
+  } else {
+    httpServer = createServer(app);
+    log('using HTTP');
+  }
 
   // Register routes and set up WebSocket
   await registerRoutes(app, httpServer);

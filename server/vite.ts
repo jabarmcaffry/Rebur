@@ -30,6 +30,8 @@ export async function setupVite(app: Express, server: Server) {
     process.env.CODESPACES === "true" &&
     process.env.CODESPACE_NAME &&
     process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+  const isHttps = (server as any).key !== undefined; // Check if HTTPS
+  const hmrProtocol = isHttps ? 'wss' : 'ws';
   const previewHmrHost = isCodespacesPreview
     ? `${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
     : undefined;
@@ -41,7 +43,7 @@ export async function setupVite(app: Express, server: Server) {
       ? false
       : {
           server,
-          protocol: previewHmrHost ? "wss" : undefined,
+          protocol: previewHmrHost ? "wss" : hmrProtocol,
           host: previewHmrHost,
           port: previewHmrHost ? 443 : undefined,
           clientPort: previewHmrHost ? 443 : undefined,

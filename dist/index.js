@@ -583,70 +583,6 @@ var insertSessionPlayerSchema = z.object({
 import multer from "multer";
 import path from "path";
 import { promises as fs } from "fs";
-var WELCOME_SCRIPT = `// Welcome to your new game!
-// Your script runs ONCE when Play starts \u2014 top to bottom.
-// To do something every frame, listen for the "heartbeat" event.
-// \`events.on("update", ...)\` still works too as a compatibility alias.
-// Open the Docs button (top of the editor) for the full reference.
-
-let timer = 0;
-let score = 0;
-
-log("Welcome, " + player.username + "!");
-gui.text("title", "My Game", { anchor: "tc", y: 16, size: 22 });
-gui.text("hint",  "WASD to move \xB7 Space to jump \xB7 E to score",
-  { anchor: "bc", y: 24, size: 14, bg: "rgba(0,0,0,0.45)" });
-gui.text("score", "Score: 0", { anchor: "tl", x: 16, y: 16, size: 18 });
-
-// \u2500\u2500 Global game state (string-based \u2014 multiplayer-ready) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-state.set("phase", "Playing");
-state.on("phase", (next) => log("phase \u2192", next));
-
-// \u2500\u2500 Input \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-keyboard.onPress("r", () => player.respawn());
-keyboard.onPress("e", () => {
-  score += 1;
-  gui.text("score", "Score: " + score);
-  if (score >= 10) state.set("phase", "GameOver");
-});
-
-// \u2500\u2500 Drop a pickup coin nearby \u2014 walk into it to collect \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-const coin = create({
-  name: "Coin",
-  primitiveType: "sphere",
-  position: { x: 2, y: 1, z: 2 },
-  scale:    { x: 0.4, y: 0.4, z: 0.4 },
-  color: "#fbbf24",
-});
-coin.isPickup = true;
-coin.pickupName = "Coin";
-coin.on("clicked", () => log("you clicked the coin"));
-
-// \u2500\u2500 Per-frame work \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-runService.heartbeat.on((dt) => {
-  timer += dt;
-
-  const world = find("World");
-  if (world) world.rotation.y += dt * 0.1;
-
-  gui.text(
-    "clock",
-    "Time: " + timer.toFixed(1) + "s",
-    { anchor: "tr", x: 16, y: 16, size: 14, bg: "rgba(0,0,0,0.45)" }
-  );
-
-  if (state.get("phase") === "GameOver") {
-    gui.text("over", "Game Over \u2014 press R to restart",
-      { anchor: "cc", y: 0, size: 28, bg: "rgba(0,0,0,0.6)" });
-  } else {
-    gui.clear("over");
-  }
-});
-
-// \u2500\u2500 World lifecycle \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-world.onPlayerSpawned((p) => log(p.username, "spawned at",
-  p.spawnPoint.x.toFixed(1), p.spawnPoint.y.toFixed(1), p.spawnPoint.z.toFixed(1)));
-`;
 var uploadDir = path.join(process.cwd(), "uploads");
 fs.mkdir(uploadDir, { recursive: true });
 var upload = multer({
@@ -692,17 +628,17 @@ async function registerRoutes(app2, httpServer) {
       const game = await storage.createGame(gameData);
       await storage.createGameObject({
         gameId: game.id,
-        name: "World",
+        name: "Baseplate",
         type: "primitive",
         container: "Workspace",
-        primitiveType: "sphere",
+        primitiveType: "cube",
         positionX: 0,
-        positionY: 0.5,
+        positionY: 0,
         positionZ: 0,
-        scaleX: 8,
-        scaleY: 8,
-        scaleZ: 8,
-        color: "#5d8a4a"
+        scaleX: 40,
+        scaleY: 1,
+        scaleZ: 40,
+        color: "#3a4252"
       });
       await storage.createGameObject({
         gameId: game.id,
@@ -710,8 +646,8 @@ async function registerRoutes(app2, httpServer) {
         type: "spawn",
         container: "Workspace",
         primitiveType: "cylinder",
-        positionX: 5,
-        positionY: 0.05,
+        positionX: 0,
+        positionY: 0.55,
         positionZ: 0,
         scaleX: 2,
         scaleY: 0.1,
@@ -728,14 +664,6 @@ async function registerRoutes(app2, httpServer) {
         positionY: 10,
         positionZ: 4,
         color: "#fff3c8"
-      });
-      await storage.createScript({
-        gameId: game.id,
-        name: "Welcome",
-        enabled: true,
-        container: "ServerScriptService",
-        scriptType: "Script",
-        code: WELCOME_SCRIPT
       });
       res.json(game);
     } catch (error) {
@@ -1150,6 +1078,7 @@ async function registerRoutes(app2, httpServer) {
 import express from "express";
 import fs2 from "fs";
 import path3 from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 import { createServer as createViteServer, createLogger } from "vite";
 
 // vite.config.ts
@@ -1187,6 +1116,8 @@ var vite_config_default = defineConfig({
 // server/vite.ts
 import { nanoid } from "nanoid";
 var viteLogger = createLogger();
+var __filename = fileURLToPath2(import.meta.url);
+var __dirname2 = path3.dirname(__filename);
 function log(message, source = "express") {
   const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -1197,9 +1128,20 @@ function log(message, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 async function setupVite(app2, server) {
+  const port = parseInt(process.env.PORT || "5000", 10);
+  const isCodespacesPreview = process.env.CODESPACES === "true" && process.env.CODESPACE_NAME && process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+  const previewHmrHost = isCodespacesPreview ? `${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}` : void 0;
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server },
+    port,
+    host: "0.0.0.0",
+    hmr: isCodespacesPreview ? false : {
+      server,
+      protocol: previewHmrHost ? "wss" : void 0,
+      host: previewHmrHost,
+      port: previewHmrHost ? 443 : void 0,
+      clientPort: previewHmrHost ? 443 : void 0
+    },
     allowedHosts: true
   };
   const vite = await createViteServer({
@@ -1207,11 +1149,6 @@ async function setupVite(app2, server) {
     configFile: false,
     customLogger: {
       ...viteLogger,
-      // Previously this called process.exit(1) on every Vite error, which killed
-      // the express process and produced an intermittent 502 on the preview proxy
-      // whenever a transient HMR / module-resolution hiccup occurred.
-      // We just log loudly instead — the dev server stays up so the next request
-      // can recover.
       error: (msg, options) => {
         viteLogger.error(msg, options);
       }
@@ -1224,7 +1161,7 @@ async function setupVite(app2, server) {
     const url = req.originalUrl;
     try {
       const clientTemplate = path3.resolve(
-        import.meta.dirname,
+        __dirname2,
         "..",
         "client",
         "index.html"
@@ -1243,7 +1180,7 @@ async function setupVite(app2, server) {
   });
 }
 function serveStatic(app2) {
-  const distPath = path3.resolve(import.meta.dirname, "../dist/public");
+  const distPath = path3.resolve(__dirname2, "../dist/public");
   if (!fs2.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`
@@ -1301,16 +1238,17 @@ app.use((req, res, next) => {
   process.on("uncaughtException", (err) => {
     console.error("[process] uncaught exception:", err);
   });
+  const port = parseInt(process.env.PORT || "5000", 10);
+  await new Promise((resolve, reject) => {
+    httpServer.listen({ port, host: "0.0.0.0" }, () => {
+      log(`serving on port ${port}`);
+      resolve();
+    });
+    httpServer.on("error", reject);
+  });
   if (app.get("env") === "development") {
     await setupVite(app, httpServer);
   } else {
     serveStatic(app);
   }
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen({
-    port,
-    host: "0.0.0.0"
-  }, () => {
-    log(`serving on port ${port}`);
-  });
 })();
