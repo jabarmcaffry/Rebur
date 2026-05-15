@@ -69,24 +69,24 @@ app.use((req, res, next) => {
     console.error("[process] uncaught exception:", err);
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, httpServer);
-  } else {
-    serveStatic(app);
-  }
-
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
-  httpServer.listen({
-    port,
-    host: "0.0.0.0",
-  }, () => {
-    log(`serving on port ${port}`);
+  await new Promise<void>((resolve, reject) => {
+    httpServer.listen({ port, host: "0.0.0.0" }, () => {
+      log(`serving on port ${port}`);
+      resolve();
+    });
+    httpServer.on("error", reject);
   });
+
+  // importantly only setup vite in development after the server has been bound
+  // so HMR can infer the correct address and port for the websocket URL.
+  if (app.get("env") === "development") {
+    await setupVite(app, httpServer);
+  } else {
+    serveStatic(app);
+  }
 })();

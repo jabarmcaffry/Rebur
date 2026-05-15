@@ -25,9 +25,27 @@ export function log(message: string, source = "express") {
 }
 
 export async function setupVite(app: Express, server: Server) {
+  const port = parseInt(process.env.PORT || "5000", 10);
+  const isCodespacesPreview =
+    process.env.CODESPACES === "true" &&
+    process.env.CODESPACE_NAME &&
+    process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
+  const previewHmrHost = isCodespacesPreview
+    ? `${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
+    : undefined;
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server },
+    port,
+    host: "0.0.0.0" as const,
+    hmr: isCodespacesPreview
+      ? false
+      : {
+          server,
+          protocol: previewHmrHost ? "wss" : undefined,
+          host: previewHmrHost,
+          port: previewHmrHost ? 443 : undefined,
+          clientPort: previewHmrHost ? 443 : undefined,
+        },
     allowedHosts: true as const,
   };
 
