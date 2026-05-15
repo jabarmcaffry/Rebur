@@ -13,16 +13,23 @@ function handleApi(method: string, url: string, body?: any): { status: number; d
 
   // Auth
   if (u === "/api/auth/user" && m === "GET") {
-    const user = store.getCurrentUser();
+    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+    const user = token === "testtoken" ? store.getCurrentUser() : null;
     return user ? { status: 200, data: user } : { status: 401, data: { message: "Unauthorized" } };
   }
   if (u === "/api/login" && m === "POST") {
     const r = store.login(body?.username, body?.password);
+    if (r.ok && typeof window !== "undefined") {
+      localStorage.setItem("auth_token", "testtoken");
+    }
     return r.ok
-      ? { status: 200, data: { success: true, user: r.user } }
+      ? { status: 200, data: { success: true, user: r.user, token: "testtoken" } }
       : { status: 401, data: { message: "Invalid credentials" } };
   }
-  if (u === "/api/logout" && m === "POST") {
+  if ((u === "/api/logout" && (m === "POST" || m === "GET"))) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth_token");
+    }
     store.logout();
     return { status: 200, data: { success: true } };
   }
@@ -138,11 +145,16 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+  const headers: Record<string, string> = {};
+  if (data) headers["Content-Type"] = "application/json";
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const res = url.startsWith("/api/")
     ? makeResponse(handleApi(method, url, data))
     : await fetch(url, {
         method,
-        headers: data ? { "Content-Type": "application/json" } : {},
+        headers,
         body: data ? JSON.stringify(data) : undefined,
         credentials: "include",
       });
@@ -158,9 +170,13 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const url = queryKey.join("/") as string;
+    const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const res = url.startsWith("/api/")
       ? makeResponse(handleApi("GET", url))
-      : await fetch(url, { credentials: "include" });
+      : await fetch(url, { headers, credentials: "include" });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;

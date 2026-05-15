@@ -55,8 +55,8 @@ function emptyDb(): DB {
     assets: {},
     sessions: {},
     sessionPlayers: {},
-    // Auto-login as the seeded test user — no real auth in the browser-only shim.
-    currentUserId: "test",
+    // No auto-login — require manual login even in the browser-only shim.
+    currentUserId: null,
   };
 }
 
@@ -70,7 +70,11 @@ function load(): DB {
       const fresh = emptyDb();
       parsed.users = { ...fresh.users, ...(parsed.users ?? {}) };
     }
-    if (parsed.currentUserId === undefined) parsed.currentUserId = "test";
+    if (parsed.currentUserId === undefined) parsed.currentUserId = null;
+    // If token exists, set logged in
+    if (typeof window !== "undefined" && localStorage.getItem("auth_token") === "testtoken") {
+      parsed.currentUserId = "test";
+    }
     return parsed;
   } catch {
     return emptyDb();
