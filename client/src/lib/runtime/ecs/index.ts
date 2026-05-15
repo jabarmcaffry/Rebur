@@ -1,10 +1,9 @@
 /**
- * Public entry for the new server-authoritative ECS pipeline.
+ * Public entry for the server-authoritative ECS pipeline.
  *
- * The legacy mutation-style runtime in `core.ts` / `game-runtime.ts` is still
- * the default. Set `runtime.useEcsPipeline = true` to opt a game into the
- * new path. We'll flip the default once Physics + Collision + Lifecycle have
- * also been ported (see plan, steps 4-5).
+ * This is now the canonical simulation path. All game state flows through
+ * the ECS pipeline with fixed system ordering for deterministic behavior.
+ * The legacy mutation paths have been removed.
  */
 export { World, defineComponent, type EntityId, type ComponentDef } from "./world";
 export { defineSystem, Scheduler, type SystemDef, type SystemContext } from "./system";

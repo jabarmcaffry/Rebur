@@ -71,6 +71,8 @@ import {
   LegacyHandle,
   InputState,
   WorldPhysics,
+  Player,
+  PlayerPhysics,
   getLatestSnapshot,
   type EntityId,
 } from "./ecs";
@@ -245,10 +247,10 @@ export class GameRuntime {
   private _ragdollVel: Record<string, Vec3> | null = null;
   private _ragdollUntil = 0;
 
-  // ECS Pipeline (gated by useEcsPipeline flag)
-  useEcsPipeline = false;
+  // ECS Pipeline - the canonical simulation path
   private _ecsPipeline: PipelineHandles | null = null;
   private _ecsEntityMap = new Map<string, EntityId>(); // legacyId -> EntityId
+  private _playerEntityId: EntityId | null = null;
 
   constructor(snap: GameObject[], scripts: Script[], username: string, avatarColor: string) {
     // Initialize input
@@ -877,7 +879,7 @@ export class GameRuntime {
 
   /**
    * Initialize the ECS pipeline and sync all existing objects into the ECS world.
-   * Call this before start() if useEcsPipeline is true.
+   * This is the canonical simulation path - all game state flows through ECS.
    */
   initEcsPipeline(): void {
     if (this._ecsPipeline) return; // Already initialized
@@ -901,12 +903,57 @@ export class GameRuntime {
       cameraForward: { x: 0, y: 0, z: -1 },
     });
     
+    // Create player entity
+    this._playerEntityId = world.create();
+    const p = this.player;
+    
+    // Player component
+    world.set(this._playerEntityId, Player, {
+      username: p.username,
+      color: p.color,
+      health: p.health,
+      maxHealth: p.maxHealth,
+      speed: p.speed,
+      walkSpeed: p.walkSpeed,
+      runSpeed: p.runSpeed,
+      jumpPower: p.jumpPower,
+      size: p.size,
+      onGround: p.onGround,
+      ragdoll: p.ragdoll,
+      killY: p.killY,
+      up: { ...p.up },
+      spawnPoint: { ...p.spawnPoint },
+    });
+    
+    // Player transform
+    world.set(this._playerEntityId, Transform, {
+      position: { ...p.position },
+      rotation: { ...p.rotation },
+      scale: { x: p.size, y: p.size, z: p.size },
+    });
+    
+    // Player velocity
+    world.set(this._playerEntityId, Velocity, { ...p.velocity });
+    
+    // Player physics
+    world.set(this._playerEntityId, PlayerPhysics, {
+      onGround: p.onGround,
+      up: { ...p.up },
+      collisionRadius: p.collisionRadius ?? 0.4,
+      collisionHalfHeight: p.collisionHalfHeight ?? 1.12,
+      walkSpeed: p.walkSpeed,
+      runSpeed: p.runSpeed,
+      jumpPower: p.jumpPower,
+      moveForward: { x: 0, y: 0, z: -1 },
+      sprinting: false,
+    });
+    
     // Sync all existing RuntimeObjects into the ECS world
     for (const ro of this._all.values()) {
       this.syncObjectToEcs(ro);
     }
     
-    this.pushLog("[ECS] Pipeline initialized with " + this._ecsEntityMap.size + " entities");
+    this.pushLog("[ECS] Pipeline initialized with " + this._ecsEntityMap.size + " objects + 1 player");
   }
 
   /**
@@ -972,34 +1019,73 @@ export class GameRuntime {
   }
 
   /**
-   * Sync ECS state back to RuntimeObjects after a tick.
-   * Reads from the committed snapshot.
+   * Sync ECS state back to RuntimeObjects and Player after a tick.
+   * Reads directly from the ECS world components.
    */
   private syncEcsToObjects(): void {
     if (!this._ecsPipeline) return;
     
-    const snapshot = getLatestSnapshot(this._ecsPipeline.server.world);
-    if (!snapshot) return;
+    const world = this._ecsPipeline.server.world;
     
-    for (const [eid, entitySnap] of Object.entries(snapshot.entities)) {
-      const legacyId = (entitySnap as any).legacyId;
-      if (!legacyId) continue;
+    // Sync player state from ECS
+    if (this._playerEntityId !== null) {
+      const playerTransform = world.get(this._playerEntityId, Transform);
+      const playerVelocity = world.get(this._playerEntityId, Velocity);
+      const playerPhys = world.get(this._playerEntityId, PlayerPhysics);
+      const playerComp = world.get(this._playerEntityId, Player);
       
+      if (playerTransform) {
+        this.player.position.x = playerTransform.position.x;
+        this.player.position.y = playerTransform.position.y;
+        this.player.position.z = playerTransform.position.z;
+        this.player.rotation.x = playerTransform.rotation.x;
+        this.player.rotation.y = playerTransform.rotation.y;
+        this.player.rotation.z = playerTransform.rotation.z;
+      }
+      if (playerVelocity) {
+        this.player.velocity.x = playerVelocity.x;
+        this.player.velocity.y = playerVelocity.y;
+        this.player.velocity.z = playerVelocity.z;
+      }
+      if (playerPhys) {
+        this.player.onGround = playerPhys.onGround;
+        this.player.up.x = playerPhys.up.x;
+        this.player.up.y = playerPhys.up.y;
+        this.player.up.z = playerPhys.up.z;
+      }
+      if (playerComp) {
+        this.player.health = playerComp.health;
+        this.player.ragdoll = playerComp.ragdoll;
+      }
+    }
+    
+    // Sync all RuntimeObjects from ECS
+    for (const [legacyId, eid] of this._ecsEntityMap) {
       const ro = this._all.get(legacyId);
       if (!ro) continue;
       
-      // Update position, rotation, velocity from ECS
-      ro.position.x = entitySnap.position.x;
-      ro.position.y = entitySnap.position.y;
-      ro.position.z = entitySnap.position.z;
-      ro.rotation.x = entitySnap.rotation.x;
-      ro.rotation.y = entitySnap.rotation.y;
-      ro.rotation.z = entitySnap.rotation.z;
-      ro.velocity.x = entitySnap.velocity.x;
-      ro.velocity.y = entitySnap.velocity.y;
-      ro.velocity.z = entitySnap.velocity.z;
-      ro.visible = entitySnap.visible;
-      ro.transparency = entitySnap.transparency;
+      const transform = world.get(eid, Transform);
+      const velocity = world.get(eid, Velocity);
+      const visual = world.get(eid, Visual);
+      
+      if (transform) {
+        ro.position.x = transform.position.x;
+        ro.position.y = transform.position.y;
+        ro.position.z = transform.position.z;
+        ro.rotation.x = transform.rotation.x;
+        ro.rotation.y = transform.rotation.y;
+        ro.rotation.z = transform.rotation.z;
+      }
+      if (velocity) {
+        ro.velocity.x = velocity.x;
+        ro.velocity.y = velocity.y;
+        ro.velocity.z = velocity.z;
+      }
+      if (visual) {
+        ro.visible = visual.visible;
+        ro.transparency = visual.transparency;
+        ro.color = visual.color;
+      }
     }
   }
 
@@ -1232,10 +1318,8 @@ export class GameRuntime {
   }
 
   start() { 
-    // Initialize ECS pipeline if enabled
-    if (this.useEcsPipeline) {
-      this.initEcsPipeline();
-    }
+    // Initialize ECS pipeline - this is now the canonical simulation path
+    this.initEcsPipeline();
     
     void this.runScripts(); 
     this._events.emit("start", [], (e, fn) => this.pushLog(`internal start error: ${formatErr(e)}`)); 
@@ -1308,7 +1392,7 @@ export class GameRuntime {
     this.time += dt;
     const p = this.player;
 
-    // INPUT PHASE
+    // INPUT PHASE - emit key events (still handled by legacy event system for scripts)
     for (const k in this.input.keys) {
       const isDown = !!this.input.keys[k];
       const wasDown = !!this._prevKeys[k];
@@ -1324,17 +1408,15 @@ export class GameRuntime {
     }
     this._events.emit("input", [dt, this.time], (e, fn) => this.pushLog(`runService.input error: ${formatErr(e)}`));
 
-    // ANIMATION PHASE
+    // ANIMATION PHASE - tweens are still managed by legacy TweenManager for API compatibility
     this._tweens.step(dt);
-    if (this.useEcsPipeline && this._ecsPipeline) {
-      // Run ECS pipeline for animation (and other systems)
-      this.stepEcsPipeline(dt);
-    } else {
-      this.updateAutoProperties(dt);
-    }
     this._events.emit("animation", [dt, this.time], (e, fn) => this.pushLog(`runService.animation error: ${formatErr(e)}`));
 
-    // REPLICATION PHASE
+    // ECS PIPELINE - runs all simulation (animation, physics, collision, lifecycle)
+    // This is now the single source of truth for game state
+    this.stepEcsPipeline(dt);
+
+    // REPLICATION PHASE - network sync
     this.network.step(dt, this.player, this.objectList, {
       t: this.time,
       moveX: this.input.moveX,
@@ -1343,127 +1425,25 @@ export class GameRuntime {
       keys: { ...this.input.keys },
     });
     this._events.emit("replication", [dt, this.time], (e, fn) => this.pushLog(`runService.replication error: ${formatErr(e)}`));
+    this._events.emit("physics", [dt, this.time], (e, fn) => this.pushLog(`runService.physics error: ${formatErr(e)}`));
 
-    // PHYSICS PHASE
-    const gravityVec = this.computeGravityForTarget(p.position, null, null, true);
-    const gMag = Math.hypot(gravityVec.x, gravityVec.y, gravityVec.z);
-    const desiredUp = gMag > 0.001 ? { x: -gravityVec.x / gMag, y: -gravityVec.y / gMag, z: -gravityVec.z / gMag } : { x: 0, y: 1, z: 0 };
-    const slerpT = Math.min(1, dt * 6);
-    p.up.x = p.up.x + (desiredUp.x - p.up.x) * slerpT;
-    p.up.y = p.up.y + (desiredUp.y - p.up.y) * slerpT;
-    p.up.z = p.up.z + (desiredUp.z - p.up.z) * slerpT;
-    const upLen = Math.hypot(p.up.x, p.up.y, p.up.z) || 1;
-    p.up.x /= upLen; p.up.y /= upLen; p.up.z /= upLen;
-
-    const cf = this.cameraForward;
-    const cfDot = cf.x * p.up.x + cf.y * p.up.y + cf.z * p.up.z;
-    let fx = cf.x - p.up.x * cfDot;
-    let fy = cf.y - p.up.y * cfDot;
-    let fz = cf.z - p.up.z * cfDot;
-    let fLen = Math.hypot(fx, fy, fz);
-    if (fLen < 0.15) {
-      fx = this._moveForward.x; fy = this._moveForward.y; fz = this._moveForward.z;
-      fLen = Math.hypot(fx, fy, fz) || 1;
-    }
-    fx /= fLen; fy /= fLen; fz /= fLen;
-    const fwdBlend = Math.min(1, dt * 8);
-    this._moveForward.x += (fx - this._moveForward.x) * fwdBlend;
-    this._moveForward.y += (fy - this._moveForward.y) * fwdBlend;
-    this._moveForward.z += (fz - this._moveForward.z) * fwdBlend;
-    const mfLen = Math.hypot(this._moveForward.x, this._moveForward.y, this._moveForward.z) || 1;
-    fx = this._moveForward.x / mfLen;
-    fy = this._moveForward.y / mfLen;
-    fz = this._moveForward.z / mfLen;
-    const rx = fy * p.up.z - fz * p.up.y;
-    const rz = fx * p.up.y - fy * p.up.x;
-
-    // Sprint: Shift doubles toward p.runSpeed.
-    const sprinting = !!(this.input.keys["shift"] || this.input.keys["shiftleft"] || this.input.keys["shiftright"]);
-    const baseSpeed = sprinting ? (p.runSpeed || p.speed * 1.6) : (p.walkSpeed || p.speed);
-    p.speed = baseSpeed;
-
-    const wantX = rx * this.input.moveX - fx * this.input.moveZ;
-    const wantZ = rz * this.input.moveX - fz * this.input.moveZ;
-    const upVelDot = p.velocity.x * p.up.x + p.velocity.y * p.up.y + p.velocity.z * p.up.z;
-
-    if (!p.ragdoll) {
-      p.velocity.x = wantX * baseSpeed + p.up.x * upVelDot;
-      p.velocity.z = wantZ * baseSpeed + p.up.z * upVelDot;
-
-      if (p.autoFaceMovement) {
-        const moveMag = Math.hypot(wantX, wantZ);
-        if (moveMag > 0.05) {
-          const targetYaw = Math.atan2(wantX, wantZ);
-          let diff = targetYaw - p.rotation.y;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          p.rotation.y += diff * Math.min(1, dt * 12);
-        }
-      }
-
-      if (this.input.jump && p.onGround) {
-        const jp = p.jumpPower || 8;
-        p.velocity.x += p.up.x * jp;
-        p.velocity.y += p.up.y * jp;
-        p.velocity.z += p.up.z * jp;
-        p.onGround = false;
-      }
-    } else {
-      // Ragdolled: scrub horizontal control velocity so the body just falls.
-      p.velocity.x *= 1 - Math.min(1, dt * 2);
-      p.velocity.z *= 1 - Math.min(1, dt * 2);
-    }
-
-    p.velocity.x += gravityVec.x * dt;
-    p.velocity.y += gravityVec.y * dt;
-    p.velocity.z += gravityVec.z * dt;
-    p.position.x += p.velocity.x * dt;
-    p.position.y += p.velocity.y * dt;
-    p.position.z += p.velocity.z * dt;
-
-    for (const o of this.objectList) {
-      if (o.anchored || o.container !== "Workspace") continue;
-      // Skip motor-pinned objects — their position is driven by the rig.
-      if (this._motorPinnedIds.has(o.id)) continue;
-      const og = this.computeGravityForTarget(o.position, o.id, o.name, false);
-      o.velocity.x += og.x * dt;
-      o.velocity.y += og.y * dt;
-      o.velocity.z += og.z * dt;
-      o.position.x += o.velocity.x * dt;
-      o.position.y += o.velocity.y * dt;
-      o.position.z += o.velocity.z * dt;
-    }
-
-    // Reset onGround before collision sweep - will be set true if any collision grounds us
-    p.onGround = false;
-    for (const o of this.objectList) {
-      if (!o.visible || !o.canCollide) continue;
-      if (o.type === "light" || o.type === "spawn") continue;
-      if (o.container !== "Workspace") continue;
-      const result = this.resolvePlayerVsObject(o);
-      if (result.grounded) p.onGround = true;
-    }
-
+    // POST-PHYSICS - touch events and motor attachment (still uses legacy systems for event emission)
     this._runPickupSweep();
-
-    // Apply motors AFTER physics so held objects snap to the rig regardless
-    // of where the underlying physics tried to move them.
     this.applyMotors();
-
-    // Update animation hint based on motion + ground state.
     this._updatePlayerAnimation();
+    this._runTouchSweep();
 
-    // Fall-out-of-world: if the player drops below killY, kill them.
+    // Kill zone check
     if (!p.ragdoll && p.position.y < p.killY) {
       p.kill();
     }
 
-    // Once the ragdoll timer elapses, respawn automatically.
+    // Ragdoll respawn timer
     if (p.ragdoll && this.time >= this._ragdollUntil) {
       p.respawn();
     }
 
-    // Advance ragdoll limb positions/velocities purely visually; gravity only.
+    // Ragdoll visual physics (purely cosmetic)
     if (p.ragdoll && this._ragdollPos && this._ragdollVel) {
       const g = -this.physics.gravity;
       for (const k of Object.keys(this._ragdollPos)) {
@@ -1476,16 +1456,13 @@ export class GameRuntime {
       }
     }
 
-    this._runTouchSweep();
-    resolveObjectCollisions(this.objectList);
-    this._events.emit("physics", [dt, this.time], (e, fn) => this.pushLog(`runService.physics error: ${formatErr(e)}`));
-
     // RENDER PHASE
     this._events.emit("render", [dt, this.time], (e, fn) => this.pushLog(`runService.render error: ${formatErr(e)}`));
 
     // UPDATE PHASE
     this._events.emit("update", [dt, this.time], (e, fn) => this.pushLog(`runService.update error: ${formatErr(e)}`));
 
+    // Timers
     for (let i = this._timers.length - 1; i >= 0; i--) {
       const t = this._timers[i];
       if (this.time < t.nextAt) continue;
@@ -1494,7 +1471,7 @@ export class GameRuntime {
       else { t.nextAt = this.time + t.interval; }
     }
 
-    // Snapshot keys for next frame.
+    // Snapshot keys for next frame
     for (const k in this.input.keys) this._prevKeys[k] = this.input.keys[k];
     this.input.jump = false;
   }

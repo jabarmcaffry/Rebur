@@ -4,7 +4,7 @@
  */
 import { defineSystem } from "../system";
 import { defineComponent, type EntityId } from "../world";
-import { Transform, Velocity, Physics, LegacyHandle } from "../components";
+import { Transform, Velocity, Physics, LegacyHandle, Player } from "../components";
 import { PlayerPhysics } from "./physics-system";
 import type { Vec3 } from "../../types";
 
@@ -40,12 +40,75 @@ function halfExtents(scale: Vec3): Vec3 {
   };
 }
 
+function vec3Dot(a: Vec3, b: Vec3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 export const CollisionSystem = defineSystem({
   id: "collision",
   after: ["physics"],
   side: "server",
   run({ world }) {
-    // Collect all collidable entities.
+    // Process player vs object collisions first.
+    for (const [playerEid, player, playerPhys, playerTransform, playerVelocity] of world.query(
+      Player, PlayerPhysics, Transform, Velocity
+    )) {
+      const playerRadius = playerPhys.collisionRadius;
+      const playerHalfHeight = playerPhys.collisionHalfHeight;
+      const up = playerPhys.up;
+      
+      // Check player against all collidable objects.
+      for (const [objEid, physics, transform, velocity] of world.query(Physics, Transform, Velocity)) {
+        // Skip self.
+        if (objEid === playerEid) continue;
+        
+        // Skip non-collidable.
+        if (!physics.canCollide) continue;
+        
+        // Skip non-Workspace entities (check via legacy handle container or tag).
+        const legacy = world.get(objEid, LegacyHandle);
+        // For now, assume all objects can collide with player.
+        
+        // Capsule vs AABB collision.
+        const result = resolvePlayerVsAABB(
+          playerTransform.position,
+          playerVelocity,
+          playerRadius,
+          playerHalfHeight,
+          up,
+          transform.position,
+          transform.scale,
+          transform.rotation,
+          physics.friction
+        );
+        
+        if (result.collided) {
+          // Apply position correction.
+          playerTransform.position.x += result.correction.x;
+          playerTransform.position.y += result.correction.y;
+          playerTransform.position.z += result.correction.z;
+          
+          // Modify velocity to prevent penetration.
+          if (result.velocityAdjust) {
+            playerVelocity.x += result.velocityAdjust.x;
+            playerVelocity.y += result.velocityAdjust.y;
+            playerVelocity.z += result.velocityAdjust.z;
+          }
+          
+          // Set grounded if standing on something.
+          if (result.grounded) {
+            playerPhys.onGround = true;
+          }
+        }
+      }
+      
+      // Write back player state.
+      world.set(playerEid, Transform, playerTransform);
+      world.set(playerEid, Velocity, playerVelocity);
+      world.set(playerEid, PlayerPhysics, playerPhys);
+    }
+    
+    // Collect all non-player collidable entities.
     const collidables: Array<{
       eid: EntityId;
       transform: { position: Vec3; rotation: Vec3; scale: Vec3 };
@@ -55,6 +118,9 @@ export const CollisionSystem = defineSystem({
     }> = [];
     
     for (const [eid, physics, transform, velocity] of world.query(Physics, Transform, Velocity)) {
+      // Skip player entities.
+      if (world.has(eid, Player)) continue;
+      
       if (!physics.canCollide) continue;
       
       let collision = world.get(eid, CollisionState);
@@ -119,7 +185,6 @@ export const CollisionSystem = defineSystem({
         }
         
         // Track contact.
-        const wasInContact = a.collision.contacts.has(b.eid as unknown as number);
         a.collision.contacts.add(b.eid as unknown as number);
         b.collision.contacts.add(a.eid as unknown as number);
         
@@ -168,3 +233,96 @@ export const CollisionSystem = defineSystem({
     }
   },
 });
+
+/**
+ * Resolve capsule (player) vs AABB collision.
+ */
+function resolvePlayerVsAABB(
+  playerPos: Vec3,
+  playerVel: Vec3,
+  playerRadius: number,
+  playerHalfHeight: number,
+  up: Vec3,
+  objPos: Vec3,
+  objScale: Vec3,
+  objRotation: Vec3,
+  friction: number
+): {
+  collided: boolean;
+  grounded: boolean;
+  correction: Vec3;
+  velocityAdjust: Vec3 | null;
+} {
+  const result = {
+    collided: false,
+    grounded: false,
+    correction: { x: 0, y: 0, z: 0 },
+    velocityAdjust: null as Vec3 | null,
+  };
+  
+  // Calculate AABB bounds.
+  const hx = Math.max(0.05, objScale.x * 0.5);
+  const hy = Math.max(0.05, objScale.y * 0.5);
+  const hz = Math.max(0.05, objScale.z * 0.5);
+  
+  const minX = objPos.x - hx;
+  const maxX = objPos.x + hx;
+  const minY = objPos.y - hy;
+  const maxY = objPos.y + hy;
+  const minZ = objPos.z - hz;
+  const maxZ = objPos.z + hz;
+  
+  // Calculate capsule endpoints.
+  const capBottom = {
+    x: playerPos.x - up.x * (playerHalfHeight - playerRadius),
+    y: playerPos.y - up.y * (playerHalfHeight - playerRadius),
+    z: playerPos.z - up.z * (playerHalfHeight - playerRadius),
+  };
+  const capTop = {
+    x: playerPos.x + up.x * (playerHalfHeight - playerRadius),
+    y: playerPos.y + up.y * (playerHalfHeight - playerRadius),
+    z: playerPos.z + up.z * (playerHalfHeight - playerRadius),
+  };
+  
+  // Find closest point on capsule line segment to AABB.
+  // Simplified: check bottom sphere for ground detection.
+  const closestX = Math.max(minX, Math.min(capBottom.x, maxX));
+  const closestY = Math.max(minY, Math.min(capBottom.y, maxY));
+  const closestZ = Math.max(minZ, Math.min(capBottom.z, maxZ));
+  
+  const dx = capBottom.x - closestX;
+  const dy = capBottom.y - closestY;
+  const dz = capBottom.z - closestZ;
+  const distSq = dx * dx + dy * dy + dz * dz;
+  
+  if (distSq < playerRadius * playerRadius && distSq > 0.0001) {
+    const dist = Math.sqrt(distSq);
+    const pen = playerRadius - dist;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const nz = dz / dist;
+    
+    result.collided = true;
+    result.correction.x = nx * pen;
+    result.correction.y = ny * pen;
+    result.correction.z = nz * pen;
+    
+    // Check if standing on surface (normal roughly aligned with up).
+    const upDot = nx * up.x + ny * up.y + nz * up.z;
+    if (upDot > 0.5) {
+      result.grounded = true;
+      
+      // Cancel downward velocity.
+      const velDot = vec3Dot(playerVel, up);
+      if (velDot < 0) {
+        result.velocityAdjust = {
+          x: -velDot * up.x,
+          y: -velDot * up.y,
+          z: -velDot * up.z,
+        };
+      }
+    }
+  }
+  
+  return result;
+}

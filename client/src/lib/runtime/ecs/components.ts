@@ -38,3 +38,70 @@ export const AutoBehavior = defineComponent<{
 
 /** Identity tag — links an ECS entity to the legacy RuntimeObject id. */
 export const LegacyHandle = defineComponent<{ legacyId: string; name: string }>("legacy-handle");
+
+/** Player entity marker + state */
+export const Player = defineComponent<{
+  username: string;
+  color: string;
+  health: number;
+  maxHealth: number;
+  speed: number;
+  walkSpeed: number;
+  runSpeed: number;
+  jumpPower: number;
+  size: number;
+  onGround: boolean;
+  ragdoll: boolean;
+  killY: number;
+  up: Vec3;
+  spawnPoint: Vec3;
+}>("player");
+
+/** Input state singleton (world entity 0) */
+export const InputState = defineComponent<{
+  moveX: number;
+  moveZ: number;
+  jump: boolean;
+  keys: Record<string, boolean>;
+  prevKeys: Record<string, boolean>;
+  cameraForward: Vec3;
+}>("input-state");
+
+/** World physics settings singleton (world entity 0) */
+export const WorldPhysics = defineComponent<{
+  gravity: number;
+  airDrag: number;
+}>("world-physics");
+
+/** Motor attachments for player */
+export const MotorAttachments = defineComponent<{
+  slots: Record<string, { entityId: number; offset: Vec3; rotation: Vec3 } | null>;
+}>("motor-attachments");
+
+/** Collision result from last frame */
+export const CollisionResult = defineComponent<{
+  grounded: boolean;
+  contacts: { entityId: number; normal: Vec3; depth: number }[];
+}>("collision-result");
+
+/** Pending destruction flag */
+export const PendingDestroy = defineComponent<{ reason?: string }>("pending-destroy");
+
+/** Spawn queue item */
+export const PendingSpawn = defineComponent<{
+  templateName: string;
+  overrides?: Record<string, any>;
+}>("pending-spawn");
+
+/** Tween state */
+export const TweenState = defineComponent<{
+  tweens: {
+    id: string;
+    property: string;
+    from: number;
+    to: number;
+    duration: number;
+    elapsed: number;
+    easing: string;
+  }[];
+}>("tween-state");
