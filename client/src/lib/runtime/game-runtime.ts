@@ -790,21 +790,81 @@ export class GameRuntime {
   }
 
   private createInternal(opts: any): RuntimeObject {
+    const id = newId();
+    const name = opts.name ?? `Part_${this._all.size + 1}`;
+    const container = opts.container ?? "Workspace";
+    const primitiveType = opts.primitiveType ?? "cube";
+    const position = { x: 0, y: 0, z: 0, ...(opts.position ?? {}) };
+    const rotation = { x: 0, y: 0, z: 0 };
+    const scale = { x: 1, y: 1, z: 1 };
+    const color = opts.color ?? "#88aaff";
+    const anchored = opts.anchored ?? false;
+    const canCollide = opts.canCollide ?? DEFAULT_PROPERTIES.canCollide;
+    const gravity = opts.gravity ?? false;
+
+    // If ECS is initialized and in proxy mode, create ECS-backed proxy directly
+    if (this._ecsPipeline && this._useProxyMode) {
+      const world = this._ecsPipeline.server.world;
+      const eid = world.create();
+      this._ecsEntityMap.set(id, eid);
+      this._reverseEntityMap.set(eid as unknown as number, id);
+
+      // Initialize ECS components
+      world.set(eid, Transform, { position, rotation, scale });
+      world.set(eid, Velocity, { x: 0, y: 0, z: 0 });
+      world.set(eid, Visual, { color, visible: true, transparency: 0, primitiveType });
+      world.set(eid, Physics, { anchored, canCollide, mass: DEFAULT_PROPERTIES.mass, friction: DEFAULT_PROPERTIES.friction, gravity });
+      world.set(eid, LegacyHandle, { legacyId: id, name });
+
+      // Create proxy RuntimeObject
+      const proxyDeps: RuntimeObjectProxyDeps = {
+        world,
+        hierarchy: this.hierarchy,
+        getObjectById: (objId: string) => this._all.get(objId),
+        getObjectEventBus: (objId: string) => {
+          let bus = this._objectEvents.get(objId);
+          if (!bus) {
+            bus = new EventBus();
+            this._objectEvents.set(objId, bus);
+          }
+          return bus;
+        },
+        pushLog: (line: string) => this.pushLog(line),
+        markDirty: (entityId: EntityId) => this._dirtyEntities.add(entityId),
+        entityId: eid,
+        legacyId: id,
+        name,
+        container,
+        type: "primitive",
+        primitiveType,
+      };
+      const ro = createRuntimeObjectProxy(proxyDeps);
+      this._all.set(id, ro);
+      if (opts.parentId) {
+        const parent = this._all.get(opts.parentId);
+        if (parent) ro.setParent(parent);
+      }
+      this.rebuildIndexes();
+      this._events.emit("objectAdded", [ro]);
+      return ro;
+    }
+
+    // Legacy path: create raw RuntimeObject (only used before ECS init)
     const raw: RuntimeObject = {
-      id: newId(),
-      name: opts.name ?? `Part_${this._all.size + 1}`,
+      id,
+      name,
       type: "primitive",
-      primitiveType: opts.primitiveType ?? "cube",
-      container: opts.container ?? "Workspace",
-      position: { x: 0, y: 0, z: 0, ...(opts.position ?? {}) },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-      color: opts.color ?? "#88aaff",
+      primitiveType,
+      container,
+      position,
+      rotation,
+      scale,
+      color,
       visible: true,
       ...DEFAULT_PROPERTIES,
-      anchored: opts.anchored ?? false,
-      canCollide: opts.canCollide ?? DEFAULT_PROPERTIES.canCollide,
-      gravity: opts.gravity ?? false,
+      anchored,
+      canCollide,
+      gravity,
       velocity: { x: 0, y: 0, z: 0 },
       on: () => () => {},
       off: () => {},
@@ -832,23 +892,84 @@ export class GameRuntime {
   }
 
   private cloneTemplateInto(tpl: RuntimeObject, container: ContainerName, position?: Vec3): RuntimeObject {
+    const id = newId();
+    const name = `${tpl.name}_${this._all.size + 1}`;
+    const primitiveType = tpl.primitiveType;
+    const pos = position ? { ...position } : { ...tpl.position };
+    const rot = { ...tpl.rotation };
+    const scl = { ...tpl.scale };
+    const color = tpl.color;
+    const gravity = tpl.gravity === false ? false : (tpl.gravity ? { strength: tpl.gravity.strength, radius: tpl.gravity.radius } : false);
+
+    // If ECS is initialized and in proxy mode, create ECS-backed proxy directly
+    if (this._ecsPipeline && this._useProxyMode) {
+      const world = this._ecsPipeline.server.world;
+      const eid = world.create();
+      this._ecsEntityMap.set(id, eid);
+      this._reverseEntityMap.set(eid as unknown as number, id);
+
+      // Initialize ECS components from template
+      world.set(eid, Transform, { position: pos, rotation: rot, scale: scl });
+      world.set(eid, Velocity, { x: 0, y: 0, z: 0 });
+      world.set(eid, Visual, { color, visible: true, transparency: tpl.transparency ?? 0, primitiveType });
+      world.set(eid, Physics, { anchored: tpl.anchored, canCollide: tpl.canCollide, mass: tpl.mass, friction: tpl.friction, gravity });
+      world.set(eid, LegacyHandle, { legacyId: id, name });
+
+      // Create proxy RuntimeObject
+      const proxyDeps: RuntimeObjectProxyDeps = {
+        world,
+        hierarchy: this.hierarchy,
+        getObjectById: (objId: string) => this._all.get(objId),
+        getObjectEventBus: (objId: string) => {
+          let bus = this._objectEvents.get(objId);
+          if (!bus) {
+            bus = new EventBus();
+            this._objectEvents.set(objId, bus);
+          }
+          return bus;
+        },
+        pushLog: (line: string) => this.pushLog(line),
+        markDirty: (entityId: EntityId) => this._dirtyEntities.add(entityId),
+        entityId: eid,
+        legacyId: id,
+        name,
+        container,
+        type: tpl.type,
+        primitiveType,
+      };
+      const ro = createRuntimeObjectProxy(proxyDeps);
+      
+      // Copy template-specific properties
+      if (tpl.isPickup) (ro as any).isPickup = tpl.isPickup;
+      if (tpl.pickupName) (ro as any).pickupName = tpl.pickupName;
+      if (tpl.pickupData) (ro as any).pickupData = tpl.pickupData;
+      if (tpl.modelId) (ro as any).modelId = tpl.modelId;
+      if (tpl.modelUrl) (ro as any).modelUrl = tpl.modelUrl;
+      
+      this._all.set(id, ro);
+      this.rebuildIndexes();
+      this._events.emit("objectAdded", [ro]);
+      return ro;
+    }
+
+    // Legacy path: create raw RuntimeObject (only used before ECS init)
     const raw: RuntimeObject = {
-      id: newId(),
-      name: `${tpl.name}_${this._all.size + 1}`,
+      id,
+      name,
       type: tpl.type,
-      primitiveType: tpl.primitiveType,
+      primitiveType,
       container,
-      position: position ? { ...position } : { ...tpl.position },
-      rotation: { ...tpl.rotation },
-      scale: { ...tpl.scale },
-      color: tpl.color,
+      position: pos,
+      rotation: rot,
+      scale: scl,
+      color,
       visible: true,
       anchored: tpl.anchored,
       canCollide: tpl.canCollide,
       transparency: tpl.transparency,
       mass: tpl.mass,
       friction: tpl.friction,
-      gravity: tpl.gravity === false ? false : (tpl.gravity ? { strength: tpl.gravity.strength, radius: tpl.gravity.radius } : false),
+      gravity,
       velocity: { x: 0, y: 0, z: 0 },
       on: () => () => {},
       off: () => {},
@@ -878,6 +999,15 @@ export class GameRuntime {
       for (const disconnect of ro.__cleanup) disconnect();
       ro.__cleanup.clear();
     }
+    
+    // Clean up ECS entity if it exists
+    const eid = this._ecsEntityMap.get(id);
+    if (eid !== undefined && this._ecsPipeline) {
+      this._ecsPipeline.server.world.destroy(eid);
+      this._ecsEntityMap.delete(id);
+      this._reverseEntityMap.delete(eid as unknown as number);
+    }
+    
     for (const cid of this.hierarchy.descendantIds(id)) {
       const child = this._all.get(cid);
       if (!child) continue;
@@ -885,6 +1015,15 @@ export class GameRuntime {
         for (const disconnect of child.__cleanup) disconnect();
         child.__cleanup.clear();
       }
+      
+      // Clean up child ECS entity
+      const childEid = this._ecsEntityMap.get(cid);
+      if (childEid !== undefined && this._ecsPipeline) {
+        this._ecsPipeline.server.world.destroy(childEid);
+        this._ecsEntityMap.delete(cid);
+        this._reverseEntityMap.delete(childEid as unknown as number);
+      }
+      
       this._all.delete(cid);
       clearContact(this._playerContacts, cid);
       this.emitObjectEvent(cid, "destroyed", []);
@@ -1107,6 +1246,7 @@ export class GameRuntime {
 
   /**
    * Sync a RuntimeObject to the ECS world.
+   * @deprecated Only used in legacy mode (when _useProxyMode is false).
    * Creates an entity if it doesn't exist, otherwise updates components.
    */
   private syncObjectToEcs(ro: RuntimeObject): EntityId {
@@ -1118,6 +1258,7 @@ export class GameRuntime {
     if (!eid) {
       eid = world.create();
       this._ecsEntityMap.set(ro.id, eid);
+      this._reverseEntityMap.set(eid as unknown as number, ro.id);
     }
     
     // Sync Transform
@@ -1216,53 +1357,6 @@ export class GameRuntime {
   }
 
   /**
-   * Legacy sync method - kept for backwards compatibility when proxy mode is disabled.
-   * @deprecated Use proxy mode instead for better performance.
-   */
-  private syncEcsToObjects(): void {
-    if (!this._ecsPipeline) return;
-    if (this._useProxyMode) {
-      // In proxy mode, only sync player
-      this.syncPlayerFromEcs();
-      return;
-    }
-    
-    const world = this._ecsPipeline.server.world;
-    
-    // Sync player state from ECS
-    this.syncPlayerFromEcs();
-    
-    // Legacy mode: Sync all RuntimeObjects from ECS
-    for (const [legacyId, eid] of this._ecsEntityMap) {
-      const ro = this._all.get(legacyId);
-      if (!ro) continue;
-      
-      const transform = world.get(eid, Transform);
-      const velocity = world.get(eid, Velocity);
-      const visual = world.get(eid, Visual);
-      
-      if (transform) {
-        ro.position.x = transform.position.x;
-        ro.position.y = transform.position.y;
-        ro.position.z = transform.position.z;
-        ro.rotation.x = transform.rotation.x;
-        ro.rotation.y = transform.rotation.y;
-        ro.rotation.z = transform.rotation.z;
-      }
-      if (velocity) {
-        ro.velocity.x = velocity.x;
-        ro.velocity.y = velocity.y;
-        ro.velocity.z = velocity.z;
-      }
-      if (visual) {
-        ro.visible = visual.visible;
-        ro.transparency = visual.transparency;
-        ro.color = visual.color;
-      }
-    }
-  }
-
-  /**
    * Step the ECS pipeline.
    * Called from the main step() method when useEcsPipeline is true.
    */
@@ -1322,8 +1416,9 @@ export class GameRuntime {
     // Step the server simulation
     server.step(dt);
     
-    // Sync ECS state back to RuntimeObjects
-    this.syncEcsToObjects();
+    // Sync player state from ECS back to RuntimePlayer
+    // (RuntimeObjects are proxies that read directly from ECS, no sync needed)
+    this.syncPlayerFromEcs();
   }
 
   private buildState(): RuntimeState {
