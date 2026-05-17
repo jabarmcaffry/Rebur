@@ -68,7 +68,7 @@ import {
   Visual,
   Physics,
   AutoBehavior,
-  LegacyHandle,
+  ObjectHandle,
   InputState,
   WorldPhysics,
   Player,
@@ -250,8 +250,8 @@ export class GameRuntime {
 
   // ECS Pipeline - the canonical simulation path
   private _ecsPipeline: PipelineHandles | null = null;
-  private _ecsEntityMap = new Map<string, EntityId>(); // legacyId -> EntityId
-  private _reverseEntityMap = new Map<number, string>(); // EntityId -> legacyId
+  private _ecsEntityMap = new Map<string, EntityId>(); // objectId -> EntityId
+  private _reverseEntityMap = new Map<number, string>(); // EntityId -> objectId
   private _playerEntityId: EntityId | null = null;
   /** Track which entities were modified via RuntimeObject proxies this tick */
   private _dirtyEntities = new Set<EntityId>();
@@ -277,11 +277,11 @@ export class GameRuntime {
     this.moduleLoaderCtx = createModuleLoaderContext((line) => this.pushLog(line));
 
     // Store initial snapshot for ECS initialization in start()
-    // We still need to create legacy RuntimeObjects for backwards compatibility
-    // during the constructor phase, but they will be replaced with proxies in start()
+    // Temporary RuntimeObjects are created during constructor phase but
+    // will be replaced with ECS-backed proxies once the pipeline initializes.
     this._initialSnapshot = snap;
     
-    // Load objects from snapshot (legacy mode for constructor phase)
+    // Load objects from snapshot (pre-ECS initialization phase)
     for (const o of snap) {
       const props = readProperties(o);
       const container = this.normalizeContainer(o.container);
@@ -430,18 +430,17 @@ export class GameRuntime {
   }
 
   /**
-   * Get the ECS entity ID for a legacy object ID.
-   * Returns null if the object doesn't exist in ECS.
+   * Get the ECS entity ID for a string object ID.
    */
-  getEntityId(legacyId: string): EntityId | null {
-    return this._ecsEntityMap.get(legacyId) ?? null;
+  getEntityId(objectId: string): EntityId | null {
+    return this._ecsEntityMap.get(objectId) ?? null;
   }
 
   /**
-   * Get the legacy object ID for an ECS entity ID.
-   * Returns null if the entity doesn't map to a legacy object.
+   * Get the string object ID for an ECS entity ID.
+   * Returns null if the entity doesn't map to an object.
    */
-  getLegacyId(entityId: number): string | null {
+  getObjectIdFromEntity(entityId: number): string | null {
     return this._reverseEntityMap.get(entityId) ?? null;
   }
 
@@ -814,7 +813,7 @@ export class GameRuntime {
       world.set(eid, Velocity, { x: 0, y: 0, z: 0 });
       world.set(eid, Visual, { color, visible: true, transparency: 0, primitiveType });
       world.set(eid, Physics, { anchored, canCollide, mass: DEFAULT_PROPERTIES.mass, friction: DEFAULT_PROPERTIES.friction, gravity });
-      world.set(eid, LegacyHandle, { legacyId: id, name });
+      world.set(eid, ObjectHandle, { objectId: id, name });
 
       // Create proxy RuntimeObject
       const proxyDeps: RuntimeObjectProxyDeps = {
@@ -832,7 +831,7 @@ export class GameRuntime {
         pushLog: (line: string) => this.pushLog(line),
         markDirty: (entityId: EntityId) => this._dirtyEntities.add(entityId),
         entityId: eid,
-        legacyId: id,
+        objectId: id,
         name,
         container,
         type: "primitive",
@@ -913,7 +912,7 @@ export class GameRuntime {
       world.set(eid, Velocity, { x: 0, y: 0, z: 0 });
       world.set(eid, Visual, { color, visible: true, transparency: tpl.transparency ?? 0, primitiveType });
       world.set(eid, Physics, { anchored: tpl.anchored, canCollide: tpl.canCollide, mass: tpl.mass, friction: tpl.friction, gravity });
-      world.set(eid, LegacyHandle, { legacyId: id, name });
+      world.set(eid, ObjectHandle, { objectId: id, name });
 
       // Create proxy RuntimeObject
       const proxyDeps: RuntimeObjectProxyDeps = {
@@ -931,7 +930,7 @@ export class GameRuntime {
         pushLog: (line: string) => this.pushLog(line),
         markDirty: (entityId: EntityId) => this._dirtyEntities.add(entityId),
         entityId: eid,
-        legacyId: id,
+        objectId: id,
         name,
         container,
         type: tpl.type,
@@ -1161,7 +1160,7 @@ export class GameRuntime {
    */
   private initializeEcsProxies(world: World): void {
     // Create proxy dependencies
-    const proxyDeps: Omit<RuntimeObjectProxyDeps, 'entityId' | 'legacyId' | 'name' | 'container' | 'type' | 'primitiveType'> = {
+    const proxyDeps: Omit<RuntimeObjectProxyDeps, 'entityId' | 'objectId' | 'name' | 'container' | 'type' | 'primitiveType'> = {
       world,
       hierarchy: this.hierarchy,
       getObjectById: (id: string) => this._all.get(id),
@@ -1178,11 +1177,11 @@ export class GameRuntime {
     };
 
     // Iterate over existing RuntimeObjects and create ECS entities + proxy replacements
-    for (const [legacyId, oldRo] of this._all.entries()) {
+    for (const [objId, oldRo] of this._all.entries()) {
       // Create ECS entity
       const eid = world.create();
-      this._ecsEntityMap.set(legacyId, eid);
-      this._reverseEntityMap.set(eid as unknown as number, legacyId);
+      this._ecsEntityMap.set(objId, eid);
+      this._reverseEntityMap.set(eid as unknown as number, objId);
 
       // Initialize ECS components from the old RuntimeObject's data
       world.set(eid, Transform, {
@@ -1213,8 +1212,8 @@ export class GameRuntime {
           autoFollow: oldRo.autoFollow,
         });
       }
-      world.set(eid, LegacyHandle, {
-        legacyId: legacyId,
+      world.set(eid, ObjectHandle, {
+        objectId: objId,
         name: oldRo.name,
       });
 
@@ -1222,7 +1221,7 @@ export class GameRuntime {
       const proxyRo = createRuntimeObjectProxy({
         ...proxyDeps,
         entityId: eid,
-        legacyId: legacyId,
+        objectId: objId,
         name: oldRo.name,
         container: oldRo.container,
         type: oldRo.type,
@@ -1237,7 +1236,7 @@ export class GameRuntime {
       if (oldRo.modelUrl) (proxyRo as any).modelUrl = oldRo.modelUrl;
 
       // Replace the old RuntimeObject with the proxy
-      this._all.set(legacyId, proxyRo);
+      this._all.set(objId, proxyRo);
     }
 
     // Rebuild indexes with the new proxy objects
@@ -1246,8 +1245,8 @@ export class GameRuntime {
 
   /**
    * Sync a RuntimeObject to the ECS world.
-   * @deprecated Only used in legacy mode (when _useProxyMode is false).
    * Creates an entity if it doesn't exist, otherwise updates components.
+   * Used for player entity sync and dynamic object creation.
    */
   private syncObjectToEcs(ro: RuntimeObject): EntityId {
     if (!this._ecsPipeline) throw new Error("ECS pipeline not initialized");
@@ -1299,9 +1298,9 @@ export class GameRuntime {
       });
     }
     
-    // Sync LegacyHandle
-    world.set(eid, LegacyHandle, {
-      legacyId: ro.id,
+    // Sync ObjectHandle
+    world.set(eid, ObjectHandle, {
+      objectId: ro.id,
       name: ro.name,
     });
     
@@ -1312,8 +1311,8 @@ export class GameRuntime {
    * Sync ECS state back to the RuntimePlayer after a tick.
    * 
    * In proxy mode, RuntimeObjects read directly from ECS so no sync is needed.
-   * Only the player needs syncing because RuntimePlayer is still a legacy object
-   * for script compatibility (player.position = ... style writes).
+   * Only the player needs syncing because RuntimePlayer uses direct property
+   * writes for script compatibility (player.position = ... style writes).
    */
   private syncPlayerFromEcs(): void {
     if (!this._ecsPipeline) return;
@@ -1366,7 +1365,7 @@ export class GameRuntime {
     const { server } = this._ecsPipeline;
     const world = server.world;
 
-    // Sync RuntimePlayer -> ECS BEFORE stepping. The legacy player object is
+    // Sync RuntimePlayer -> ECS BEFORE stepping. The player object is
     // mutated by scripts and by kill/respawn/teleport in the same tick, so
     // ECS must adopt that state as the new authoritative input each tick.
     if (this._playerEntityId !== null) {
@@ -1689,7 +1688,7 @@ export class GameRuntime {
     this.time += dt;
     const p = this.player;
 
-    // INPUT PHASE - emit key events (still handled by legacy event system for scripts)
+    // INPUT PHASE - emit key events for script handlers
     for (const k in this.input.keys) {
       const isDown = !!this.input.keys[k];
       const wasDown = !!this._prevKeys[k];
@@ -1705,7 +1704,7 @@ export class GameRuntime {
     }
     this._events.emit("input", [dt, this.time], (e, fn) => this.pushLog(`runService.input error: ${formatErr(e)}`));
 
-    // ANIMATION PHASE - tweens are still managed by legacy TweenManager for API compatibility
+    // ANIMATION PHASE - tweens managed by TweenManager for API compatibility
     this._tweens.step(dt);
     this._events.emit("animation", [dt, this.time], (e, fn) => this.pushLog(`runService.animation error: ${formatErr(e)}`));
 
@@ -1724,7 +1723,7 @@ export class GameRuntime {
     this._events.emit("replication", [dt, this.time], (e, fn) => this.pushLog(`runService.replication error: ${formatErr(e)}`));
     this._events.emit("physics", [dt, this.time], (e, fn) => this.pushLog(`runService.physics error: ${formatErr(e)}`));
 
-    // POST-PHYSICS - touch events and motor attachment (still uses legacy systems for event emission)
+    // POST-PHYSICS - touch events and motor attachment
     this._runPickupSweep();
     this.applyMotors();
     this._updatePlayerAnimation();

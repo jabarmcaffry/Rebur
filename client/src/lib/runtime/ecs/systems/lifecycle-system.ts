@@ -4,7 +4,7 @@
  */
 import { defineSystem } from "../system";
 import { defineComponent, type EntityId } from "../world";
-import { Transform, Visual, Physics, LegacyHandle, Velocity } from "../components";
+import { Transform, Visual, Physics, ObjectHandle, Velocity } from "../components";
 import { CommandGroups } from "../../commands/router";
 import type { Vec3 } from "../../types";
 
@@ -121,8 +121,8 @@ export const LifecycleSystem = defineSystem({
         gravity: false,
       });
       
-      world.set(eid, LegacyHandle, {
-        legacyId: `ecs_${eid}`,
+      world.set(eid, ObjectHandle, {
+        objectId: `ecs_${eid}`,
         name: spawn.name,
       });
       

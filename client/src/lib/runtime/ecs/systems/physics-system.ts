@@ -5,7 +5,7 @@
  */
 import { defineSystem } from "../system";
 import { defineComponent, type EntityId } from "../world";
-import { Transform, Velocity, Physics, Player, InputState, LegacyHandle } from "../components";
+import { Transform, Velocity, Physics, Player, InputState } from "../components";
 import type { Vec3 } from "../../types";
 
 /** World-level physics constants (singleton on entity 0). */

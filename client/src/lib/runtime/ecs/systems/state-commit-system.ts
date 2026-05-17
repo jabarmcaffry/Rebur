@@ -8,12 +8,12 @@
  */
 import { defineSystem } from "../system";
 import { defineComponent, type EntityId } from "../world";
-import { Transform, Velocity, Visual, Physics, LegacyHandle } from "../components";
+import { Transform, Velocity, Visual, Physics, ObjectHandle } from "../components";
 import type { Vec3 } from "../../types";
 
 export interface EntitySnapshot {
   id: number;
-  legacyId?: string;
+  objectId?: string;
   name: string;
   position: Vec3;
   rotation: Vec3;
@@ -52,7 +52,7 @@ function makeBuf(): SnapshotBuffer {
 function newSnap(): EntitySnapshot {
   return {
     id: 0,
-    legacyId: undefined,
+    objectId: undefined,
     name: "",
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
@@ -104,11 +104,11 @@ export const StateCommitSystem = defineSystem({
       const numEid = eid as unknown as number;
       const velocity = world.get(eid, Velocity);
       const physics = world.get(eid, Physics);
-      const handle = world.get(eid, LegacyHandle);
+      const handle = world.get(eid, ObjectHandle);
 
       const snap = pool.pop() ?? newSnap();
       snap.id = numEid;
-      snap.legacyId = handle?.legacyId;
+      snap.objectId = handle?.objectId;
       snap.name = handle?.name ?? `entity_${numEid}`;
       snap.position.x = transform.position.x;
       snap.position.y = transform.position.y;

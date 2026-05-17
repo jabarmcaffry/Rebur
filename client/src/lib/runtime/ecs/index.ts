@@ -1,9 +1,8 @@
 /**
  * Public entry for the server-authoritative ECS pipeline.
  *
- * This is now the canonical simulation path. All game state flows through
+ * This is the canonical simulation path. All game state flows through
  * the ECS pipeline with fixed system ordering for deterministic behavior.
- * The legacy mutation paths have been removed.
  */
 export { World, defineComponent, type EntityId, type ComponentDef } from "./world";
 export { defineSystem, Scheduler, InlineRunner, type SystemDef, type SystemContext, type SystemRunner } from "./system";
@@ -19,7 +18,6 @@ export {
   type SerializedEntity,
   type EntityDelta,
 } from "./worker-runner";
-export * from "./components";
 
 // Systems - in fixed execution order
 export { InputIntakeSystem, InputState, type InputCommandPayload } from "./systems/input-intake-system";

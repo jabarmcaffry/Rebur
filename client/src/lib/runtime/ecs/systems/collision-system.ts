@@ -4,7 +4,7 @@
  */
 import { defineSystem } from "../system";
 import { defineComponent, type EntityId } from "../world";
-import { Transform, Velocity, Physics, LegacyHandle, Player } from "../components";
+import { Transform, Velocity, Physics, Player } from "../components";
 import { PlayerPhysics } from "./physics-system";
 import type { Vec3 } from "../../types";
 

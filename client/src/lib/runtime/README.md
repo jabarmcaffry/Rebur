@@ -299,6 +299,12 @@ runtime.start(); // ECS pipeline is automatically initialized
 ## Component Definitions
 
 ```typescript
+// ObjectHandle (identity component)
+world.set(eid, ObjectHandle, {
+  objectId: "unique_id",  // String identifier
+  name: "MyObject",       // Display name
+});
+
 // Transform (position, rotation, scale)
 world.set(eid, Transform, {
   position: { x: 0, y: 0, z: 0 },

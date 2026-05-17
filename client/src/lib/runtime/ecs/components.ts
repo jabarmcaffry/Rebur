@@ -36,8 +36,8 @@ export const AutoBehavior = defineComponent<{
   autoFollow?: { target: { position: Vec3 }; speed: number; offset?: Vec3 };
 }>("auto-behavior");
 
-/** Identity tag — links an ECS entity to the legacy RuntimeObject id. */
-export const LegacyHandle = defineComponent<{ legacyId: string; name: string }>("legacy-handle");
+/** Identity tag - links an ECS entity to its string object ID. */
+export const ObjectHandle = defineComponent<{ objectId: string; name: string }>("object-handle");
 
 /** Player entity marker + state */
 export const Player = defineComponent<{

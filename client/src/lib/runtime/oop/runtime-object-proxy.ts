@@ -9,7 +9,7 @@
  * RuntimeObjects -> ECS -> RuntimeObjects every frame.
  */
 import type { World, EntityId, ComponentDef } from "../ecs/world";
-import { Transform, Velocity, Visual, Physics, AutoBehavior, LegacyHandle } from "../ecs/components";
+import { Transform, Velocity, Visual, Physics, AutoBehavior, ObjectHandle } from "../ecs/components";
 import type { Vec3, RuntimeObject, ContainerName, ObjectEventName } from "../types";
 import { EventBus, type EventsAPI } from "../types";
 
@@ -19,8 +19,8 @@ export interface RuntimeObjectProxyDeps {
   world: World;
   /** Entity ID in the ECS world */
   entityId: EntityId;
-  /** Legacy ID for backwards compatibility */
-  legacyId: string;
+  /** String object ID */
+  objectId: string;
   /** Object name */
   name: string;
   /** Container name */
@@ -181,16 +181,16 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
 
   const obj: RuntimeObject = {
     // Identity - these are fixed
-    get id() { return deps.legacyId; },
+    get id() { return deps.objectId; },
     get name() { 
-      const handle = deps.world.get(deps.entityId, LegacyHandle);
+      const handle = deps.world.get(deps.entityId, ObjectHandle);
       return handle?.name ?? deps.name; 
     },
     set name(v: string) {
-      const handle = deps.world.get(deps.entityId, LegacyHandle);
+      const handle = deps.world.get(deps.entityId, ObjectHandle);
       if (handle) {
         handle.name = v;
-        deps.world.set(deps.entityId, LegacyHandle, handle);
+        deps.world.set(deps.entityId, ObjectHandle, handle);
       }
     },
     type: deps.type,
@@ -389,12 +389,12 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
     // Hierarchy
     parentId: null,
     get children() {
-      return deps.hierarchy.childIds(deps.legacyId)
+      return deps.hierarchy.childIds(deps.objectId)
         .map(cid => deps.getObjectById(cid))
         .filter(Boolean) as RuntimeObject[];
     },
     findFirstChild(name: string) {
-      for (const cid of deps.hierarchy.childIds(deps.legacyId)) {
+      for (const cid of deps.hierarchy.childIds(deps.objectId)) {
         const child = deps.getObjectById(cid);
         if (child && child.name === name) return child;
       }
@@ -407,7 +407,7 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
 
     // Events
     on(event: ObjectEventName, fn: (...args: any[]) => void) {
-      const bus = deps.getObjectEventBus(deps.legacyId);
+      const bus = deps.getObjectEventBus(deps.objectId);
       const disconnect = bus.on(event as any, fn as any);
       cleanupSet.add(disconnect);
       return () => {
@@ -416,7 +416,7 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
       };
     },
     off(event: ObjectEventName, fn: (...args: any[]) => void) {
-      const bus = deps.getObjectEventBus(deps.legacyId);
+      const bus = deps.getObjectEventBus(deps.objectId);
       bus.off(event as any, fn as any);
     },
     onPropertyChanged(property: string) {
@@ -444,7 +444,7 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
       const old = attributes.get(key);
       if (old !== value) {
         attributes.set(key, value);
-        const bus = deps.getObjectEventBus(deps.legacyId);
+        const bus = deps.getObjectEventBus(deps.objectId);
         bus.emit("changed", [`Attribute.${key}`, value, old]);
       }
     },
@@ -490,16 +490,16 @@ export interface EntityRenderSnapshot {
 /**
  * Read a render snapshot directly from ECS for an entity.
  */
-export function readEntitySnapshot(world: World, entityId: EntityId, legacyId: string): EntityRenderSnapshot | null {
+export function readEntitySnapshot(world: World, entityId: EntityId, objectId: string): EntityRenderSnapshot | null {
   const transform = world.get(entityId, Transform);
   const visual = world.get(entityId, Visual);
   const physics = world.get(entityId, Physics);
-  const handle = world.get(entityId, LegacyHandle);
+  const handle = world.get(entityId, ObjectHandle);
   
   if (!transform || !visual) return null;
   
   return {
-    id: legacyId,
+    id: objectId,
     entityId: entityId as unknown as number,
     name: handle?.name ?? `entity_${entityId}`,
     type: "primitive", // TODO: store in ECS
