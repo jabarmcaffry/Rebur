@@ -13,8 +13,12 @@
  *   client -> server : input messages (move axes, jump, action buttons)
  *
  * Both sides also expose `broadcast` / `send` / `on` for custom channels.
+ * 
+ * For real multiplayer, use the NetworkLayer from ./network/interpolation.ts
+ * which provides WebSocket transport and entity interpolation.
  */
 import type { RuntimeObject, RuntimePlayer, Vec3 } from "./types";
+import { InterpolationManager, type WorldSnapshot, type EntitySnapshot } from "./network/interpolation";
 
 export type NetSnapshot = {
   t: number;
@@ -76,9 +80,16 @@ export class NetworkBus {
   /** Ticks per second the server emits world snapshots at. */
   snapshotHz = 20;
   private _accum = 0;
+  private _seq = 0;
 
   private _serverSide = new Side();
   private _clientSide = new Side();
+  
+  /** Interpolation manager for smooth rendering */
+  private _interpolation = new InterpolationManager({ renderDelay: 0 }); // No delay for local mode
+  
+  /** Whether interpolation is enabled */
+  interpolationEnabled = false;
 
   /** Server-facing API. `broadcast` reaches every client; `on` listens to
    *  messages a client sent up. */
@@ -111,9 +122,11 @@ export class NetworkBus {
     const interval = 1 / Math.max(1, this.snapshotHz);
     if (this._accum < interval) return;
     this._accum = 0;
+    this._seq++;
 
+    const serverTime = performance.now();
     const snap: NetSnapshot = {
-      t: performance.now(),
+      t: serverTime,
       player: {
         position: { ...player.position },
         rotation: { ...player.rotation },
@@ -133,10 +146,55 @@ export class NetworkBus {
         })),
     };
     this._clientSide.emit("__snapshot", snap);
+    
+    // Feed into interpolation buffer if enabled
+    if (this.interpolationEnabled) {
+      const worldSnap: WorldSnapshot = {
+        serverTime,
+        clientTime: serverTime, // Same for local mode
+        seq: this._seq,
+        player: {
+          position: snap.player.position,
+          rotation: snap.player.rotation,
+          velocity: snap.player.velocity,
+          health: snap.player.health,
+          serverTime,
+        },
+        entities: snap.objects.map(o => ({
+          ...o,
+          serverTime,
+        })),
+      };
+      this._interpolation.addSnapshot(worldSnap);
+    }
+  }
+  
+  /**
+   * Get interpolated entity states for smooth rendering.
+   * Only useful when interpolationEnabled is true.
+   */
+  getInterpolatedState() {
+    return this._interpolation.update();
+  }
+  
+  /**
+   * Get interpolation statistics.
+   */
+  getInterpolationStats() {
+    return this._interpolation.stats;
+  }
+  
+  /**
+   * Configure interpolation settings.
+   */
+  setInterpolationConfig(config: { renderDelay?: number; maxExtrapolation?: number }) {
+    this._interpolation.setConfig(config);
   }
 
   clear() {
     this._serverSide.clear();
     this._clientSide.clear();
+    this._interpolation.clear();
+    this._seq = 0;
   }
 }

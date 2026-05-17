@@ -9,18 +9,12 @@
  * 2. Worker runs the system and computes deltas
  * 3. Worker sends deltas back to main thread
  * 4. Main thread applies deltas to the ECS world
- *
- * For now this is a synchronous fallback that runs inline. The actual
- * worker implementation requires:
- * - Serializable component transfer format
- * - Worker script bundling
- * - Delta computation in the worker
  */
 import type { SystemDef, SystemRunner, SystemContext } from "./system";
 import { InlineRunner } from "./system";
 import type { World, EntityId, ComponentDef } from "./world";
-import { Transform, Velocity, Physics, Player } from "./components";
-import { PlayerPhysics, WorldPhysics, GravitySource } from "./systems/physics-system";
+import { Transform, Velocity, Physics, Player, InputState } from "./components";
+import { PlayerPhysics, WorldPhysics, GravitySource, MotorPinned } from "./systems/physics-system";
 
 /** Message sent to the worker */
 export interface WorkerMessage {
@@ -32,7 +26,13 @@ export interface WorkerMessage {
   entities: SerializedEntity[];
   /** World-level singletons */
   worldPhysics: { gravity: number; airDrag: number };
-  inputState: { moveX: number; moveZ: number; jump: boolean; cameraForward: { x: number; y: number; z: number } };
+  inputState: { 
+    moveX: number; 
+    moveZ: number; 
+    jump: boolean; 
+    keys?: Record<string, boolean>;
+    cameraForward: { x: number; y: number; z: number };
+  };
 }
 
 /** Entity data sent to worker */
@@ -44,6 +44,7 @@ export interface SerializedEntity {
   player?: { ragdoll: boolean; health: number; killY: number };
   playerPhysics?: { onGround: boolean; up: { x: number; y: number; z: number }; collisionRadius: number; collisionHalfHeight: number; walkSpeed: number; runSpeed: number; jumpPower: number; moveForward: { x: number; y: number; z: number }; sprinting: boolean };
   gravitySource?: { strength: number; radius: number };
+  motorPinned?: boolean;
 }
 
 /** Message received from worker */
@@ -53,6 +54,12 @@ export interface WorkerResult {
   tick: number;
   /** Delta updates to apply to entities */
   deltas: EntityDelta[];
+  /** Optional profiling information */
+  profiling?: {
+    entityCount: number;
+    gravitySourceCount: number;
+    executionTimeMs: number;
+  };
 }
 
 /** Component deltas from worker */
@@ -71,31 +78,75 @@ export interface WorkerRunnerOptions {
   useWorker?: boolean;
   /** Systems that should run on the worker */
   workerSystems?: Set<string>;
+  /** URL to the worker script (if not provided, will try to create inline) */
+  workerUrl?: string;
 }
 
 /**
  * Worker-based system runner that offloads computation to a Web Worker.
  * 
- * Currently implements a synchronous fallback. When real workers are enabled:
+ * Features:
  * - Physics and Collision systems can run in parallel
  * - Main thread stays responsive during complex simulations
- * - Double-buffering prevents race conditions
+ * - Automatic fallback to inline execution if worker unavailable
+ * - Delta-based updates minimize data transfer
  */
 export class WorkerRunner implements SystemRunner {
   private worker: Worker | null = null;
-  private pending: Map<string, { resolve: () => void; reject: (e: Error) => void }> = new Map();
+  private pending: Map<string, { 
+    resolve: () => void; 
+    reject: (e: Error) => void;
+    ctx: SystemContext;
+    system: SystemDef;
+  }> = new Map();
   private options: WorkerRunnerOptions;
   private useWorker: boolean;
+  private world: World | null = null;
+  
+  /** Profiling stats from the last worker execution */
+  lastProfilingStats: WorkerResult["profiling"] | null = null;
 
   constructor(options: WorkerRunnerOptions = {}) {
     this.options = options;
     this.useWorker = options.useWorker ?? false;
     
     if (this.useWorker && typeof Worker !== "undefined") {
-      // Worker would be initialized here with the physics worker script
-      // For now, we fall back to inline execution
-      this.useWorker = false;
+      try {
+        this.initializeWorker();
+      } catch (e) {
+        console.warn("[WorkerRunner] Failed to initialize worker, falling back to inline:", e);
+        this.useWorker = false;
+      }
     }
+  }
+  
+  /**
+   * Initialize the Web Worker.
+   */
+  private initializeWorker(): void {
+    if (this.options.workerUrl) {
+      // Use provided URL
+      this.worker = new Worker(this.options.workerUrl, { type: "module" });
+    } else {
+      // Try to create worker from blob (for bundled scenarios)
+      // This requires the physics.worker.ts to be bundled separately
+      // For now, we'll indicate the worker should be loaded externally
+      console.warn("[WorkerRunner] No worker URL provided. Set workerUrl option or ensure physics.worker.ts is bundled.");
+      this.useWorker = false;
+      return;
+    }
+    
+    this.worker.onmessage = (event) => this.handleWorkerMessage(event);
+    this.worker.onerror = (error) => {
+      console.error("[WorkerRunner] Worker error:", error);
+      // Fallback all pending to inline
+      for (const [key, pending] of this.pending) {
+        InlineRunner.exec(pending.system, pending.ctx);
+        pending.resolve();
+      }
+      this.pending.clear();
+      this.useWorker = false;
+    };
   }
 
   /**
@@ -127,6 +178,7 @@ export class WorkerRunner implements SystemRunner {
     }
 
     const { world, dt, tick } = ctx;
+    this.world = world;
     
     // Serialize relevant entities
     const entities = this.serializeEntities(world, system.id);
@@ -134,7 +186,14 @@ export class WorkerRunner implements SystemRunner {
     // Get world singletons
     const worldEntity = 0 as unknown as EntityId;
     const worldPhysics = world.get(worldEntity, WorldPhysics) ?? { gravity: 9.81, airDrag: 0 };
-    const inputState = { moveX: 0, moveZ: 0, jump: false, cameraForward: { x: 0, y: 0, z: -1 } };
+    const inputStateComp = world.get(worldEntity, InputState);
+    const inputState = inputStateComp ? {
+      moveX: inputStateComp.moveX,
+      moveZ: inputStateComp.moveZ,
+      jump: inputStateComp.jump,
+      keys: inputStateComp.keys ? { ...inputStateComp.keys } : {},
+      cameraForward: inputStateComp.cameraForward ? { ...inputStateComp.cameraForward } : { x: 0, y: 0, z: -1 },
+    } : { moveX: 0, moveZ: 0, jump: false, keys: {}, cameraForward: { x: 0, y: 0, z: -1 } };
 
     const message: WorkerMessage = {
       type: "run-system",
@@ -149,7 +208,7 @@ export class WorkerRunner implements SystemRunner {
     // Send to worker and wait for result
     return new Promise<void>((resolve, reject) => {
       const key = `${system.id}-${tick}`;
-      this.pending.set(key, { resolve, reject });
+      this.pending.set(key, { resolve, reject, ctx, system });
       
       this.worker!.postMessage(message);
       
@@ -157,6 +216,7 @@ export class WorkerRunner implements SystemRunner {
       setTimeout(() => {
         if (this.pending.has(key)) {
           this.pending.delete(key);
+          console.warn(`[WorkerRunner] Timeout for ${system.id}, falling back to inline`);
           // Fallback to inline on timeout
           InlineRunner.exec(system, ctx);
           resolve();
@@ -176,8 +236,17 @@ export class WorkerRunner implements SystemRunner {
     const pending = this.pending.get(key);
     if (!pending) return;
     
+    // Store profiling stats
+    if (result.profiling) {
+      this.lastProfilingStats = result.profiling;
+    }
+    
+    // Apply deltas to the world
+    if (this.world && result.deltas.length > 0) {
+      this.applyDeltas(this.world, result.deltas);
+    }
+    
     this.pending.delete(key);
-    // Deltas would be applied here
     pending.resolve();
   }
 
@@ -230,6 +299,11 @@ export class WorkerRunner implements SystemRunner {
       const gravSource = world.get(eid, GravitySource);
       if (gravSource) {
         entity.gravitySource = { ...gravSource };
+      }
+      
+      // Check if motor-pinned (should skip physics)
+      if (world.has(eid, MotorPinned)) {
+        entity.motorPinned = true;
       }
       
       entities.push(entity);

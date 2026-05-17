@@ -77,7 +77,7 @@ import {
   type EntityId,
 } from "./ecs";
 import { createRuntimeObjectProxy, type RuntimeObjectProxyDeps } from "./oop/runtime-object-proxy";
-import { runPickupSweep, runTouchSweep, clearContact, type LegacyTouchContext } from "./objects/touch-system";
+import { runPickupSweep, runTouchSweep, clearContact, createTouchSystemContext, type LegacyTouchContext, type TouchSystemContext } from "./objects/touch-system";
 import { 
   initializeModuleScripts, 
   requireModule, 
@@ -86,6 +86,7 @@ import {
   type ModuleLoaderContext,
   type Script as ModuleScript,
 } from "./scripting/module-loader";
+import { Profiler, globalProfiler } from "./trace/profiler";
 
 // Helper functions (pure)
 function newId() { return `rt_${Math.random().toString(36).slice(2, 10)}`; }
@@ -196,6 +197,9 @@ export class GameRuntime {
   private _objectEvents = new Map<string, EventBus<Record<any, any>>>();
   private _playerContacts = new Set<string>();
   
+  // Touch system context - persists between frames for proper state machine
+  private _touchSystemContext: import("./objects/touch-system").TouchSystemContext | null = null;
+  
   // API cache
   private _api: GameAPI | null = null;
   
@@ -242,6 +246,9 @@ export class GameRuntime {
   gui = new Map<string, GuiElement>();
   guiVersion = 0;
   runService!: RunServiceAPI;
+  
+  // Performance profiler
+  profiler = globalProfiler;
   
   // Ragdoll state
   _ragdollPos: Record<string, Vec3> | null = null;
@@ -1025,6 +1032,10 @@ export class GameRuntime {
       
       this._all.delete(cid);
       clearContact(this._playerContacts, cid);
+      if (this._touchSystemContext) {
+        this._touchSystemContext.contacts.delete(cid);
+        this._touchSystemContext.bodies.delete(cid);
+      }
       this.emitObjectEvent(cid, "destroyed", []);
       this._objectEvents.delete(cid);
       this.hierarchy.remove(child);
@@ -1032,6 +1043,10 @@ export class GameRuntime {
     }
     this._all.delete(id);
     clearContact(this._playerContacts, id);
+    if (this._touchSystemContext) {
+      this._touchSystemContext.contacts.delete(id);
+      this._touchSystemContext.bodies.delete(id);
+    }
     this.emitObjectEvent(id, "destroyed", []);
     this._objectEvents.delete(id);
     this.hierarchy.remove(ro);
@@ -1633,7 +1648,9 @@ export class GameRuntime {
     this._tweens.clear(); 
     this.network.clear(); 
     this.hierarchy.clear(); 
-    this.tagManager.clear(); 
+    this.tagManager.clear();
+    this._touchSystemContext = null;
+    this._playerContacts.clear();
   }
 
   /** Delegates to the extracted animation/auto-properties module */
@@ -1670,25 +1687,43 @@ export class GameRuntime {
     runPickupSweep(this.player, this.objectList, ctx);
   }
 
-  /** Run touch sweep using extracted module */
+  /** Run touch sweep using extracted module with persistent context */
   private _runTouchSweep() {
-    const ctx: LegacyTouchContext = {
-      playerContacts: this._playerContacts,
-      emitObjectEvent: (id, event, args) => this.emitObjectEvent(id, event, args),
-      pushLog: (line) => this.pushLog(line),
-      removeObject: (id) => this.removeObject(id),
-      rebuildIndexes: () => this.rebuildIndexes(),
-      getObject: (id) => this._all.get(id),
-    };
+    // Create persistent touch system context on first use
+    if (!this._touchSystemContext) {
+      this._touchSystemContext = createTouchSystemContext();
+    }
+    
+    // Update context with current runtime references
+    const ctx = this._touchSystemContext;
+    ctx.emitObjectEvent = (id, event, args) => this.emitObjectEvent(id, event, args);
+    ctx.pushLog = (line) => this.pushLog(line);
+    ctx.removeObject = (id) => this.removeObject(id);
+    ctx.rebuildIndexes = () => this.rebuildIndexes();
+    ctx.getObject = (id) => this._all.get(id);
+    
     runTouchSweep(this.player, this.objectList, ctx);
+    
+    // Sync active contacts back to legacy playerContacts set for compatibility
+    this._playerContacts.clear();
+    for (const [id, contact] of ctx.contacts) {
+      if (contact.state === "active") {
+        this._playerContacts.add(id);
+      }
+    }
   }
 
   step(dt: number) {
     if (dt > 0.1) dt = 0.1;
     this.time += dt;
     const p = this.player;
+    const tickNum = Math.floor(this.time * 60);
+    
+    // Begin frame profiling
+    this.profiler.beginFrame(tickNum);
 
     // INPUT PHASE - emit key events for script handlers
+    this.profiler.begin("Input");
     for (const k in this.input.keys) {
       const isDown = !!this.input.keys[k];
       const wasDown = !!this._prevKeys[k];
@@ -1703,16 +1738,22 @@ export class GameRuntime {
       }
     }
     this._events.emit("input", [dt, this.time], (e, fn) => this.pushLog(`runService.input error: ${formatErr(e)}`));
+    this.profiler.end("Input");
 
     // ANIMATION PHASE - tweens managed by TweenManager for API compatibility
+    this.profiler.begin("Animation");
     this._tweens.step(dt);
     this._events.emit("animation", [dt, this.time], (e, fn) => this.pushLog(`runService.animation error: ${formatErr(e)}`));
+    this.profiler.end("Animation");
 
     // ECS PIPELINE - runs all simulation (animation, physics, collision, lifecycle)
     // This is now the single source of truth for game state
+    this.profiler.begin("ECS Pipeline");
     this.stepEcsPipeline(dt);
+    this.profiler.end("ECS Pipeline");
 
     // REPLICATION PHASE - network sync
+    this.profiler.begin("Network");
     this.network.step(dt, this.player, this.objectList, {
       t: this.time,
       moveX: this.input.moveX,
@@ -1722,12 +1763,15 @@ export class GameRuntime {
     });
     this._events.emit("replication", [dt, this.time], (e, fn) => this.pushLog(`runService.replication error: ${formatErr(e)}`));
     this._events.emit("physics", [dt, this.time], (e, fn) => this.pushLog(`runService.physics error: ${formatErr(e)}`));
+    this.profiler.end("Network");
 
     // POST-PHYSICS - touch events and motor attachment
+    this.profiler.begin("PostPhysics");
     this._runPickupSweep();
     this.applyMotors();
     this._updatePlayerAnimation();
     this._runTouchSweep();
+    this.profiler.end("PostPhysics");
 
     // Kill zone check
     if (!p.ragdoll && p.position.y < p.killY) {
@@ -1753,12 +1797,17 @@ export class GameRuntime {
     }
 
     // RENDER PHASE
+    this.profiler.begin("Render");
     this._events.emit("render", [dt, this.time], (e, fn) => this.pushLog(`runService.render error: ${formatErr(e)}`));
+    this.profiler.end("Render");
 
     // UPDATE PHASE
+    this.profiler.begin("Update");
     this._events.emit("update", [dt, this.time], (e, fn) => this.pushLog(`runService.update error: ${formatErr(e)}`));
+    this.profiler.end("Update");
 
     // Timers
+    this.profiler.begin("Timers");
     for (let i = this._timers.length - 1; i >= 0; i--) {
       const t = this._timers[i];
       if (this.time < t.nextAt) continue;
@@ -1766,10 +1815,14 @@ export class GameRuntime {
       if (t.once) { this._timers.splice(i, 1); }
       else { t.nextAt = this.time + t.interval; }
     }
+    this.profiler.end("Timers");
 
     // Snapshot keys for next frame
     for (const k in this.input.keys) this._prevKeys[k] = this.input.keys[k];
     this.input.jump = false;
+    
+    // End frame profiling
+    this.profiler.endFrame();
   }
 
   /** Delegates to the extracted physics/player-collision module */

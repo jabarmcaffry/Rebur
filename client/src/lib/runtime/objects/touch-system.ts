@@ -96,8 +96,8 @@ export interface TouchSystemConfig {
 
 const DEFAULT_CONFIG: TouchSystemConfig = {
   rateLimit: 50,        // 50ms between events
-  debounceFrames: 2,    // 2 frames to confirm touch
-  exitFrames: 3,        // 3 frames without contact to exit
+  debounceFrames: 1,    // 1 frame to confirm touch (instant)
+  exitFrames: 2,        // 2 frames without contact to exit
   sleepThreshold: 0.01, // Very low velocity
   sleepDelay: 60,       // 60 frames (~1 second at 60fps)
   maxEventsPerFrame: 10,
@@ -281,7 +281,8 @@ export function runTouchSweep(
   objectList: RuntimeObject[],
   ctx: TouchSystemContext | LegacyTouchContext
 ): void {
-  // Handle legacy context
+  // Handle legacy context - convert to TouchSystemContext
+  // Note: Legacy mode loses state between frames (known limitation)
   const isLegacy = 'playerContacts' in ctx;
   const touchCtx: TouchSystemContext = isLegacy ? fromLegacyContext(ctx) : ctx;
   
