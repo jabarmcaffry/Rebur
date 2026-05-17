@@ -87,6 +87,7 @@ import {
   type Script as ModuleScript,
 } from "./scripting/module-loader";
 import { Profiler, globalProfiler } from "./trace/profiler";
+import { NamespacedEventBus, globalObjectEventBus, type ObjectEventProxy } from "./events/namespaced-event-bus";
 
 // Helper functions (pure)
 function newId() { return `rt_${Math.random().toString(36).slice(2, 10)}`; }
@@ -194,6 +195,9 @@ export class GameRuntime {
   
   // Events
   private _events = new EventBus<EngineEvents>();
+  // Use global namespaced event bus for object events (memory efficient for 1000s of objects)
+  private _objectEventBus = globalObjectEventBus;
+  // Legacy map kept for backward compatibility during transition
   private _objectEvents = new Map<string, EventBus<Record<any, any>>>();
   private _playerContacts = new Set<string>();
   
@@ -653,17 +657,16 @@ export class GameRuntime {
           (target as any)[propName] = value;
           const propBus = propertyEvents.get(propName);
           if (propBus) propBus.emit("changed", [propName, value, oldValue]);
-          const generalBus = this._objectEvents.get(id);
-          if (generalBus) generalBus.emit("changed", [propName, value, oldValue]);
+          // Emit on namespaced bus
+          this._objectEventBus.emit(id, "propertyChanged" as any, [propName, value, oldValue]);
         }
         return true;
       }
     });
 
     proxy.on = (event, fn) => {
-      let bus = this._objectEvents.get(id);
-      if (!bus) { bus = new EventBus(); this._objectEvents.set(id, bus); }
-      const disconnect = bus.on(event as any, fn as any);
+      // Use namespaced event bus (primary path - memory efficient)
+      const disconnect = this._objectEventBus.on(id, event as any, fn as any);
       cleanupSet.add(disconnect);
       return () => {
         disconnect();
@@ -671,7 +674,7 @@ export class GameRuntime {
       };
     };
     proxy.off = (event, fn) => {
-      this._objectEvents.get(id)?.off(event as any, fn as any);
+      this._objectEventBus.off(id, event as any, fn as any);
     };
     
     // Property changed signal - camelCase API (preferred)
@@ -699,8 +702,8 @@ export class GameRuntime {
       const old = attributes.get(key);
       if (old !== value) {
         attributes.set(key, value);
-        const generalBus = this._objectEvents.get(id);
-        if (generalBus) generalBus.emit("changed", [`Attribute.${key}`, value, old]);
+        // Emit on namespaced bus
+        this._objectEventBus.emit(id, "propertyChanged" as any, [`Attribute.${key}`, value, old]);
       }
     };
     proxy.getAttribute = (key: string) => attributes.get(key);
@@ -790,9 +793,14 @@ export class GameRuntime {
   }
 
   private emitObjectEvent(id: string, event: any, args: any[]) {
-    const bus = this._objectEvents.get(id);
-    if (!bus) return;
-    bus.emit(event, args, (e, fn) => this.pushLog(`obj.on("${event}") error: ${formatErr(e)}`));
+    // Use namespaced event bus (primary path - memory efficient)
+    this._objectEventBus.emit(id, event, args, (e, fn) => this.pushLog(`obj.on("${event}") error: ${formatErr(e)}`));
+    
+    // Also emit on legacy bus for backward compatibility
+    const legacyBus = this._objectEvents.get(id);
+    if (legacyBus) {
+      legacyBus.emit(event, args, (e, fn) => this.pushLog(`obj.on("${event}") error: ${formatErr(e)}`));
+    }
   }
 
   private createInternal(opts: any): RuntimeObject {
@@ -1037,6 +1045,7 @@ export class GameRuntime {
         this._touchSystemContext.bodies.delete(cid);
       }
       this.emitObjectEvent(cid, "destroyed", []);
+      this._objectEventBus.clearObject(cid);
       this._objectEvents.delete(cid);
       this.hierarchy.remove(child);
       this._events.emit("objectRemoved", [child]);
@@ -1048,6 +1057,7 @@ export class GameRuntime {
       this._touchSystemContext.bodies.delete(id);
     }
     this.emitObjectEvent(id, "destroyed", []);
+    this._objectEventBus.clearObject(id);
     this._objectEvents.delete(id);
     this.hierarchy.remove(ro);
     this._events.emit("objectRemoved", [ro]);
@@ -1649,6 +1659,7 @@ export class GameRuntime {
     this.network.clear(); 
     this.hierarchy.clear(); 
     this.tagManager.clear();
+    this._objectEventBus.clear();
     this._touchSystemContext = null;
     this._playerContacts.clear();
   }
