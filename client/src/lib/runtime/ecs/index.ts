@@ -6,7 +6,19 @@
  * The legacy mutation paths have been removed.
  */
 export { World, defineComponent, type EntityId, type ComponentDef } from "./world";
-export { defineSystem, Scheduler, type SystemDef, type SystemContext } from "./system";
+export { defineSystem, Scheduler, InlineRunner, type SystemDef, type SystemContext, type SystemRunner } from "./system";
+export * from "./components";
+
+// Worker runner for parallel system execution
+export { 
+  WorkerRunner, 
+  createPhysicsWorkerRunner,
+  type WorkerRunnerOptions,
+  type WorkerMessage,
+  type WorkerResult,
+  type SerializedEntity,
+  type EntityDelta,
+} from "./worker-runner";
 export * from "./components";
 
 // Systems - in fixed execution order

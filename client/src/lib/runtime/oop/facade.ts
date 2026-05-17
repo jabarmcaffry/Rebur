@@ -27,3 +27,11 @@ export {
   type ObjectProxyDeps,
   type GameProxyDeps,
 } from "./proxies";
+
+// Re-export the new RuntimeObject proxy for ECS-backed objects
+export {
+  createRuntimeObjectProxy,
+  readEntitySnapshot,
+  type RuntimeObjectProxyDeps,
+  type EntityRenderSnapshot,
+} from "./runtime-object-proxy";

@@ -76,6 +76,7 @@ import {
   getLatestSnapshot,
   type EntityId,
 } from "./ecs";
+import { createRuntimeObjectProxy, type RuntimeObjectProxyDeps } from "./oop/runtime-object-proxy";
 import { runPickupSweep, runTouchSweep, clearContact, type LegacyTouchContext } from "./objects/touch-system";
 import { 
   initializeModuleScripts, 
@@ -250,7 +251,14 @@ export class GameRuntime {
   // ECS Pipeline - the canonical simulation path
   private _ecsPipeline: PipelineHandles | null = null;
   private _ecsEntityMap = new Map<string, EntityId>(); // legacyId -> EntityId
+  private _reverseEntityMap = new Map<number, string>(); // EntityId -> legacyId
   private _playerEntityId: EntityId | null = null;
+  /** Track which entities were modified via RuntimeObject proxies this tick */
+  private _dirtyEntities = new Set<EntityId>();
+  /** When true, RuntimeObjects are thin proxies reading from ECS (no dual sync) */
+  private _useProxyMode = true;
+  /** Initial game object snapshot for ECS initialization */
+  private _initialSnapshot: GameObject[] = [];
 
   constructor(snap: GameObject[], scripts: Script[], username: string, avatarColor: string) {
     // Initialize input
@@ -268,7 +276,12 @@ export class GameRuntime {
     // Initialize module loader context
     this.moduleLoaderCtx = createModuleLoaderContext((line) => this.pushLog(line));
 
-    // Load objects from snapshot
+    // Store initial snapshot for ECS initialization in start()
+    // We still need to create legacy RuntimeObjects for backwards compatibility
+    // during the constructor phase, but they will be replaced with proxies in start()
+    this._initialSnapshot = snap;
+    
+    // Load objects from snapshot (legacy mode for constructor phase)
     for (const o of snap) {
       const props = readProperties(o);
       const container = this.normalizeContainer(o.container);
@@ -398,6 +411,45 @@ export class GameRuntime {
     const motor = this.motorState.get(slot);
     if (!motor) return null;
     return { slot, offset: motor.offset, rotation: motor.rotation };
+  }
+
+  /**
+   * Get the ECS world for direct access.
+   * Useful for rendering with interpolation or advanced queries.
+   */
+  getEcsWorld(): World | null {
+    return this._ecsPipeline?.server.world ?? null;
+  }
+
+  /**
+   * Get the client view for snapshot interpolation.
+   * Renderers can use this for smooth visual interpolation between server ticks.
+   */
+  getClientView() {
+    return this._ecsPipeline?.client ?? null;
+  }
+
+  /**
+   * Get the ECS entity ID for a legacy object ID.
+   * Returns null if the object doesn't exist in ECS.
+   */
+  getEntityId(legacyId: string): EntityId | null {
+    return this._ecsEntityMap.get(legacyId) ?? null;
+  }
+
+  /**
+   * Get the legacy object ID for an ECS entity ID.
+   * Returns null if the entity doesn't map to a legacy object.
+   */
+  getLegacyId(entityId: number): string | null {
+    return this._reverseEntityMap.get(entityId) ?? null;
+  }
+
+  /**
+   * Check if running in ECS proxy mode (no dual sync).
+   */
+  isProxyMode(): boolean {
+    return this._useProxyMode && this._ecsPipeline !== null;
   }
 
   private mountPlayerMotors() {
@@ -880,6 +932,9 @@ export class GameRuntime {
   /**
    * Initialize the ECS pipeline and sync all existing objects into the ECS world.
    * This is the canonical simulation path - all game state flows through ECS.
+   * 
+   * In proxy mode, RuntimeObjects become thin proxies that read directly from ECS,
+   * eliminating the dual-sync overhead where we were copying data every frame.
    */
   initEcsPipeline(): void {
     if (this._ecsPipeline) return; // Already initialized
@@ -948,12 +1003,106 @@ export class GameRuntime {
       sprinting: false,
     });
     
-    // Sync all existing RuntimeObjects into the ECS world
-    for (const ro of this._all.values()) {
-      this.syncObjectToEcs(ro);
+    // Create ECS entities for all objects and replace with proxy RuntimeObjects
+    if (this._useProxyMode) {
+      this.initializeEcsProxies(world);
+    } else {
+      // Legacy mode: sync existing RuntimeObjects to ECS
+      for (const ro of this._all.values()) {
+        this.syncObjectToEcs(ro);
+      }
     }
     
-    this.pushLog("[ECS] Pipeline initialized with " + this._ecsEntityMap.size + " objects + 1 player");
+    this.pushLog("[ECS] Pipeline initialized with " + this._ecsEntityMap.size + " objects + 1 player" + (this._useProxyMode ? " (proxy mode)" : ""));
+  }
+
+  /**
+   * Initialize ECS entities and replace RuntimeObjects with thin proxies.
+   * This eliminates the dual-sync overhead by making RuntimeObjects read directly from ECS.
+   */
+  private initializeEcsProxies(world: World): void {
+    // Create proxy dependencies
+    const proxyDeps: Omit<RuntimeObjectProxyDeps, 'entityId' | 'legacyId' | 'name' | 'container' | 'type' | 'primitiveType'> = {
+      world,
+      hierarchy: this.hierarchy,
+      getObjectById: (id: string) => this._all.get(id),
+      getObjectEventBus: (id: string) => {
+        let bus = this._objectEvents.get(id);
+        if (!bus) {
+          bus = new EventBus();
+          this._objectEvents.set(id, bus);
+        }
+        return bus;
+      },
+      pushLog: (line: string) => this.pushLog(line),
+      markDirty: (entityId: EntityId) => this._dirtyEntities.add(entityId),
+    };
+
+    // Iterate over existing RuntimeObjects and create ECS entities + proxy replacements
+    for (const [legacyId, oldRo] of this._all.entries()) {
+      // Create ECS entity
+      const eid = world.create();
+      this._ecsEntityMap.set(legacyId, eid);
+      this._reverseEntityMap.set(eid as unknown as number, legacyId);
+
+      // Initialize ECS components from the old RuntimeObject's data
+      world.set(eid, Transform, {
+        position: { ...oldRo.position },
+        rotation: { ...oldRo.rotation },
+        scale: { ...oldRo.scale },
+      });
+      world.set(eid, Velocity, { ...oldRo.velocity });
+      world.set(eid, Visual, {
+        color: oldRo.color,
+        visible: oldRo.visible,
+        transparency: oldRo.transparency,
+        primitiveType: oldRo.primitiveType,
+      });
+      world.set(eid, Physics, {
+        anchored: oldRo.anchored,
+        canCollide: oldRo.canCollide,
+        mass: oldRo.mass,
+        friction: oldRo.friction,
+        gravity: oldRo.gravity,
+      });
+      if (oldRo.autoRotateY !== undefined || oldRo.autoBob || oldRo.autoSpin || oldRo.autoMove || oldRo.autoFollow) {
+        world.set(eid, AutoBehavior, {
+          autoRotateY: oldRo.autoRotateY,
+          autoBob: oldRo.autoBob,
+          autoSpin: oldRo.autoSpin,
+          autoMove: oldRo.autoMove,
+          autoFollow: oldRo.autoFollow,
+        });
+      }
+      world.set(eid, LegacyHandle, {
+        legacyId: legacyId,
+        name: oldRo.name,
+      });
+
+      // Create proxy RuntimeObject that reads from ECS
+      const proxyRo = createRuntimeObjectProxy({
+        ...proxyDeps,
+        entityId: eid,
+        legacyId: legacyId,
+        name: oldRo.name,
+        container: oldRo.container,
+        type: oldRo.type,
+        primitiveType: oldRo.primitiveType,
+      });
+
+      // Preserve any special properties from the old object
+      if (oldRo.isPickup) (proxyRo as any).isPickup = oldRo.isPickup;
+      if (oldRo.pickupName) (proxyRo as any).pickupName = oldRo.pickupName;
+      if (oldRo.pickupData) (proxyRo as any).pickupData = oldRo.pickupData;
+      if (oldRo.modelId) (proxyRo as any).modelId = oldRo.modelId;
+      if (oldRo.modelUrl) (proxyRo as any).modelUrl = oldRo.modelUrl;
+
+      // Replace the old RuntimeObject with the proxy
+      this._all.set(legacyId, proxyRo);
+    }
+
+    // Rebuild indexes with the new proxy objects
+    this.rebuildIndexes();
   }
 
   /**
@@ -1019,10 +1168,13 @@ export class GameRuntime {
   }
 
   /**
-   * Sync ECS state back to RuntimeObjects and Player after a tick.
-   * Reads directly from the ECS world components.
+   * Sync ECS state back to the RuntimePlayer after a tick.
+   * 
+   * In proxy mode, RuntimeObjects read directly from ECS so no sync is needed.
+   * Only the player needs syncing because RuntimePlayer is still a legacy object
+   * for script compatibility (player.position = ... style writes).
    */
-  private syncEcsToObjects(): void {
+  private syncPlayerFromEcs(): void {
     if (!this._ecsPipeline) return;
     
     const world = this._ecsPipeline.server.world;
@@ -1059,7 +1211,28 @@ export class GameRuntime {
       }
     }
     
-    // Sync all RuntimeObjects from ECS
+    // Clear dirty entity set for next tick
+    this._dirtyEntities.clear();
+  }
+
+  /**
+   * Legacy sync method - kept for backwards compatibility when proxy mode is disabled.
+   * @deprecated Use proxy mode instead for better performance.
+   */
+  private syncEcsToObjects(): void {
+    if (!this._ecsPipeline) return;
+    if (this._useProxyMode) {
+      // In proxy mode, only sync player
+      this.syncPlayerFromEcs();
+      return;
+    }
+    
+    const world = this._ecsPipeline.server.world;
+    
+    // Sync player state from ECS
+    this.syncPlayerFromEcs();
+    
+    // Legacy mode: Sync all RuntimeObjects from ECS
     for (const [legacyId, eid] of this._ecsEntityMap) {
       const ro = this._all.get(legacyId);
       if (!ro) continue;
