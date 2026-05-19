@@ -15,7 +15,13 @@ import { GameRuntime } from "@/lib/runtime";
  * Always writes the resulting forward vector back to `runtime.cameraForward`
  * so movement input stays camera-relative.
  */
-export default function ChaseCameraRig({ runtime }: { runtime: GameRuntime }) {
+export default function ChaseCameraRig({
+  runtime,
+  shiftLock = false,
+}: {
+  runtime: GameRuntime;
+  shiftLock?: boolean;
+}) {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
   const lastPlayerPos = useRef(new THREE.Vector3());
@@ -73,9 +79,22 @@ export default function ChaseCameraRig({ runtime }: { runtime: GameRuntime }) {
         ctl.minDistance = cfg.minDistance;
         ctl.maxDistance = cfg.maxDistance;
         ctl.rotateSpeed = cfg.sensitivity;
-        ctl.enableRotate = !(cfg.lockYaw && cfg.lockPitch);
+        ctl.enableRotate = !(cfg.lockYaw && cfg.lockPitch) && !shiftLock;
         ctl.enabled = (cfg.mode as string) !== "firstPerson";
         ctl.update();
+
+        // Shift lock: force camera directly behind the player
+        if (shiftLock && p.rotation) {
+          const yaw = p.rotation.y;
+          const dist = cfg.distance ?? 6;
+          const targetPos = new THREE.Vector3(
+            head.x - Math.sin(yaw) * dist,
+            head.y + dist * 0.35,
+            head.z - Math.cos(yaw) * dist,
+          );
+          camera.position.lerp(targetPos, 0.12);
+          ctl.update();
+        }
       }
     }
 

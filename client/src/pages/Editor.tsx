@@ -58,6 +58,7 @@ import PlayMode from "@/components/PlayMode";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
+import { configureMonacoForEngine, ENGINE_EDITOR_OPTIONS } from "@/lib/runtime/scripting/monaco-config";
 
 type TransformMode = "translate" | "rotate" | "scale";
 
@@ -1599,19 +1600,13 @@ export default function EditorPage() {
                           height="100%"
                           defaultLanguage="javascript"
                           language="javascript"
-                          theme="vs-dark"
                           value={scriptDraft}
                           onChange={(v) => setScriptDraft(v ?? "")}
+                          beforeMount={(monaco) => configureMonacoForEngine(monaco)}
                           onMount={(editor) => { monacoRef.current = editor; }}
                           options={{
-                            minimap: { enabled: false },
+                            ...ENGINE_EDITOR_OPTIONS,
                             fontSize: editorFontSize,
-                            fontFamily: "JetBrains Mono, monospace",
-                            scrollBeyondLastLine: false,
-                            tabSize: 2,
-                            automaticLayout: true,
-                            wordWrap: "on",
-                            quickSuggestions: { other: true, comments: false, strings: false },
                           }}
                         />
                       </div>

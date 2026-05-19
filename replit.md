@@ -51,7 +51,15 @@ Both the Editor viewport and `PlayMode.tsx` filter `renderableObjects` to **only
 - When WebGL is **not** available, both surfaces fall back to **`client/src/components/SVGScene.tsx`**, which builds a Three.js scene and renders it with the official `SVGRenderer` from `three/examples/jsm/renderers/SVGRenderer`. This means scenes still render (as inline SVG paths/polygons) on browsers / contexts without WebGL, and a small "SVG fallback (no WebGL)" badge is shown.
 - `SVGScene` supports drag-to-orbit, wheel-to-zoom, click-to-select, syncs meshes with the latest `objects` prop each frame, and (in Play mode) reads positions from the `GameRuntime` to animate the avatar and scripted objects.
 
-### Play Mode (`client/src/components/PlayMode.tsx`)
+### Play Mode HUD (`client/src/components/PlayMode.tsx`)
+Rebuilt with a Roblox-style top-left menu system:
+- **Menu button** (top-left, shows username) opens a dropdown with: Resume, Reset Avatar, Settings, Show Console, Leave.
+- **Settings sub-panel**: Shift Lock toggle (locks camera behind player) and FPS Counter toggle.
+- **FPS counter** (top-right, when enabled): live frames-per-second display.
+- **Chat panel** (/ key or Chat button): message input + scrollable history. Messages ghost in the bottom-left when chat is closed.
+- **Console output** is color-coded: red for errors, yellow for warnings, green for normal output.
+
+### Play Mode Canvas (`client/src/components/PlayMode.tsx`)
 - Full-screen overlay that runs the user's game.
 - Spawns a personal **avatar** at the SpawnLocation (or origin if none): torso (capsule), head (sphere), eyes, smile, hair cap, swinging arms (with hands) and legs that animate based on horizontal velocity. While `player.flying` is true the avatar gently bobs.
 - **Chase camera** (`ChaseCameraRig`) follows both the player's translation **and** their up vector — each frame it rotates the camera's offset around the player by the quaternion that takes the previous up to the current up, so the camera-to-player relationship looks identical regardless of gravity orientation (walking around a spherical planet, flipped gravity, etc). Yaw is intentionally **not** followed (would feedback-loop with camera-relative movement); horizon level is smoothed by lerping `camera.up`.
@@ -61,6 +69,18 @@ Both the Editor viewport and `PlayMode.tsx` filter `renderableObjects` to **only
 - **Console** panel toggleable from the HUD shows everything emitted by `game.log(...)`.
 - The R3F `Canvas` is wrapped in its own error boundary so a missing WebGL context shows a fallback message instead of crashing the page.
 - **The script game-loop runs in a standalone `requestAnimationFrame` loop**, independent of the Three.js Canvas, so user scripts execute (and the console populates) even when WebGL is unavailable.
+
+### Event System (`client/src/lib/runtime/events/namespaced-event-bus.ts`)
+A single shared bus keyed by `"objectId:eventName"` handles all per-object events. Two tiers:
+- **Engine-internal events** (`touched`, `untouched`, `touchStarted`, `touchEnded`, `clicked`, `destroyed`, `woke`, `slept`, `collisionStarted`, `collisionEnded`, `propertyChanged`, `changed`) — fired only by the engine. If a script calls `obj.emit("touched", ...)` the engine logs a clear error and returns `false`.
+- **Custom events** — any other name. Scripts call `obj.emit("myEvent", ...args)` freely and `obj.on("myEvent", fn)` to listen. Returns `true` on success.
+- `obj.on(event, fn)` works for both tiers (internal and custom). Returns an unsubscribe function.
+
+### Monaco Editor (`client/src/lib/runtime/scripting/monaco-config.ts`)
+- Built-in TypeScript/JavaScript IntelliSense is **fully disabled** (`noLib: true`, no semantic validation) — eliminates confusing suggestions from standard library types.
+- A **custom CompletionItemProvider** covers 80+ engine API items with snippet inserts, parameter hints, and context-aware dotted member completions.
+- A **HoverProvider** shows API documentation on mouse-over.
+- `ENGINE_EDITOR_OPTIONS` is the canonical options object spread into every MonacoEditor instance. Editor.tsx calls `configureMonacoForEngine(monaco)` in `beforeMount`.
 
 ### Game Runtime (`client/src/lib/gameRuntime.ts`) — event-first
 - `GameRuntime` class instantiates a JS sandbox per Play session.

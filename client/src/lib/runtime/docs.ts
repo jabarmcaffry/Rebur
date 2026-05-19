@@ -1,291 +1,490 @@
-// docs.ts — DEFAULT_SCRIPT + SCRIPTING_DOCS
+// docs.ts — DEFAULT_SCRIPT + full SCRIPTING_DOCS
 
-// Default code for brand new scripts — just a helpful comment pointing to docs.
-// Subsequent scripts created by the user will be empty.
-export const DEFAULT_SCRIPT = `// Click the Docs button (top bar) for the full scripting reference.
-// Your code runs once when Play starts. Use events for ongoing logic.
+export const DEFAULT_SCRIPT = `// Script runs once when Play starts.
+// Use events for ongoing logic.
+// Press Docs in the toolbar for the full API reference.
 `;
 
-export const SCRIPTING_DOCS = `# Rebur Engine — Scripting Reference
+export const SCRIPTING_DOCS = `# Rebur Engine — Complete Reference
 
-Welcome! This guide covers everything you need to script games in the Rebur engine.
-The engine handles physics, rendering, collisions, input and networking at ~60 fps.
-**Your scripts handle game logic.**
-
----
-
-## Quick Start
-
-Scripts run in a sandbox with the full API available as globals. Here's a minimal example:
-
-\`\`\`js
-// Create a spinning coin
-const coin = create({
-  primitiveType: "sphere",
-  position: { x: 2, y: 2, z: 0 },
-  color: "#ffd700",
-});
-coin.autoRotateY = 2;
-
-// Collect it on touch
-coin.on("touched", (other) => {
-  if (other === player) {
-    player.inventory.add("Coin");
-    destroy(coin);
-  }
-});
-\`\`\`
+This guide covers **everything** in the Rebur Engine: the editor interface, hierarchy, properties, containers, scripting API, events, physics, GUI, networking, and more.
 
 ---
 
 ## Table of Contents
 
-1. [Globals](#globals)
-2. [Containers](#containers)
-3. [Creating Objects](#creating-objects)
-4. [Object Properties](#object-properties)
-5. [Object Events](#object-events)
-6. [Auto-Animation](#auto-animation)
-7. [Player](#player)
-8. [Inventory](#inventory)
-9. [Camera](#camera)
-10. [Input](#input)
-11. [Game Loop (runService)](#game-loop-runservice)
-12. [Timing Utilities](#timing-utilities)
-13. [World Events](#world-events)
-14. [Tweens](#tweens)
-15. [Raycasting](#raycasting)
-16. [State](#state)
-17. [Tags](#tags)
-18. [GUI](#gui)
-19. [Object-Based GUI](#object-based-gui)
-20. [3D Models](#3d-models)
-21. [Math Library](#math-library)
-22. [Physics Events](#physics-events)
-23. [Networking](#networking)
-24. [Tasks](#tasks)
-25. [Modules](#modules)
-26. [Utilities](#utilities)
-27. [Debug](#debug)
-28. [Advanced: Reactive Primitives](#advanced-reactive-primitives)
+1. [Editor Interface](#editor-interface)
+2. [Hierarchy Panel](#hierarchy-panel)
+3. [Containers](#containers)
+4. [Properties Panel](#properties-panel)
+5. [Play Mode HUD](#play-mode-hud)
+6. [Scripting — Quick Start](#scripting--quick-start)
+7. [Globals Reference](#globals-reference)
+8. [Containers in Scripts](#containers-in-scripts)
+9. [Creating & Destroying Objects](#creating--destroying-objects)
+10. [Object Properties](#object-properties)
+11. [Object Events](#object-events)
+12. [Custom Events (obj.emit)](#custom-events-objemit)
+13. [Auto-Animation](#auto-animation)
+14. [Player](#player)
+15. [Inventory](#inventory)
+16. [Camera](#camera)
+17. [Input](#input)
+18. [Game Loop (runService)](#game-loop-runservice)
+19. [Timing Utilities](#timing-utilities)
+20. [World Events](#world-events)
+21. [State](#state)
+22. [Tags](#tags)
+23. [GUI](#gui)
+24. [Tweens](#tweens)
+25. [Raycasting](#raycasting)
+26. [Physics](#physics)
+27. [Networking](#networking)
+28. [Tasks](#tasks)
+29. [Modules (require)](#modules-require)
+30. [Debugging](#debugging)
+31. [Math Library](#math-library)
+32. [Advanced Classes](#advanced-classes)
 
 ---
 
-## Globals
+## Editor Interface
 
-All of these are available directly in your script (no imports needed):
+The editor is split into four main zones:
+
+### Toolbar (top)
+- **Add Primitive**: Cube, Sphere, Cylinder, Plane — adds to Workspace
+- **Add Light**: Adds a point light to Lighting
+- **Transform modes** (desktop): Translate / Rotate / Scale gizmo
+- **Play ▶**: Saves pending script edits, then launches Play Mode
+- **Docs**: Opens this reference panel
+- **Snippets**: Popover with ready-to-paste code blocks
+
+### Left Panel — Hierarchy
+Tree view of all containers and objects. See [Hierarchy Panel](#hierarchy-panel).
+
+### Center Panel — Scene / Scripts
+- **Scene tab**: 3D viewport with gizmo, orbit, and transform controls
+- **Scripts tab**: Monaco code editor (JS). Script selection is driven from the Hierarchy.
+
+### Right Panel — Properties
+Shows and edits properties of the selected object. See [Properties Panel](#properties-panel).
+
+### Mobile layout
+On screens narrower than 768px the left and right panels collapse into Sheet drawers triggered by the **☰ Menu** and **⊞ Properties** buttons in the toolbar. Transform-mode buttons are hidden.
+
+---
+
+## Hierarchy Panel
+
+The Hierarchy mirrors **Roblox Studio's Explorer** — every service container is a top-level node and objects live inside them.
+
+### Controls
+| Action | How |
+|--------|-----|
+| **Select an object** | Click its row |
+| **Select a script** | Click its script row → switches center pane to Scripts tab |
+| **Add a script to a container** | Click the **+** button on the container header |
+| **Add a script to an object** | Click the **+** button next to the object row |
+| **Expand / collapse** | Click the **▶ / ▼** chevron |
+| **Drag to reparent** | Drag an object row onto another object or container |
+
+### Script types per container
+| Container | Default script type |
+|-----------|---------------------|
+| Workspace | Script |
+| Lighting | Script |
+| Players | LocalScript |
+| ServerScriptService | Script |
+| StarterPlayer | LocalScript |
+| ReplicatedStorage | ModuleScript |
+
+---
+
+## Containers
+
+Every object **must** belong to exactly one container. Objects cannot exist outside a container.
+
+| Container | Purpose | Rendered at runtime? |
+|-----------|---------|----------------------|
+| **Workspace** | Live 3D world — rendered, simulated, collidable | ✅ Yes |
+| **Lighting** | Lights and atmosphere — rendered but not physics-simulated | ✅ Yes |
+| **Players** | Player avatars. At runtime, the active player is listed here | ❌ No (virtual) |
+| **ServerScriptService** | Server-only scripts. Not rendered | ❌ No |
+| **StarterPlayer** | Scripts/objects cloned to each player on join | ❌ No |
+| **ReplicatedStorage** | Templates for \`spawn()\` + ModuleScripts | ❌ No |
+
+> **Runtime note**: When Play starts, the active player appears in both **Players** (as a virtual entry) and **Workspace** (as a physical avatar). This mirrors how Roblox works.
+
+---
+
+## Properties Panel
+
+Select any object to inspect and edit its properties.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| **Name** | string | Object display name. Must be unique within its container for reliable \`find()\` results |
+| **Color** | hex | Surface color |
+| **Container** | dropdown | Which service container this object lives in |
+| **Position X/Y/Z** | number | World position of the object's center |
+| **Rotation X/Y/Z** | number | Euler rotation in radians |
+| **Scale X/Y/Z** | number | Size multiplier (1 = default unit size) |
+| **Anchored** | boolean | If true, physics/gravity won't move this object |
+| **Can Collide** | boolean | If false, other objects pass through this one |
+| **Transparency** | 0–1 | 0 = fully opaque, 1 = invisible |
+| **Mass** | number | Affects physics interactions |
+| **Friction** | 0–1 | Surface friction |
+| **Delete** | button | Permanently removes the object |
+
+---
+
+## Play Mode HUD
+
+When you press **Play ▶** the editor hides and the game fills the screen.
+
+### Top-left menu (☰)
+Click the hamburger button (showing your username) to open the game menu:
+
+| Option | Description |
+|--------|-------------|
+| **Resume** | Close the menu and return to the game |
+| **Reset Avatar** | Respawn the player at the spawn point |
+| **Settings** | Opens the settings sub-panel |
+| **Show Console** | Toggle the script output panel |
+| **Leave** | Stop playing and return to the editor |
+
+### Settings
+| Setting | Description |
+|---------|-------------|
+| **Shift Lock** | Lock the camera behind the player (camera yaw follows movement direction) |
+| **Show FPS** | Display a live frames-per-second counter in the top-right corner |
+
+### Chat
+Click the **Chat** button or press **/** to open the chat panel. Messages appear in the bottom-left. Press **Enter** to send, **Escape** to close.
+
+### Controls
+| Input | Action |
+|-------|--------|
+| WASD / Arrow Keys | Move |
+| Space | Jump |
+| Shift | Run (hold) |
+| Mouse drag | Look around |
+| Scroll | Zoom (third-person) |
+| **/** | Open chat |
+| **Esc** | Open menu |
+| **Mobile left joystick** | Move |
+| **Mobile JUMP button** | Jump |
+
+---
+
+## Scripting — Quick Start
+
+Scripts run **once** when Play starts. Register event listeners for ongoing logic.
+
+\`\`\`js
+// Spinning coin that you can collect
+const coin = create({
+  name: "Coin",
+  primitiveType: "sphere",
+  position: { x: 3, y: 2, z: 0 },
+  color: "#fbbf24",
+  scale: { x: 0.5, y: 0.5, z: 0.5 },
+});
+coin.autoRotateY = 3;
+
+coin.on("touched", () => {
+  player.inventory.add("Coin", { count: 1 });
+  destroy(coin);
+  log("Collected a coin! Total:", player.inventory.get("Coin")?.count);
+});
+\`\`\`
+
+---
+
+## Globals Reference
+
+All of these are available directly — no imports needed:
 
 | Category | Globals |
 |----------|---------|
 | **Containers** | \`workspace\`, \`lighting\`, \`players\`, \`serverScriptService\`, \`starterPlayer\`, \`replicatedStorage\` |
 | **Objects** | \`create\`, \`destroy\`, \`spawn\`, \`find\` |
 | **Player** | \`player\` |
-| **Input** | \`keyboard\`, \`mouse\` |
-| **Systems** | \`camera\`, \`world\`, \`runService\`, \`network\`, \`state\`, \`tags\`, \`gui\` |
-| **Timing** | \`time\`, \`dt\`, \`now\`, \`every\`, \`after\`, \`wait\`, \`task\` |
+| **Input** | \`keyboard\`, \`mouse\`, \`onKey\` |
+| **Systems** | \`camera\`, \`world\`, \`runService\`, \`network\`, \`state\`, \`tags\`, \`gui\`, \`physics\` |
+| **Timing** | \`time\`, \`dt\`, \`now\`, \`every\`, \`after\`, \`wait\`, \`onUpdate\`, \`task\` |
 | **Animation** | \`tween\` |
 | **Physics** | \`raycast\` |
-| **Math** | \`random\`, \`randInt\`, \`pick\`, \`dist\`, \`lerp\`, \`clamp\`, \`Vector3\`, \`Quaternion\`, \`CFrame\`, \`rad\`, \`deg\` |
+| **Math** | \`random\`, \`randInt\`, \`pick\`, \`dist\`, \`lerp\`, \`clamp\` |
 | **Modules** | \`require\`, \`exports\`, \`module\` |
 | **Debug** | \`log\`, \`debug\` |
 | **Classes** | \`Emitter\`, \`Callable\`, \`Class\`, \`weakRef\`, \`WeakTable\` |
-| **Models** | \`models\` (registry for 3D model loading) |
 
 ---
 
-## Containers
+## Containers in Scripts
 
-Containers organize objects in the game world:
+\`\`\`js
+// Access by name (fast — O(1) lookup)
+const baseplate = workspace.Baseplate;
+const sun = lighting.Sun;
 
-| Container | Purpose |
-|-----------|---------|
-| \`workspace\` | Live 3D world - objects here are simulated and rendered |
-| \`lighting\` | Lights and atmosphere settings |
-| \`players\` | Player avatars |
-| \`replicatedStorage\` | Templates and ModuleScripts (shared, not rendered) |
-| \`serverScriptService\` | Server-only scripts |
-| \`starterPlayer\` | Per-player scripts/objects |
+// Search all containers
+const coin = find("Coin");
 
-Access objects by name: \`workspace.Baseplate\`, \`replicatedStorage.CoinTemplate\`
+// Iterate all Workspace objects
+for (const name in workspace) {
+  const obj = workspace[name];
+  log(obj.name, obj.position.y);
+}
+\`\`\`
 
-Use \`find("name")\` to search all containers.
+At runtime, \`players\` contains the active player:
+\`\`\`js
+// The local player is always in players
+const me = players[player.username]; // same as the player global
+\`\`\`
 
 ---
 
-## Creating Objects
+## Creating & Destroying Objects
 
 \`\`\`js
 // Create a new object
 const box = create({
-  name: "MyBox",                   // optional name
+  name: "Box",
   primitiveType: "cube",           // "cube" | "sphere" | "cylinder" | "plane"
-  position: { x: 0, y: 1, z: 0 },  // world position (center)
-  rotation: { x: 0, y: 0, z: 0 },  // radians
-  scale: { x: 1, y: 1, z: 1 },     // size multiplier
-  color: "#ff8844",                // hex color
-  anchored: true,                  // if false, affected by gravity
-  canCollide: true,                // if false, other objects pass through
-  container: "Workspace",          // where to place it
+  position: { x: 0, y: 1, z: 0 },
+  rotation: { x: 0, y: 0, z: 0 }, // radians
+  scale: { x: 1, y: 1, z: 1 },
+  color: "#ff8844",
+  anchored: false,
+  canCollide: true,
+  container: "Workspace",          // required — objects must be in a container
   parent: null,                    // optional parent object
 });
 
-// Clone from a template in ReplicatedStorage
+// Clone from a ReplicatedStorage template
 const enemy = spawn("EnemyTemplate", {
   position: { x: 5, y: 1, z: 0 },
+  color: "#ff4444",
 });
 
-// Find existing object
-const baseplate = find("Baseplate");
+// Find an existing object (searches all containers)
+const obj = find("BasePlate");
 
-// Destroy an object
-destroy(box);           // by reference
-destroy("MyBox");       // by name
+// Destroy
+destroy(box);        // by reference
+destroy("Box");      // by name
 \`\`\`
 
 ---
 
 ## Object Properties
 
-All objects have these properties you can read and write:
-
 \`\`\`js
 // Transform
-obj.position    // { x, y, z } - center position
-obj.rotation    // { x, y, z } - radians
-obj.scale       // { x, y, z } - size
+obj.position        // { x, y, z }
+obj.rotation        // { x, y, z } radians
+obj.scale           // { x, y, z }
+obj.velocity        // { x, y, z } current velocity (read/write)
 
 // Appearance
-obj.color       // hex string, e.g. "#ff0000"
-obj.visible     // boolean
-obj.transparency // 0 (opaque) to 1 (invisible)
+obj.color           // "#rrggbb"
+obj.visible         // boolean
+obj.transparency    // 0 (opaque) to 1 (invisible)
 
 // Physics
-obj.anchored    // if true, doesn't move
-obj.canCollide  // if false, no collision
-obj.velocity    // { x, y, z } - current movement
-obj.mass        // affects physics interactions
-obj.friction    // 0-1, surface friction
+obj.anchored        // true = won't move
+obj.canCollide      // false = passes through
+obj.mass            // mass in kg (affects collision response)
+obj.friction        // 0–1
 
-// Custom gravity (pulls nearby objects)
+// Per-object gravity (pulls nearby objects toward this object)
 obj.gravity = { strength: 9.81, radius: 30 };
 obj.gravity = false;  // disable
 
-// Custom attributes (store any data)
+// Custom attributes (arbitrary data)
 obj.setAttribute("hp", 100);
-obj.getAttribute("hp");  // 100
-obj.getAttributes();     // { hp: 100, ... }
+obj.getAttribute("hp");     // → 100
+obj.getAttributes();        // → { hp: 100, ... }
 
 // Hierarchy
-obj.parentId             // parent object's ID
-obj.children             // array of child objects
-obj.setParent(other);    // reparent
-obj.findFirstChild("ChildName");  // find by name
+obj.parentId            // parent object ID (string | null)
+obj.children            // RuntimeObject[]
+obj.setParent(other);   // reparent
+obj.findFirstChild("ChildName");
+
+// Identity (read-only)
+obj.id              // unique runtime ID
+obj.name            // display name
+obj.type            // "primitive" | "light" | "spawn" | "model" | ...
+obj.primitiveType   // "cube" | "sphere" | "cylinder" | "plane" | null
+obj.container       // ContainerName
 \`\`\`
 
 ---
 
 ## Object Events
 
-React to things happening to objects:
+Events let you react to things happening to objects.
 
 \`\`\`js
-// Called when another object or player touches this one
+// ─── Engine-internal events (fired by the engine automatically) ───────────
+
+// Player or object touches this object
 obj.on("touched", (other) => {
-  log("Touched by:", other.name);
+  log("touched by", other.username ?? other.name);
 });
 
-// Called when the touch ends
-obj.on("untouched", () => {
-  log("No longer touching");
+// Touch ends
+obj.on("untouched", (other) => {
+  log("no longer touching");
 });
 
-// Called when the player clicks this object
-obj.on("clicked", () => {
-  log("Clicked!");
+// Precise touch-start with physics data
+obj.on("touchStarted", (other, penetration, normal) => {
+  log("contact started, penetration:", penetration);
 });
 
-// Called when the object is destroyed
+// Touch ended (debounced)
+obj.on("touchEnded", (other) => {
+  log("contact ended");
+});
+
+// Player clicks on this object (3D viewport click)
+obj.on("clicked", (obj) => {
+  obj.color = "#ff4444";
+});
+
+// Object is about to be destroyed
 obj.on("destroyed", () => {
-  log("Goodbye!");
+  log("goodbye");
 });
 
-// Listen for specific property changes (camelCase preferred)
+// Collision with another dynamic object
+obj.on("collisionStarted", (other, contact) => {
+  log("hit", other.name, "at", contact.point);
+});
+obj.on("collisionEnded", (other) => { });
+
+// Physics wake/sleep (optimization states)
+obj.on("woke", () => { });
+obj.on("slept", () => { });
+
+// Property changed
 obj.onPropertyChanged("color").on("changed", (prop, newVal, oldVal) => {
-  log("Color changed from", oldVal, "to", newVal);
+  log("color changed:", oldVal, "→", newVal);
 });
 
-// Legacy alias (still works)
-obj.GetPropertyChangedSignal("color").on("changed", callback);
-
-// Store the unsubscribe function to stop listening
-const unsub = obj.on("touched", () => {});
+// All on() calls return an unsubscribe function:
+const unsub = obj.on("touched", handler);
 unsub();  // stop listening
 \`\`\`
 
 ---
 
-## Auto-Animation
+## Custom Events (obj.emit)
 
-Let the engine animate objects automatically every frame:
+You can define **your own** events on any object. Custom events are fully user-controlled and fire all registered listeners.
 
 \`\`\`js
-// Rotate around Y axis (radians per second)
+// Define a custom event
+const door = find("Door");
+
+// Anyone can listen
+door.on("opened", (who) => {
+  log(who, "opened the door");
+});
+
+door.on("locked", () => {
+  door.color = "#ef4444";
+});
+
+// You can emit your custom events freely
+door.emit("opened", player.username);
+door.emit("locked");
+
+// ⚠️ You CANNOT emit engine-internal events:
+door.emit("touched");    // ERROR: "touched" is reserved for engine-internal use
+door.emit("clicked");    // ERROR: "clicked" is reserved for engine-internal use
+// The engine logs an error and returns false. Your game keeps running.
+
+// All custom event names (not in the reserved list) work:
+door.emit("myCustomEvent", arg1, arg2);  // ✅ fine
+door.emit("exploded", { force: 100 });   // ✅ fine
+\`\`\`
+
+**Reserved (engine-internal) event names:**
+\`touched\`, \`untouched\`, \`touchStarted\`, \`touchEnded\`, \`clicked\`, \`destroyed\`, \`collisionStarted\`, \`collisionEnded\`, \`woke\`, \`slept\`, \`propertyChanged\`, \`changed\`
+
+---
+
+## Auto-Animation
+
+Let the engine animate objects every frame without a script update loop:
+
+\`\`\`js
+// Spin around Y axis (radians/second)
 obj.autoRotateY = 2;
 
 // Bob up and down (sine wave)
 obj.autoBob = { amplitude: 0.3, speed: 2 };
 
-// Spin on multiple axes
-obj.autoSpin = { x: 0, y: 1, z: 0.5 };
+// Spin on multiple axes simultaneously
+obj.autoSpin = { x: 0.5, y: 1, z: 0 };
 
-// Move in a direction
+// Move in a direction continuously
 obj.autoMove = { direction: { x: 1, y: 0, z: 0 }, speed: 2 };
 
-// Follow a target (player or object)
+// Follow a target (player or another object)
 obj.autoFollow = { target: player, speed: 4, offset: { x: 0, y: 2, z: 0 } };
 
-// Disable by setting to undefined
+// Disable any auto-animation
 obj.autoRotateY = undefined;
+obj.autoBob = undefined;
 \`\`\`
 
 ---
 
 ## Player
 
-The local player is always available as \`player\`:
-
 \`\`\`js
-// Info
-player.username       // display name
-player.color          // avatar color (hex)
+// Identity
+player.username         // display name (read-only)
+player.color            // avatar color hex
 
 // Transform
-player.position       // { x, y, z } feet position
-player.rotation       // { x, y, z } yaw in rotation.y
-player.velocity       // { x, y, z } current movement
-player.up             // { x, y, z } up direction (usually 0,1,0)
-player.onGround       // true if standing on something
+player.position         // { x, y, z } — feet position
+player.rotation         // { x, y, z } — rotation.y is yaw
+player.velocity         // { x, y, z }
+player.up               // up direction vector (changes with per-object gravity)
+player.onGround         // true while standing on something
 
 // Health
 player.health = 100;
 player.maxHealth = 100;
 player.takeDamage(25);
 player.heal(50);
-player.kill();
+player.kill();           // triggers ragdoll + respawn
 player.respawn();
 
 // Movement
-player.walkSpeed = 6;        // normal speed
-player.runSpeed = 12;        // hold Shift to run
+player.walkSpeed = 6;       // normal walk speed
+player.runSpeed = 12;       // Shift = run
 player.jumpPower = 8;
-player.size = 1;             // avatar scale
-player.autoFaceMovement = true;  // rotate to face movement direction
+player.size = 1;            // avatar scale
+player.autoFaceMovement = true;  // auto-rotate to face movement
 
 // Physics
-player.killY = -50;          // auto-die below this Y level
-player.ragdoll;              // true while dying (read-only)
+player.killY = -50;         // auto-die below this Y
+player.ragdoll;             // true while dying (read-only)
 player.collisionRadius = 0.4;
 player.collisionHalfHeight = 0.9;
+
+// Flying (enable in-game flight)
+player.canFly = true;       // Space = fly up, Shift = fly down
 
 // Teleport
 player.teleport(10, 5, 0);
@@ -296,68 +495,58 @@ player.spawnPoint = { x: 0, y: 5, z: 0 };
 
 ## Inventory
 
-Players have an inventory system for collecting and managing items:
-
 \`\`\`js
 // Add items
-player.inventory.add("Coin");                    // add 1 coin
-player.inventory.add("Coin", { count: 5 });      // add 5 coins
-player.inventory.add("Sword", {
-  count: 1,
-  template: "SwordTemplate",  // optional: template to spawn when dropped
-  data: { damage: 10 },       // optional: custom data
-});
+player.inventory.add("Coin");
+player.inventory.add("Sword", { count: 1, template: "SwordTemplate", data: { damage: 15 } });
 
-// Check and get items
+// Check / get
 player.inventory.has("Coin");          // true/false
 player.inventory.has("Coin", 5);       // has at least 5?
-player.inventory.get("Coin");          // returns item or null
-player.inventory.items;                // array of all items
+player.inventory.get("Coin");          // InventoryItem | null
+player.inventory.items;                // all items
 
-// Remove items
+// Remove
 player.inventory.remove("Coin");       // remove 1
 player.inventory.remove("Coin", 3);    // remove up to 3
 
-// Equip/unequip (for UI tracking)
+// Equip
 player.inventory.equip("Sword");
-player.inventory.equipped;             // currently equipped item or null
+player.inventory.equipped;             // current item or null
 player.inventory.equip(null);          // unequip
 
-// Drop items into the world
-player.inventory.drop("Coin");         // drops 1 in front of player
-player.inventory.drop("Coin", 3);
+// Drop into world (spawns template from ReplicatedStorage if available)
+player.inventory.drop("Sword");
 
 // Settings
-player.inventory.maxSlots = 32;        // inventory size limit
-player.inventory.clear();              // remove everything
+player.inventory.maxSlots = 32;
+player.inventory.clear();
 \`\`\`
 
 ---
 
 ## Camera
 
-Control the player's view:
-
 \`\`\`js
-// Camera modes
-camera.mode = "thirdPerson";  // default, orbits player
-camera.mode = "firstPerson";  // inside player's head
-camera.mode = "free";         // detached, controlled by mouse
-camera.mode = "scripted";     // you control position/lookAt directly
+// Modes
+camera.mode = "thirdPerson";  // default — orbits player
+camera.mode = "firstPerson";  // inside player head
+camera.mode = "scripted";     // fully manual — set position + lookAt
+camera.mode = "free";         // detached orbit
 
-// Third-person settings
-camera.distance = 6;          // distance from player
-camera.minDistance = 2;       // zoom limits
+// Third-person
+camera.distance = 6;
+camera.minDistance = 2;
 camera.maxDistance = 20;
-camera.offset = { x: 0, y: 1.95, z: 0 };  // look-at offset from player feet
+camera.offset = { x: 0, y: 1.95, z: 0 };
 
-// General settings
-camera.fov = 60;              // field of view (degrees)
-camera.sensitivity = 1;       // mouse sensitivity multiplier
-camera.lockYaw = false;       // prevent horizontal rotation
-camera.lockPitch = false;     // prevent vertical rotation
+// General
+camera.fov = 60;             // degrees
+camera.sensitivity = 1;
+camera.lockYaw = false;
+camera.lockPitch = false;
 
-// Scripted mode - set these directly
+// Scripted mode
 camera.mode = "scripted";
 camera.position = { x: 0, y: 10, z: 10 };
 camera.lookAt = { x: 0, y: 0, z: 0 };
@@ -367,92 +556,76 @@ camera.lookAt = { x: 0, y: 0, z: 0 };
 
 ## Input
 
-Handle keyboard and mouse input:
-
 \`\`\`js
-// Keyboard
+// Key press / release edge events
 keyboard.onPress("e", () => log("E pressed"));
 keyboard.onRelease("e", () => log("E released"));
-keyboard.isDown("w");  // true if currently held
 
-// Special keys: "shift", "control", "alt", "space", "enter", "escape"
-// Arrow keys: "arrowup", "arrowdown", "arrowleft", "arrowright"
+// Shorthand
+onKey("e", () => log("E pressed"));
 
-// Mouse clicks on objects
-mouse.onClick((obj) => {
-  if (obj) {
-    log("Clicked on:", obj.name);
-  } else {
-    log("Clicked on nothing");
+// Held check (use inside update loop)
+runService.update.on((dt) => {
+  if (keyboard.isDown("e")) {
+    player.position.y += 2 * dt;
   }
 });
 
-// Built-in movement (always active):
-// WASD or Arrow Keys = move
-// Space = jump
-// Shift = run
-// Mouse = look around
+// Special keys: "space", "shift", "control", "alt", "enter", "escape"
+// Arrow keys: "arrowup", "arrowdown", "arrowleft", "arrowright"
+
+// 3D click
+mouse.onClick((obj) => {
+  if (obj) log("Clicked", obj.name);
+  else     log("Clicked empty space");
+});
 \`\`\`
 
 ---
 
 ## Game Loop (runService)
 
-Hook into the engine's update cycle. Each phase runs once per frame (~60fps):
-
 \`\`\`js
-// Phase order: input → animation → replication → physics → render → update
+// Phase order each frame: input → animation → replication → physics → render → update
 
 runService.update.on((dt, time) => {
-  // dt = time since last frame (seconds)
-  // time = total elapsed time (seconds)
-  log("Frame!", dt);
+  // Most logic goes here — runs after physics resolves
+  obj.rotation.y += dt;
 });
 
 runService.physics.on((dt, time) => {
-  // Runs during physics step
+  // During physics step — good for applying forces
 });
 
 runService.render.on((dt, time) => {
-  // Runs before rendering
+  // Just before rendering
 });
 
-// Also available: input, animation, replication
+// Convenience alias
+onUpdate((dt) => { });
 \`\`\`
 
 ---
 
 ## Timing Utilities
 
-Convenient ways to schedule code:
-
 \`\`\`js
-// Current time
-time;           // elapsed game time (updated each frame)
-dt;             // delta time since last frame
-now();          // current sim time (same as time)
+time;        // total elapsed game time (seconds)
+dt;          // seconds since last frame
+now();       // same as time
 
-// Run every frame (same as runService.update)
-onUpdate((dt, time) => {
-  obj.rotation.y += dt;
-});
+// Repeat
+const stop = every(0.5, () => log("tick"));
+stop();      // cancel
 
-// Run every N seconds
-const stop = every(0.5, () => {
-  log("tick");
-});
-stop();  // cancel
+// Once
+after(2, () => log("2 seconds later"));
 
-// Run once after N seconds
-after(2, () => {
-  log("2 seconds later!");
-});
-
-// Async wait
+// Async
 async function example() {
-  log("Starting...");
+  log("start");
   await wait(1.5);
-  log("1.5 seconds later!");
+  log("done");
 }
 example();
 \`\`\`
@@ -461,118 +634,50 @@ example();
 
 ## World Events
 
-React to major game events:
-
 \`\`\`js
-world.onPlayerSpawned((p) => {
-  log("Player spawned:", p.username);
-});
-
-world.onPlayerDied((p) => {
-  log("Player died:", p.username);
-});
-
-world.onObjectAdded((obj) => {
-  log("New object:", obj.name);
-});
-
-world.onObjectRemoved((obj) => {
-  log("Object removed:", obj.name);
-});
-\`\`\`
-
----
-
-## Tweens
-
-Smoothly animate properties over time:
-
-\`\`\`js
-// Tween position over 2 seconds
-tween(obj.position, { x: 10, y: 5 }, 2);
-
-// With easing
-tween(obj.position, { y: 10 }, 1, "easeOutQuad");
-
-// With callback when done
-tween(obj.position, { x: 0 }, 1, "linear", () => {
-  log("Tween complete!");
-});
-
-// Cancel a tween
-const cancel = tween(obj.position, { x: 100 }, 10);
-cancel();
-
-// Available easings:
-// "linear"
-// "easeInQuad", "easeOutQuad", "easeInOutQuad"
-// "easeInCubic", "easeOutCubic", "easeInOutCubic"
-\`\`\`
-
----
-
-## Raycasting
-
-Cast rays to detect objects:
-
-\`\`\`js
-const hit = raycast(
-  player.position,              // origin
-  { x: 0, y: -1, z: 0 },        // direction (will be normalized)
-  10,                           // max distance
-  {
-    ignore: [someObject],       // objects to skip
-    filter: (o) => o.canCollide // custom filter
-  }
-);
-
-if (hit) {
-  log("Hit:", hit.object.name);
-  log("Distance:", hit.distance);
-  log("Position:", hit.position);  // { x, y, z }
-  log("Normal:", hit.normal);      // surface normal { x, y, z }
-}
+world.onPlayerSpawned((p) => log(p.username, "spawned"));
+world.onPlayerDied((p) => log(p.username, "died"));
+world.onObjectAdded((obj) => log("added:", obj.name));
+world.onObjectRemoved((obj) => log("removed:", obj.name));
 \`\`\`
 
 ---
 
 ## State
 
-Key-value store for game state (multiplayer-ready):
+Global reactive key-value store — changes trigger listeners.
 
 \`\`\`js
-state.set("phase", "Playing");
-state.set("score", "100");
+state.set("phase", "Lobby");
+state.set("score", 0);
 
-state.get("phase");  // "Playing"
+state.get("phase");   // "Lobby"
+state.keys();         // ["phase", "score"]
+state.getAll();       // { phase: "Lobby", score: 0 }
 
-// React to changes
-state.on("phase", (newValue, oldValue) => {
-  log("Phase changed:", oldValue, "→", newValue);
+state.on("phase", (newVal, oldVal) => {
+  log("Phase:", oldVal, "→", newVal);
 });
 
-state.keys();  // ["phase", "score"]
+keyboard.onPress("p", () => state.set("phase", "Playing"));
 \`\`\`
 
 ---
 
 ## Tags
 
-Organize objects with tags for easy querying:
-
 \`\`\`js
-tags.add(enemy, "enemy");
-tags.add(enemy, "hostile");
+tags.add(obj, "enemy");
+tags.add(obj, "boss");
 
-tags.has(enemy, "enemy");     // true
-tags.all(enemy);              // ["enemy", "hostile"]
-
-tags.get("enemy");            // array of all objects with "enemy" tag
-tags.remove(enemy, "hostile");
+tags.has(obj, "enemy");     // true
+tags.all(obj);              // ["enemy", "boss"]
+tags.get("enemy");          // all objects with the "enemy" tag
+tags.remove(obj, "boss");
 
 // Example: damage all enemies
 for (const e of tags.get("enemy")) {
-  e.setAttribute("hp", e.getAttribute("hp") - 10);
+  e.setAttribute("hp", (e.getAttribute("hp") ?? 100) - 10);
 }
 \`\`\`
 
@@ -580,288 +685,114 @@ for (const e of tags.get("enemy")) {
 
 ## GUI
 
-Create on-screen UI elements:
-
 \`\`\`js
 // Text element
 gui.text("score", "Score: 0", {
-  anchor: "tl",    // position anchor
-  x: 16,           // offset from anchor
+  anchor: "tl",    // tl, tc, tr, cl, cc, cr, bl, bc, br
+  x: 16,
   y: 16,
-  size: 18,        // font size
+  size: 18,
   color: "#ffffff",
+  bg: "rgba(0,0,0,0.5)",
 });
 
-// Update text
-gui.text("score", "Score: 100", { anchor: "tl", x: 16, y: 16 });
+// Update
+gui.text("score", "Score: 42");
 
 // Button
-gui.button("play", "Play", { anchor: "cc", x: 0, y: 0 }, (game) => {
-  game.state.set("phase", "Playing");
-  gui.clear("play");
+gui.button("btn", "Respawn", { anchor: "br", x: 24, y: 24 }, () => {
+  player.respawn();
 });
 
-// Remove element
+// Remove one or all
 gui.clear("score");
-
-// Remove all GUI
 gui.clear();
-
-// Anchors:
-// tl = top-left      tc = top-center      tr = top-right
-// cl = center-left   cc = center-center   cr = center-right
-// bl = bottom-left   bc = bottom-center   br = bottom-right
 \`\`\`
 
 ---
 
-## Object-Based GUI
-
-For advanced UIs with nesting, layouts, animations, and dragging:
+## Tweens
 
 \`\`\`js
-// Create a frame (container)
-const panel = gui.frame("inventory", {
-  anchor: "cr",
-  x: 20,
-  y: 0,
-  width: { mode: "fixed", value: 300 },
-  height: { mode: "fixed", value: 400 },
-  backgroundColor: "rgba(0,0,0,0.8)",
-  borderRadius: 12,
-});
+// Basic tween
+tween(obj.position, { x: 10 }, 2);
 
-// Add a title
-const title = gui.label("title", "Inventory", {
-  fontSize: 20,
-  fontWeight: 600,
-  color: "#ffffff",
-});
-panel.addChild(title);
+// With easing
+tween(obj.position, { y: 10 }, 1, "easeOutQuad");
 
-// Create a vertical layout for items
-const itemList = gui.vstack("items", {
-  layoutGap: 8,
-  layoutPadding: { top: 10, right: 10, bottom: 10, left: 10 },
-});
-panel.addChild(itemList);
+// With callback
+tween(obj.position, { x: 0 }, 1, "linear", () => log("done"));
 
-// Add buttons to the stack
-const btn1 = gui.btn("sword", "Sword x1", {
-  backgroundColor: "#374151",
-  onClick: () => log("Selected sword"),
-});
-itemList.addChild(btn1);
+// Cancel
+const cancel = tween(obj.position, { x: 100 }, 10);
+cancel();
 
-// Layout modes: horizontal stack, vertical stack, grid
-const toolbar = gui.hstack("toolbar", { layoutGap: 4 });
-const grid = gui.grid("grid", 4, { layoutGap: 8 }); // 4 columns
-
-// Scroll containers for long lists
-const scrollArea = gui.scroll("scrollArea", {
-  width: { mode: "fixed", value: 250 },
-  height: { mode: "fixed", value: 300 },
-  showScrollbarY: true,
-});
-
-// Make elements draggable
-panel.draggable = true;
-panel.dragBounds = { minX: 0, maxX: 800, minY: 0, maxY: 600 };
-
-// Listen for drag events
-panel.on("dragStart", (x, y) => log("Started dragging"));
-panel.on("drag", (x, y) => log("Dragging to", x, y));
-panel.on("dragEnd", (x, y) => log("Stopped dragging"));
-
-// Animate UI elements
-panel.animate("transparency", 0, 0.3);  // fade in
-btn1.animate("x", btn1.x + 10, 0.2, { easing: "easeOut" });
-
-// Text input fields
-const search = gui.input("search", {
-  placeholder: "Search...",
-  onSubmit: (value) => log("Searching for:", value),
-  onChange: (value) => log("Typing:", value),
-});
-
-// Image elements
-const icon = gui.image("icon", "/textures/sword.png", {
-  width: { mode: "fixed", value: 32 },
-  height: { mode: "fixed", value: 32 },
-  fit: "contain",
-});
-
-// Find and destroy elements
-const found = gui.find("inventory");
-gui.destroy("title");
-gui.destroy(panel);  // destroys panel and all children
+// Easings: "linear", "easeInQuad", "easeOutQuad", "easeInOutQuad",
+//          "easeInCubic", "easeOutCubic", "easeInOutCubic"
 \`\`\`
 
 ---
 
-## 3D Models
-
-Import and use GLTF/GLB 3D models:
+## Raycasting
 
 \`\`\`js
-// Create an object with a 3D model
-const character = create({
-  name: "Hero",
-  type: "model",
-  modelUrl: "/models/hero.glb",
-  position: { x: 0, y: 0, z: 0 },
-  scale: { x: 1, y: 1, z: 1 },
-});
-
-// Play animations (if model has them)
-character.animation = "walk";
-character.animationSpeed = 1.0;
-character.animationLoop = true;
-
-// Models support all standard object properties
-character.position.x += 5;
-character.rotation.y = Math.PI / 2;
-character.visible = true;
-
-// Use models from ReplicatedStorage templates
-const enemy = spawn("EnemyModel", {
-  position: { x: 10, y: 0, z: 5 },
-});
-
-// Switch animations
-keyboard.onPress("w", () => {
-  character.animation = "walk";
-});
-keyboard.onRelease("w", () => {
-  character.animation = "idle";
-});
-\`\`\`
-
----
-
-## Math Library
-
-Advanced math primitives for 3D transformations. Plain \`{x, y, z}\` objects
-still work everywhere - these are for when you need vector/quaternion math.
-
-\`\`\`js
-// Vector3 - 3D vectors with math operations
-const v1 = new Vector3(1, 2, 3);
-const v2 = new Vector3(4, 5, 6);
-
-v1.add(v2);           // Vector3(5, 7, 9)
-v1.sub(v2);           // Vector3(-3, -3, -3)
-v1.mul(2);            // Vector3(2, 4, 6)
-v1.dot(v2);           // 32 (scalar)
-v1.cross(v2);         // Vector3(-3, 6, -3)
-v1.magnitude;         // 3.74...
-v1.unit;              // normalized vector
-v1.distanceTo(v2);    // distance between points
-
-// Static constructors
-Vector3.zero;         // (0, 0, 0)
-Vector3.one;          // (1, 1, 1)
-Vector3.up;           // (0, 1, 0)
-Vector3.forward;      // (0, 0, 1)
-Vector3.lerp(v1, v2, 0.5);  // midpoint
-
-// Quaternion - rotations without gimbal lock
-const q = Quaternion.fromEuler(0, Math.PI / 2, 0);  // 90° Y rotation
-const q2 = Quaternion.fromAxisAngle(Vector3.up, Math.PI);
-
-q.mul(q2);                    // combine rotations
-q.rotateVector(v1);           // rotate a vector
-q.toEuler();                  // back to euler angles
-q.forward;                    // direction it's facing
-Quaternion.slerp(q, q2, 0.5); // smooth interpolation
-
-// CFrame - position + rotation combined
-const cf = new CFrame(
-  { x: 0, y: 5, z: 0 },       // position
-  Quaternion.identity         // rotation
+const hit = raycast(
+  player.position,
+  { x: 0, y: -1, z: 0 },   // direction (auto-normalized)
+  50,                        // max distance
+  {
+    ignore: [player],        // objects to skip
+    filter: (o) => o.canCollide,
+  }
 );
 
-CFrame.lookAt(
-  { x: 0, y: 0, z: 0 },       // from
-  { x: 10, y: 0, z: 10 }      // at
-);
-
-cf.pointToWorldSpace(localPoint);   // local → world
-cf.pointToObjectSpace(worldPoint);  // world → local
-cf.lookVector;                      // forward direction
-cf.mul(otherCFrame);                // combine transforms
-
-// Utility functions
-rad(90);              // degrees → radians
-deg(Math.PI);         // radians → degrees
-clamp(x, 0, 1);       // clamp to range
-lerp(0, 100, 0.5);    // 50
-smoothstep(t);        // smooth 0-1 curve
+if (hit) {
+  log("Hit:", hit.object.name);
+  log("Distance:", hit.distance.toFixed(2));
+  log("Point:", hit.point);
+  log("Normal:", hit.normal);
+}
 \`\`\`
 
 ---
 
-## Physics Events
-
-Enhanced touch detection with debouncing and sleep states:
+## Physics
 
 \`\`\`js
-// New events (more reliable than touched/untouched)
-obj.on("touchStarted", (player, obj, penetration, normal) => {
-  // Fires once when contact begins (debounced)
-  log("Touch started, penetration:", penetration);
-});
+// Global physics
+physics.gravity = 9.81;   // m/s² downward
+physics.airDrag = 0;      // resistance for unanchored objects
 
-obj.on("touchEnded", (player, obj) => {
-  // Fires once when contact ends (debounced)
-  log("Touch ended");
-});
+// Zero-G
+physics.gravity = 0;
 
-// Legacy events still work
-obj.on("touched", (player, obj) => {});
-obj.on("untouched", (player, obj) => {});
+// Per-object gravity well (attracts nearby objects and the player)
+planet.gravity = { strength: 12, radius: 40 };
+planet.gravity = false;  // disable
 
-// Physics sleep/wake (for performance)
-obj.on("slept", (obj) => {
-  // Object has stopped moving and is now sleeping
-  log(obj.name, "went to sleep");
-});
-
-obj.on("woke", (obj) => {
-  // Object was disturbed and is now awake
-  log(obj.name, "woke up");
-});
-
-// Collision categories (advanced filtering)
-obj.collisionCategory = 1;   // bitmask category
-obj.collisionMask = 0xFFFF;  // what categories to collide with
-
-// Preset categories:
-// Default: 1, Player: 2, Static: 4, Dynamic: 8
-// Trigger: 16, Projectile: 32, Pickup: 64, Character: 128
+// Object physics properties
+obj.anchored = false;     // let gravity affect it
+obj.canCollide = true;
+obj.mass = 2;
+obj.friction = 0.5;
+obj.velocity = { x: 0, y: 10, z: 0 };  // set directly
 \`\`\`
 
 ---
 
 ## Networking
 
-For multiplayer games (locally simulated, ready for real servers):
-
 \`\`\`js
-// Server broadcasts to all clients
-network.server.broadcast("chat", { msg: "Hello everyone!" });
-
-// Server listens for client messages
-network.server.on("playerReady", (data) => {
-  log("Player ready:", data.id);
+// Server → all clients
+network.server.broadcast("updateScore", { score: 100 });
+network.client.on("updateScore", ({ score }) => {
+  gui.text("score", "Score: " + score);
 });
 
-// Client sends to server
-network.client.send("playerReady", { id: 1 });
-
-// Client listens for broadcasts
-network.client.on("chat", (data) => {
-  log("Chat:", data.msg);
+// Client → server
+network.client.send("requestSpawn", { type: "enemy" });
+network.server.on("requestSpawn", (payload) => {
+  spawn(payload.type);
 });
 \`\`\`
 
@@ -869,168 +800,113 @@ network.client.on("chat", (data) => {
 
 ## Tasks
 
-Coroutine-style scheduling for complex sequences:
-
 \`\`\`js
-// Run immediately in a new "thread"
+// Run fn concurrently (non-blocking)
 task.spawn(() => {
-  log("Starting task");
+  log("runs in parallel");
 });
 
-// Run after delay
-task.delay(2, () => {
-  log("2 seconds later");
-});
+// Delay without blocking
+task.delay(2, () => log("2 seconds later"));
 
 // Async wait
-async function sequence() {
-  log("Step 1");
-  await task.wait(1);
-  log("Step 2");
-  await task.wait(1);
-  log("Step 3");
+async function loop() {
+  while (true) {
+    log("tick");
+    await task.wait(1);
+  }
 }
-task.spawn(sequence);
+task.spawn(loop);
 \`\`\`
 
 ---
 
-## Modules
-
-Share code between scripts using ModuleScripts:
+## Modules (require)
 
 \`\`\`js
-// In a ModuleScript named "MathLib":
-exports.add = (a, b) => a + b;
-exports.multiply = (a, b) => a * b;
-exports.PI = 3.14159;
+// In ReplicatedStorage → create a ModuleScript named "MathUtils"
+// MathUtils script:
+exports.square = (n) => n * n;
+exports.clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-// In another script:
-const MathLib = require("MathLib");
-log(MathLib.add(2, 3));      // 5
-log(MathLib.PI);             // 3.14159
+// In any other script:
+const MathUtils = require("MathUtils");
+log(MathUtils.square(5));   // 25
 \`\`\`
 
 ---
 
-## Utilities
-
-Helpful math and random functions:
+## Debugging
 
 \`\`\`js
-// Random numbers
-random(0, 1);        // float between 0 and 1
-random(5, 10);       // float between 5 and 10
-randInt(1, 6);       // integer 1-6 (inclusive, like a die)
+// Print to in-game console (color-coded: green=info, red=error, yellow=warning)
+log("Hello", player.position);
 
-// Pick random from array
-pick(["red", "green", "blue"]);
+// Debug API
+debug.getChildren(obj);         // RuntimeObject[]
+debug.getDescendants(obj);      // all descendants recursively
+debug.getFullName(obj);         // "Workspace.Platform.Coin"
+debug.getPropertyNames(obj);    // all property names
+debug.getObjectsWithTag("tag"); // same as tags.get()
+debug.getEventConnections(obj); // number of active listeners
 
-// Distance between two points or objects
-dist(obj1, obj2);
-dist({ x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 });
+// Error messages include:
+// - Script name
+// - Line number (approximate)
+// - Helpful hint for common mistakes
 
-// Linear interpolation
-lerp(0, 100, 0.5);   // 50
+// Example script error output:
+// [MyScript] Runtime error on line 12: Cannot read properties of null
+// Check for a typo, missing object, wrong container, or unsupported API use.
+\`\`\`
 
-// Clamp value to range
-clamp(15, 0, 10);    // 10
-clamp(-5, 0, 10);    // 0
+**Common mistakes:**
+- \`workspace.Box\` is \`null\` — object doesn't exist or is in a different container
+- \`obj.on("touched")\` never fires — check that obj.canCollide is true
+- Scripts run top-to-bottom once. Use \`runService.update.on()\` for per-frame logic.
+- \`obj.emit("clicked")\` logs an error — \`clicked\` is engine-reserved; use a different name.
 
-// Logging (appears in Console panel)
-log("Hello!");
-log("Score:", score, "Lives:", lives);
-log({ complex: "object", works: true });
+---
+
+## Math Library
+
+\`\`\`js
+random(0, 10);           // float in [0, 10)
+randInt(1, 6);           // integer in [1, 6]
+pick(["a", "b", "c"]);   // random element
+
+dist(obj, player);       // 3D distance
+dist({ x:0,y:0,z:0 }, { x:3,y:4,z:0 }); // 5
+
+lerp(0, 100, 0.5);       // 50
+clamp(15, 0, 10);        // 10
+
+// Also available: Math.sin, Math.cos, Math.atan2, Math.hypot, Math.abs, etc.
 \`\`\`
 
 ---
 
-## Debug
-
-Inspect the runtime for debugging:
+## Advanced Classes
 
 \`\`\`js
-debug.getChildren(obj);           // direct children
-debug.getDescendants(obj);        // all nested children
-debug.getFullName(obj);           // "Workspace.Folder.MyObject"
-debug.getPropertyNames(obj);      // ["position", "rotation", ...]
-debug.getObjectsWithTag("enemy"); // same as tags.get()
-debug.getEventConnections(obj);   // number of event listeners
-\`\`\`
+// Emitter — custom typed event bus
+const events = new Emitter();
+events.on("explode", (force) => log("boom", force));
+events.emit("explode", 100);
 
----
-
-## Advanced: Reactive Primitives
-
-For complex patterns, these classes are available:
-
-\`\`\`js
-// Emitter - event dispatcher
-const onDamage = new Emitter();
-onDamage.on((amount) => log("Took damage:", amount));
-onDamage.fire(25);
-
-// Callable - observable function
-const attack = new Callable((target) => target.takeDamage(10));
-attack.connect((target) => log("Attacked:", target.name));
-attack(enemy);  // calls function AND notifies listeners
-
-// Class - prototype factory
-const Enemy = new Class("Enemy", { hp: 100, damage: 10 });
-const goblin = new Enemy({ hp: 50 });
-log(goblin.hp, goblin.damage);  // 50, 10
-
-// WeakTable - object-keyed map (doesn't prevent garbage collection)
-const metadata = new WeakTable();
-metadata.set(obj, { spawned: now() });
-
-// weakRef - weak reference
-const ref = weakRef(obj);
-ref.get();  // returns obj or null if garbage collected
-\`\`\`
-
----
-
-## Example: Complete Mini-Game
-
-\`\`\`js
-// Coin collection game
-
-let score = 0;
-gui.text("score", "Coins: 0", { anchor: "tl", x: 16, y: 16, size: 24, color: "#ffd700" });
-
-// Spawn coins
-function spawnCoin() {
-  const coin = create({
-    primitiveType: "sphere",
-    position: { x: random(-10, 10), y: 1, z: random(-10, 10) },
-    scale: { x: 0.5, y: 0.5, z: 0.5 },
-    color: "#ffd700",
-  });
-  coin.autoRotateY = 3;
-  coin.autoBob = { amplitude: 0.2, speed: 2 };
-  
-  coin.on("touched", (other) => {
-    if (other === player) {
-      score++;
-      gui.text("score", "Coins: " + score, { anchor: "tl", x: 16, y: 16, size: 24, color: "#ffd700" });
-      destroy(coin);
-      after(1, spawnCoin);  // spawn a new one
-    }
-  });
-}
-
-// Start with 5 coins
-for (let i = 0; i < 5; i++) spawnCoin();
-
-// Give player a weapon
-const sword = create({
-  primitiveType: "cube",
-  scale: { x: 0.1, y: 0.8, z: 0.1 },
-  color: "#64748b",
+// Class — OOP inheritance helper
+const Enemy = Class(class {
+  constructor(name) {
+    this.obj = create({ name, primitiveType: "sphere", color: "#ff4444" });
+    this.hp = 100;
+  }
+  damage(n) {
+    this.hp -= n;
+    if (this.hp <= 0) destroy(this.obj);
+  }
 });
-player.motors.attach("rightHand", sword, { y: 0.3 });
 
-world.onPlayerSpawned(() => log("Game started!"));
+const goblin = new Enemy("Goblin");
+goblin.damage(50);
 \`\`\`
 `;

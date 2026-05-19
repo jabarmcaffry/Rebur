@@ -665,7 +665,6 @@ export class GameRuntime {
     });
 
     proxy.on = (event, fn) => {
-      // Use namespaced event bus (primary path - memory efficient)
       const disconnect = this._objectEventBus.on(id, event as any, fn as any);
       cleanupSet.add(disconnect);
       return () => {
@@ -675,6 +674,15 @@ export class GameRuntime {
     };
     proxy.off = (event, fn) => {
       this._objectEventBus.off(id, event as any, fn as any);
+    };
+    // Script-facing emit — custom events only; engine-internal events are blocked
+    proxy.emit = (event: string, ...args: any[]): boolean => {
+      const err = (this._objectEventBus as any).emitCustom(
+        id, event, args,
+        (e: any) => this.pushLog(`obj.emit("${event}") handler error: ${formatErr(e)}`)
+      );
+      if (err) { this.pushLog(err); return false; }
+      return true;
     };
     
     // Property changed signal - camelCase API (preferred)
@@ -1084,6 +1092,12 @@ export class GameRuntime {
     }
     this.objects = ws;
     this.objectList = list;
+
+    // At runtime, the active player always appears in the Players container
+    // (mirrors Roblox: players[username] is the local player's data object)
+    if (this.player && this.player.username) {
+      (pl as any)[this.player.username] = this.player;
+    }
   }
 
   private pushLog(line: string) { 

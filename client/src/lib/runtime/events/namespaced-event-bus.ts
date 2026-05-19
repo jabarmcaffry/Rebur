@@ -1,17 +1,30 @@
 /**
  * Namespaced Event Bus
- * 
- * A memory-efficient event system for handling thousands of objects.
- * Instead of creating one EventBus per object, uses a single bus with
- * namespaced event keys like "object:abc123:touched".
- * 
- * This dramatically reduces memory overhead when dealing with many objects
- * while maintaining the same API surface for scripts.
+ *
+ * Supports both internal (engine-reserved) and custom (user-defined) events.
+ * Internal events cannot be emitted from script code — the engine fires them.
+ * Custom events are fully user-controlled and can be emitted freely.
  */
 
 import type { RuntimeObject, RuntimePlayer, ObjectEventName } from "../types";
 
-/** Event payload types for object events */
+/** Internal events that are fired by the engine — scripts cannot emit these */
+export const INTERNAL_EVENTS = new Set<string>([
+  "touched",
+  "untouched",
+  "touchStarted",
+  "touchEnded",
+  "clicked",
+  "destroyed",
+  "woke",
+  "slept",
+  "collisionStarted",
+  "collisionEnded",
+  "propertyChanged",
+  "changed",
+]);
+
+/** Event payload types for built-in object events */
 export type ObjectEventPayloads = {
   touched: [player: RuntimePlayer, object: RuntimeObject];
   untouched: [player: RuntimePlayer, object: RuntimeObject];
@@ -22,66 +35,39 @@ export type ObjectEventPayloads = {
   propertyChanged: [propertyName: string, oldValue: any, newValue: any];
   collisionStarted: [other: RuntimeObject, contact: { point: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } }];
   collisionEnded: [other: RuntimeObject];
+  woke: [];
+  slept: [];
 };
 
 /** Handler function type */
 type EventHandler<T extends any[]> = (...args: T) => void;
 
-/** Subscription info for cleanup */
-interface Subscription {
-  objectId: string;
-  event: ObjectEventName;
-  handler: EventHandler<any>;
-}
-
 /**
- * Global namespaced event bus for all object events.
- * 
- * Usage:
- *   bus.on("abc123", "touched", handler);
- *   bus.emit("abc123", "touched", [player, object]);
- *   bus.off("abc123", "touched", handler);
+ * Global namespaced event bus — one shared bus handles all object events.
+ * Keys are "objectId:eventName" strings.
  */
 export class NamespacedEventBus {
-  // Map of "objectId:eventName" -> Set of handlers
   private handlers = new Map<string, Set<EventHandler<any>>>();
-  
-  // Track subscriptions per object for bulk cleanup
   private objectSubscriptions = new Map<string, Set<string>>();
-  
-  // Statistics for debugging/profiling
+
   private stats = {
     totalSubscriptions: 0,
     totalEmits: 0,
     objectsWithHandlers: 0,
   };
 
-  /**
-   * Create a namespaced key for an object event.
-   */
-  private key(objectId: string, event: ObjectEventName): string {
+  private key(objectId: string, event: string): string {
     return `${objectId}:${event}`;
   }
 
-  /**
-   * Subscribe to an object event.
-   * Returns an unsubscribe function.
-   */
-  on<E extends ObjectEventName>(
-    objectId: string,
-    event: E,
-    handler: EventHandler<ObjectEventPayloads[E]>
-  ): () => void {
+  /** Subscribe to any event (internal or custom). Returns unsubscribe fn. */
+  on(objectId: string, event: string, handler: EventHandler<any>): () => void {
     const k = this.key(objectId, event);
-    
-    // Get or create handler set
     let set = this.handlers.get(k);
     if (!set) {
       set = new Set();
       this.handlers.set(k, set);
     }
-    
-    // Track subscription per object
     let objSubs = this.objectSubscriptions.get(objectId);
     if (!objSubs) {
       objSubs = new Set();
@@ -89,36 +75,20 @@ export class NamespacedEventBus {
       this.stats.objectsWithHandlers++;
     }
     objSubs.add(k);
-    
     set.add(handler);
     this.stats.totalSubscriptions++;
-    
-    // Return unsubscribe function
     return () => this.off(objectId, event, handler);
   }
 
-  /**
-   * Unsubscribe from an object event.
-   */
-  off<E extends ObjectEventName>(
-    objectId: string,
-    event: E,
-    handler: EventHandler<ObjectEventPayloads[E]>
-  ): void {
+  /** Unsubscribe from an event. */
+  off(objectId: string, event: string, handler: EventHandler<any>): void {
     const k = this.key(objectId, event);
     const set = this.handlers.get(k);
-    
     if (set) {
       const deleted = set.delete(handler);
-      if (deleted) {
-        this.stats.totalSubscriptions--;
-      }
-      
-      // Cleanup empty sets
+      if (deleted) this.stats.totalSubscriptions--;
       if (set.size === 0) {
         this.handlers.delete(k);
-        
-        // Update object subscriptions
         const objSubs = this.objectSubscriptions.get(objectId);
         if (objSubs) {
           objSubs.delete(k);
@@ -132,63 +102,55 @@ export class NamespacedEventBus {
   }
 
   /**
-   * Emit an event to all handlers for an object.
+   * Emit an event (engine-internal path — no guard here).
+   * Scripts should use emitCustom() which enforces the internal/custom boundary.
    */
-  emit<E extends ObjectEventName>(
-    objectId: string,
-    event: E,
-    args: ObjectEventPayloads[E],
-    onError?: (e: any, fn: Function) => void
-  ): void {
+  emit(objectId: string, event: string, args: any[], onError?: (e: any, fn: Function) => void): void {
     const k = this.key(objectId, event);
     const set = this.handlers.get(k);
-    
     if (!set || set.size === 0) return;
-    
     this.stats.totalEmits++;
-    
-    // Snapshot handlers to allow safe iteration
-    const handlers = Array.from(set);
-    for (const handler of handlers) {
+    const snapshot = Array.from(set);
+    for (const fn of snapshot) {
       try {
-        handler(...args);
+        fn(...args);
       } catch (e) {
-        onError?.(e, handler);
+        onError?.(e, fn);
       }
     }
   }
 
   /**
-   * Check if an object has any handlers for a specific event.
+   * Script-facing emit — only allowed for custom (non-internal) events.
+   * Returns an error string if the event is reserved; null on success.
    */
-  hasHandlers(objectId: string, event: ObjectEventName): boolean {
-    const k = this.key(objectId, event);
-    const set = this.handlers.get(k);
-    return !!set && set.size > 0;
+  emitCustom(objectId: string, event: string, args: any[], onError?: (e: any, fn: Function) => void): string | null {
+    if (INTERNAL_EVENTS.has(event)) {
+      return (
+        `Cannot emit "${event}" — this is an engine-internal event reserved by the runtime. ` +
+        `Internal events (touched, clicked, destroyed, etc.) are fired automatically by the engine. ` +
+        `Use a different name for your custom event.`
+      );
+    }
+    this.emit(objectId, event, args, onError);
+    return null;
   }
 
-  /**
-   * Get the number of handlers for an object event.
-   */
-  handlerCount(objectId: string, event: ObjectEventName): number {
-    const k = this.key(objectId, event);
-    return this.handlers.get(k)?.size ?? 0;
+  hasHandlers(objectId: string, event: string): boolean {
+    return (this.handlers.get(this.key(objectId, event))?.size ?? 0) > 0;
   }
 
-  /**
-   * Check if an object has any event subscriptions.
-   */
+  handlerCount(objectId: string, event: string): number {
+    return this.handlers.get(this.key(objectId, event))?.size ?? 0;
+  }
+
   hasObjectSubscriptions(objectId: string): boolean {
     return this.objectSubscriptions.has(objectId);
   }
 
-  /**
-   * Remove all handlers for a specific object (used when object is destroyed).
-   */
   clearObject(objectId: string): void {
     const objSubs = this.objectSubscriptions.get(objectId);
     if (!objSubs) return;
-    
     for (const k of objSubs) {
       const set = this.handlers.get(k);
       if (set) {
@@ -196,110 +158,79 @@ export class NamespacedEventBus {
         this.handlers.delete(k);
       }
     }
-    
     this.objectSubscriptions.delete(objectId);
     this.stats.objectsWithHandlers--;
   }
 
-  /**
-   * Clear all handlers.
-   */
   clear(): void {
     this.handlers.clear();
     this.objectSubscriptions.clear();
-    this.stats = {
-      totalSubscriptions: 0,
-      totalEmits: 0,
-      objectsWithHandlers: 0,
-    };
+    this.stats = { totalSubscriptions: 0, totalEmits: 0, objectsWithHandlers: 0 };
   }
 
-  /**
-   * Get statistics for debugging/profiling.
-   */
-  getStats(): Readonly<typeof this.stats & { uniqueEventKeys: number }> {
-    return {
-      ...this.stats,
-      uniqueEventKeys: this.handlers.size,
-    };
+  getStats() {
+    return { ...this.stats, uniqueEventKeys: this.handlers.size };
   }
 
-  /**
-   * Create a proxy object that provides the familiar on/off API for a specific object.
-   * This maintains API compatibility with the per-object EventBus pattern.
-   */
   createObjectProxy(objectId: string): ObjectEventProxy {
     return new ObjectEventProxy(this, objectId);
   }
 }
 
 /**
- * Proxy that provides the familiar on/off API for a specific object.
- * Used to maintain API compatibility with the old per-object EventBus pattern.
+ * Per-object event proxy — exposes on/off/emit API for a specific object.
+ * emit() is guarded to prevent firing internal engine events from scripts.
  */
 export class ObjectEventProxy {
   private cleanupFns = new Set<() => void>();
 
   constructor(
     private bus: NamespacedEventBus,
-    private objectId: string
+    private objectId: string,
+    private pushLog?: (msg: string) => void,
   ) {}
 
-  /**
-   * Subscribe to an event on this object.
-   */
-  on<E extends ObjectEventName>(
-    event: E,
-    handler: EventHandler<ObjectEventPayloads[E]>
-  ): () => void {
+  on(event: string, handler: EventHandler<any>): () => void {
     const cleanup = this.bus.on(this.objectId, event, handler);
     this.cleanupFns.add(cleanup);
-    
-    // Return cleanup that also removes from our tracking set
     return () => {
       cleanup();
       this.cleanupFns.delete(cleanup);
     };
   }
 
-  /**
-   * Unsubscribe from an event on this object.
-   */
-  off<E extends ObjectEventName>(
-    event: E,
-    handler: EventHandler<ObjectEventPayloads[E]>
-  ): void {
+  off(event: string, handler: EventHandler<any>): void {
     this.bus.off(this.objectId, event, handler);
   }
 
   /**
-   * Emit an event on this object.
+   * Script-facing emit — only allowed for custom events.
+   * Logs an error and returns false if the event is engine-reserved.
    */
-  emit<E extends ObjectEventName>(
-    event: E,
-    args: ObjectEventPayloads[E],
-    onError?: (e: any, fn: Function) => void
-  ): void {
-    this.bus.emit(this.objectId, event, args, onError);
+  emit(event: string, ...args: any[]): boolean {
+    const err = this.bus.emitCustom(this.objectId, event, args, (e) => {
+      this.pushLog?.(`obj.emit("${event}") handler error: ${e?.message ?? e}`);
+    });
+    if (err) {
+      this.pushLog?.(err);
+      return false;
+    }
+    return true;
   }
 
-  /**
-   * Check if this object has handlers for an event.
-   */
-  hasHandlers(event: ObjectEventName): boolean {
+  /** Engine-internal emit — bypasses the guard. Do not expose to scripts. */
+  _emitInternal(event: string, args: any[], onError?: (e: any) => void): void {
+    this.bus.emit(this.objectId, event, args, onError ? (e) => onError(e) : undefined);
+  }
+
+  hasHandlers(event: string): boolean {
     return this.bus.hasHandlers(this.objectId, event);
   }
 
-  /**
-   * Clean up all subscriptions for this object.
-   */
   cleanup(): void {
-    for (const fn of this.cleanupFns) {
-      fn();
-    }
+    for (const fn of this.cleanupFns) fn();
     this.cleanupFns.clear();
   }
 }
 
-/** Global singleton instance */
 export const globalObjectEventBus = new NamespacedEventBus();

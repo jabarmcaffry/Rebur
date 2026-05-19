@@ -1,92 +1,59 @@
 /**
  * Monaco Editor Configuration for Rebur Engine Scripts
- * 
- * Provides:
- * - Custom autocomplete for all engine APIs
- * - Type definitions for intellisense
- * - Custom theme matching the editor
- * - Snippets for common patterns
+ *
+ * - Disables Monaco's built-in TypeScript/JavaScript IntelliSense and autocomplete
+ * - Registers a fully custom completion provider for the engine API
+ * - Registers hover documentation
+ * - Keeps the custom dark theme and syntax highlighting unchanged
  */
 
 import type * as Monaco from "monaco-editor";
 
-/** Type definitions for the scripting API */
+/** Type definitions added as extra lib for hover docs only (not for inference) */
 export const ENGINE_TYPE_DEFS = `
 // =============================================================================
-// REBUR ENGINE TYPE DEFINITIONS
+// REBUR ENGINE — TYPE DEFINITIONS (for hover documentation only)
 // =============================================================================
 
-// -----------------------------------------------------------------------------
-// Basic Types
-// -----------------------------------------------------------------------------
+interface Vec3 { x: number; y: number; z: number; }
 
-interface Vec3 {
-  x: number;
-  y: number;
-  z: number;
-}
+type ContainerName = "Workspace" | "Lighting" | "Players" | "ReplicatedStorage" | "ServerScriptService" | "StarterPlayer";
 
 interface RuntimeObject {
-  // Identity
   readonly id: string;
   name: string;
   readonly type: string;
   readonly primitiveType: string | null;
   readonly container: ContainerName;
-  
-  // Transform
   position: Vec3;
   rotation: Vec3;
   scale: Vec3;
   velocity: Vec3;
-  
-  // Appearance
   color: string;
   visible: boolean;
   transparency: number;
-  
-  // Physics
   anchored: boolean;
   canCollide: boolean;
   mass: number;
   friction: number;
-  gravity: false | { strength: number; radius: number; player?: boolean };
-  
-  // Auto behaviors
+  gravity: false | { strength: number; radius: number };
   autoRotateY?: number;
   autoBob?: { amplitude: number; speed: number };
   autoSpin?: Vec3;
-  autoMove?: { from: Vec3; to: Vec3; speed: number; loop?: boolean };
-  autoFollow?: { target: RuntimeObject | string; speed: number; offset?: Vec3 };
-  
-  // Pickup
+  autoMove?: { direction: Vec3; speed: number };
+  autoFollow?: { target: any; speed: number; offset?: Vec3 };
   isPickup?: boolean;
   pickupName?: string;
   pickupData?: any;
-  pickupCount?: number;
-  
-  // Hierarchy
   parentId: string | null;
   readonly children: RuntimeObject[];
+  on(event: string, fn: (...args: any[]) => void): () => void;
+  off(event: string, fn: (...args: any[]) => void): void;
+  emit(event: string, ...args: any[]): boolean;
   findFirstChild(name: string): RuntimeObject | null;
   setParent(parent: RuntimeObject | null): void;
-  
-  // Events
-  on(event: "touched", fn: (other: RuntimeObject | RuntimePlayer) => void): () => void;
-  on(event: "untouched", fn: (other: RuntimeObject | RuntimePlayer) => void): () => void;
-  on(event: "touchStarted", fn: (other: RuntimeObject | RuntimePlayer, pen: number, normal: Vec3) => void): () => void;
-  on(event: "touchEnded", fn: (other: RuntimeObject | RuntimePlayer) => void): () => void;
-  on(event: "clicked", fn: (obj: RuntimeObject) => void): () => void;
-  on(event: "destroyed", fn: () => void): () => void;
-  on(event: "collisionStarted", fn: (other: RuntimeObject, contact: { point: Vec3; normal: Vec3 }) => void): () => void;
-  on(event: "collisionEnded", fn: (other: RuntimeObject) => void): () => void;
-  off(event: string, fn: Function): void;
-  
-  // Property changes
   onPropertyChanged(property: string): { on(event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void): () => void };
   GetPropertyChangedSignal(property: string): { on(event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void): () => void };
-  
-  // Attributes
   setAttribute(key: string, value: any): void;
   getAttribute(key: string): any;
   getAttributes(): Record<string, any>;
@@ -108,411 +75,452 @@ interface RuntimePlayer {
   size: number;
   spawnPoint: Vec3;
   up: Vec3;
-  collisionRadius: number;
-  collisionHalfHeight: number;
   autoFaceMovement: boolean;
   ragdoll: boolean;
   killY: number;
-  
-  // Actions
-  takeDamage(amount: number): void;
-  heal(amount: number): void;
+  canFly?: boolean;
+  flying?: boolean;
+  takeDamage(n: number): void;
+  heal(n: number): void;
   kill(): void;
-  teleport(position: Vec3): void;
+  teleport(x: number, y: number, z: number): void;
   respawn(): void;
-  
-  // Inventory
   readonly inventory: Inventory;
-  
-  // Motors (attach objects to player body)
-  motors: {
-    attach(slot: MotorSlot, obj: RuntimeObject, offset?: Vec3, rotation?: Vec3): void;
-    detach(slot: MotorSlot): RuntimeObject | null;
-    get(slot: MotorSlot): RuntimeObject | null;
-    animation: string;
-  };
+  motors: { attach(slot: string, obj: RuntimeObject, offset?: Vec3, rotation?: Vec3): void; detach(slot: string): RuntimeObject | null; get(slot: string): RuntimeObject | null; animation: string; };
 }
-
-type MotorSlot = "rightHand" | "leftHand" | "head" | "back" | "chest";
-
-interface Inventory {
-  items: InventoryItem[];
-  equipped: InventoryItem | null;
-  add(name: string, count?: number, data?: any): void;
-  remove(name: string, count?: number): boolean;
-  has(name: string): boolean;
-  count(name: string): number;
-  equip(name: string): boolean;
-  unequip(): void;
-  drop(name: string): void;
-  on(event: "changed", fn: (items: InventoryItem[]) => void): () => void;
-  on(event: "itemAdded", fn: (item: InventoryItem) => void): () => void;
-  on(event: "itemRemoved", fn: (item: InventoryItem) => void): () => void;
-  on(event: "equipped", fn: (item: InventoryItem | null) => void): () => void;
-}
-
-interface InventoryItem {
-  name: string;
-  count: number;
-  data?: any;
-}
-
-type ContainerName = "Workspace" | "Lighting" | "ReplicatedStorage" | "ServerScriptService" | "StarterPlayer" | "Players";
-
-// -----------------------------------------------------------------------------
-// Input APIs
-// -----------------------------------------------------------------------------
-
-interface KeyboardAPI {
-  /** Subscribe to key press. Returns unsubscribe function. */
-  onPress(key: string, fn: () => void): () => void;
-  /** Subscribe to key release. Returns unsubscribe function. */
-  onRelease(key: string, fn: () => void): () => void;
-  /** Check if key is currently held */
-  isDown(key: string): boolean;
-}
-
-interface MouseAPI {
-  /** Subscribe to 3D object clicks. Callback receives clicked object or null. */
-  onClick(fn: (obj: RuntimeObject | null) => void): () => void;
-}
-
-// -----------------------------------------------------------------------------
-// Camera
-// -----------------------------------------------------------------------------
-
-interface RuntimeCamera {
-  mode: "thirdPerson" | "firstPerson" | "fixed" | "follow";
-  distance: number;
-  minDistance: number;
-  maxDistance: number;
-  offset: Vec3;
-  sensitivity: number;
-  lockYaw: boolean;
-  lockPitch: boolean;
-  position: Vec3;
-  lookAt: Vec3;
-  fov: number;
-}
-
-// -----------------------------------------------------------------------------
-// Run Service (Game Loop)
-// -----------------------------------------------------------------------------
-
-interface RunServiceAPI {
-  input: { on(fn: (dt: number, time: number) => void): () => void };
-  animation: { on(fn: (dt: number, time: number) => void): () => void };
-  physics: { on(fn: (dt: number, time: number) => void): () => void };
-  replication: { on(fn: (dt: number, time: number) => void): () => void };
-  render: { on(fn: (dt: number, time: number) => void): () => void };
-  update: { on(fn: (dt: number, time: number) => void): () => void };
-}
-
-// -----------------------------------------------------------------------------
-// World Events
-// -----------------------------------------------------------------------------
-
-interface WorldAPI {
-  onObjectAdded(fn: (obj: RuntimeObject) => void): () => void;
-  onObjectRemoved(fn: (obj: RuntimeObject) => void): () => void;
-  onPlayerSpawned(fn: (player: RuntimePlayer) => void): () => void;
-  onPlayerDied(fn: (player: RuntimePlayer) => void): () => void;
-}
-
-// -----------------------------------------------------------------------------
-// State
-// -----------------------------------------------------------------------------
-
-interface RuntimeState {
-  get<T = any>(key: string): T | undefined;
-  set(key: string, value: any): void;
-  on(key: string, fn: (value: any, oldValue: any) => void): () => void;
-  keys(): string[];
-  getAll(): Record<string, any>;
-}
-
-// -----------------------------------------------------------------------------
-// GUI
-// -----------------------------------------------------------------------------
-
-interface GuiAPI {
-  text(id: string, text: string, opts?: {
-    x?: number;
-    y?: number;
-    anchor?: "tl" | "tc" | "tr" | "cl" | "cc" | "cr" | "bl" | "bc" | "br";
-    color?: string;
-    size?: number;
-    bg?: string;
-  }): void;
-  button(id: string, text: string, opts?: {
-    x?: number;
-    y?: number;
-    anchor?: "tl" | "tc" | "tr" | "cl" | "cc" | "cr" | "bl" | "bc" | "br";
-    color?: string;
-    size?: number;
-    bg?: string;
-  }, onClick?: () => void): void;
-  clear(id?: string): void;
-}
-
-// -----------------------------------------------------------------------------
-// Tags
-// -----------------------------------------------------------------------------
-
-interface TagsAPI {
-  add(obj: RuntimeObject, tag: string): void;
-  remove(obj: RuntimeObject, tag: string): void;
-  has(obj: RuntimeObject, tag: string): boolean;
-  get(tag: string): RuntimeObject[];
-  all(obj: RuntimeObject): string[];
-}
-
-// -----------------------------------------------------------------------------
-// Tasks
-// -----------------------------------------------------------------------------
-
-interface TaskAPI {
-  wait(seconds: number): Promise<void>;
-  delay(seconds: number, callback: () => void): void;
-  spawn<T>(fn: (...args: any[]) => T, ...args: any[]): T;
-}
-
-// -----------------------------------------------------------------------------
-// Network
-// -----------------------------------------------------------------------------
-
-interface NetworkAPI {
-  server: {
-    broadcast(channel: string, payload: any): void;
-    on(channel: string, fn: (payload: any) => void): () => void;
-  };
-  client: {
-    send(channel: string, payload: any): void;
-    on(channel: string, fn: (payload: any) => void): () => void;
-  };
-}
-
-// -----------------------------------------------------------------------------
-// Raycasting
-// -----------------------------------------------------------------------------
-
-interface RaycastResult {
-  object: RuntimeObject;
-  distance: number;
-  point: Vec3;
-  normal: Vec3;
-}
-
-interface RaycastParams {
-  ignore?: RuntimeObject[];
-  ignoreNames?: string[];
-  maxDistance?: number;
-}
-
-// -----------------------------------------------------------------------------
-// Debug
-// -----------------------------------------------------------------------------
-
-interface DebugAPI {
-  getChildren(obj: RuntimeObject): RuntimeObject[];
-  getDescendants(obj: RuntimeObject): RuntimeObject[];
-  getFullName(obj: RuntimeObject): string;
-  getPropertyNames(obj: RuntimeObject): string[];
-  getObjectsWithTag(tag: string): RuntimeObject[];
-  getEventConnections(obj: RuntimeObject): number;
-}
-
-// -----------------------------------------------------------------------------
-// Classes
-// -----------------------------------------------------------------------------
-
-declare class Emitter<T extends Record<string, any[]>> {
-  on<K extends keyof T>(event: K, fn: (...args: T[K]) => void): () => void;
-  off<K extends keyof T>(event: K, fn: (...args: T[K]) => void): void;
-  emit<K extends keyof T>(event: K, ...args: T[K]): void;
-}
-
-declare class Callable<T extends (...args: any[]) => any> {
-  constructor(fn: T);
-  static create<T extends (...args: any[]) => any>(fn: T): T & { destroy(): void };
-}
-
-declare function Class<T extends new (...args: any[]) => any>(base: T): T;
-
-// -----------------------------------------------------------------------------
-// Global Functions & Variables
-// -----------------------------------------------------------------------------
-
-// Containers
-declare const workspace: Record<string, RuntimeObject>;
-declare const lighting: Record<string, RuntimeObject>;
-declare const replicatedStorage: Record<string, RuntimeObject>;
-declare const serverScriptService: Record<string, RuntimeObject>;
-declare const starterPlayer: Record<string, RuntimeObject>;
-declare const players: Record<string, RuntimeObject>;
-
-// Objects
-declare function create(opts: {
-  name?: string;
-  primitiveType?: "cube" | "sphere" | "cylinder" | "plane";
-  position?: Partial<Vec3>;
-  rotation?: Partial<Vec3>;
-  scale?: Partial<Vec3>;
-  color?: string;
-  anchored?: boolean;
-  canCollide?: boolean;
-  container?: ContainerName;
-  parent?: RuntimeObject;
-  gravity?: boolean | { strength: number; radius: number };
-}): RuntimeObject;
-
-declare function spawn(templateName: string, overrides?: Partial<RuntimeObject>): RuntimeObject | null;
-declare function find(name: string): RuntimeObject | null;
-declare function destroy(target: RuntimeObject | string): void;
-
-// Player
-declare const player: RuntimePlayer;
-declare const inventory: Inventory;
-
-// Input
-declare const keyboard: KeyboardAPI;
-declare const mouse: MouseAPI;
-
-// Systems
-declare const camera: RuntimeCamera;
-declare const world: WorldAPI;
-declare const runService: RunServiceAPI;
-declare const network: NetworkAPI;
-declare const state: RuntimeState;
-declare const tags: TagsAPI;
-declare const gui: GuiAPI;
-declare const task: TaskAPI;
-declare const debug: DebugAPI;
-
-// Timing
-declare const time: number;
-declare const dt: number;
-declare function now(): number;
-declare function every(seconds: number, fn: () => void): () => void;
-declare function after(seconds: number, fn: () => void): () => void;
-declare function wait(seconds: number): Promise<void>;
-
-// Animation
-type Easing = "linear" | "easeIn" | "easeOut" | "easeInOut" | "bounce" | "elastic";
-declare function tween(target: any, to: Record<string, any>, duration: number, easing?: Easing, onDone?: () => void): { cancel(): void };
-
-// Physics
-declare function raycast(origin: Vec3, direction: Vec3, maxDistance?: number, params?: RaycastParams): RaycastResult | null;
-
-// Math
-declare function random(min: number, max: number): number;
-declare function randInt(min: number, max: number): number;
-declare function pick<T>(arr: T[]): T;
-declare function dist(a: Vec3 | RuntimeObject, b: Vec3 | RuntimeObject): number;
-declare function lerp(a: number, b: number, t: number): number;
-declare function clamp(n: number, min: number, max: number): number;
-
-// Modules
-declare function require(moduleName: string): any;
-declare const exports: any;
-declare const module: { exports: any };
-
-// Debug
-declare function log(...args: any[]): void;
-
-// Key handling shortcut
-declare function onKey(key: string, fn: () => void): () => void;
-declare function onUpdate(fn: (dt: number, time: number) => void): () => void;
 `;
 
-/** Autocomplete items for the engine API */
-export const AUTOCOMPLETE_ITEMS: Monaco.languages.CompletionItem[] = [
-  // Objects
-  { label: "create", kind: 1, insertText: "create({\n\tname: \\"\\",\n\tprimitiveType: \\"cube\\",\n\tposition: { x: 0, y: 1, z: 0 },\n\tcolor: \\"#88aaff\\",\n})", insertTextRules: 4, detail: "Create a new object", documentation: "Create a new RuntimeObject with the specified properties." },
-  { label: "spawn", kind: 1, insertText: "spawn(\\"$1\\")", insertTextRules: 4, detail: "Clone from ReplicatedStorage", documentation: "Clone an object from ReplicatedStorage by name." },
-  { label: "find", kind: 1, insertText: "find(\\"$1\\")", insertTextRules: 4, detail: "Find object by name", documentation: "Search all containers for an object by name." },
-  { label: "destroy", kind: 1, insertText: "destroy($1)", insertTextRules: 4, detail: "Remove an object", documentation: "Destroy an object by reference or name." },
-  
-  // Player
-  { label: "player", kind: 5, insertText: "player", detail: "The local player", documentation: "Reference to the current player's RuntimePlayer object." },
-  { label: "player.position", kind: 9, insertText: "player.position", detail: "Player position", documentation: "Player's position as Vec3." },
-  { label: "player.velocity", kind: 9, insertText: "player.velocity", detail: "Player velocity", documentation: "Player's velocity as Vec3." },
-  { label: "player.health", kind: 9, insertText: "player.health", detail: "Player health", documentation: "Player's current health (0-100)." },
-  { label: "player.takeDamage", kind: 1, insertText: "player.takeDamage($1)", insertTextRules: 4, detail: "Damage the player", documentation: "Deal damage to the player." },
-  { label: "player.heal", kind: 1, insertText: "player.heal($1)", insertTextRules: 4, detail: "Heal the player", documentation: "Restore health to the player." },
-  { label: "player.kill", kind: 1, insertText: "player.kill()", detail: "Kill the player", documentation: "Instantly kill the player (triggers respawn)." },
-  { label: "player.respawn", kind: 1, insertText: "player.respawn()", detail: "Respawn the player", documentation: "Respawn the player at their spawn point." },
-  { label: "player.teleport", kind: 1, insertText: "player.teleport({ x: $1, y: $2, z: $3 })", insertTextRules: 4, detail: "Teleport the player", documentation: "Teleport the player to a position." },
-  
-  // Input
-  { label: "keyboard", kind: 5, insertText: "keyboard", detail: "Keyboard input API", documentation: "API for keyboard input handling." },
-  { label: "keyboard.onPress", kind: 1, insertText: "keyboard.onPress(\\"$1\\", () => {\n\t$2\n})", insertTextRules: 4, detail: "On key press", documentation: "Subscribe to key press events." },
-  { label: "keyboard.onRelease", kind: 1, insertText: "keyboard.onRelease(\\"$1\\", () => {\n\t$2\n})", insertTextRules: 4, detail: "On key release", documentation: "Subscribe to key release events." },
-  { label: "keyboard.isDown", kind: 1, insertText: "keyboard.isDown(\\"$1\\")", insertTextRules: 4, detail: "Check if key held", documentation: "Check if a key is currently held down." },
-  { label: "mouse", kind: 5, insertText: "mouse", detail: "Mouse input API", documentation: "API for mouse input handling." },
-  { label: "mouse.onClick", kind: 1, insertText: "mouse.onClick((obj) => {\n\t$1\n})", insertTextRules: 4, detail: "On 3D click", documentation: "Subscribe to 3D object clicks." },
-  
-  // Events
-  { label: ".on(\"touched\")", kind: 1, insertText: ".on(\\"touched\\", (other) => {\n\t$1\n})", insertTextRules: 4, detail: "On touch event", documentation: "Called when this object is touched by another object or player." },
-  { label: ".on(\"clicked\")", kind: 1, insertText: ".on(\\"clicked\\", () => {\n\t$1\n})", insertTextRules: 4, detail: "On click event", documentation: "Called when this object is clicked." },
-  { label: ".on(\"destroyed\")", kind: 1, insertText: ".on(\\"destroyed\\", () => {\n\t$1\n})", insertTextRules: 4, detail: "On destroy event", documentation: "Called when this object is destroyed." },
-  
-  // Timing
-  { label: "every", kind: 1, insertText: "every($1, () => {\n\t$2\n})", insertTextRules: 4, detail: "Repeat every N seconds", documentation: "Call a function repeatedly at the specified interval." },
-  { label: "after", kind: 1, insertText: "after($1, () => {\n\t$2\n})", insertTextRules: 4, detail: "Run after N seconds", documentation: "Call a function once after a delay." },
-  { label: "wait", kind: 1, insertText: "await wait($1)", insertTextRules: 4, detail: "Wait N seconds", documentation: "Pause script execution for the specified duration." },
-  
-  // GUI
-  { label: "gui.text", kind: 1, insertText: "gui.text(\\"$1\\", \\"$2\\", { anchor: \\"tc\\", y: 16 })", insertTextRules: 4, detail: "Display text", documentation: "Display text on the screen." },
-  { label: "gui.button", kind: 1, insertText: "gui.button(\\"$1\\", \\"$2\\", { anchor: \\"br\\", x: 24, y: 24 }, () => {\n\t$3\n})", insertTextRules: 4, detail: "Create a button", documentation: "Create a clickable button on the screen." },
-  { label: "gui.clear", kind: 1, insertText: "gui.clear($1)", insertTextRules: 4, detail: "Clear GUI", documentation: "Clear all or specific GUI elements." },
-  
-  // Run service
-  { label: "runService.update.on", kind: 1, insertText: "runService.update.on((dt) => {\n\t$1\n})", insertTextRules: 4, detail: "Every frame (update)", documentation: "Called every frame during the update phase." },
-  { label: "runService.render.on", kind: 1, insertText: "runService.render.on((dt) => {\n\t$1\n})", insertTextRules: 4, detail: "Every frame (render)", documentation: "Called every frame during the render phase." },
-  { label: "runService.physics.on", kind: 1, insertText: "runService.physics.on((dt) => {\n\t$1\n})", insertTextRules: 4, detail: "Every frame (physics)", documentation: "Called every frame during the physics phase." },
-  
-  // World events
-  { label: "world.onPlayerSpawned", kind: 1, insertText: "world.onPlayerSpawned((p) => {\n\t$1\n})", insertTextRules: 4, detail: "Player spawned", documentation: "Called when a player spawns." },
-  { label: "world.onPlayerDied", kind: 1, insertText: "world.onPlayerDied((p) => {\n\t$1\n})", insertTextRules: 4, detail: "Player died", documentation: "Called when a player dies." },
-  { label: "world.onObjectAdded", kind: 1, insertText: "world.onObjectAdded((obj) => {\n\t$1\n})", insertTextRules: 4, detail: "Object added", documentation: "Called when an object is added to the world." },
-  { label: "world.onObjectRemoved", kind: 1, insertText: "world.onObjectRemoved((obj) => {\n\t$1\n})", insertTextRules: 4, detail: "Object removed", documentation: "Called when an object is removed from the world." },
-  
-  // State
-  { label: "state.get", kind: 1, insertText: "state.get(\\"$1\\")", insertTextRules: 4, detail: "Get state value", documentation: "Get a global state value." },
-  { label: "state.set", kind: 1, insertText: "state.set(\\"$1\\", $2)", insertTextRules: 4, detail: "Set state value", documentation: "Set a global state value." },
-  { label: "state.on", kind: 1, insertText: "state.on(\\"$1\\", (value) => {\n\t$2\n})", insertTextRules: 4, detail: "Watch state", documentation: "Subscribe to state changes." },
-  
-  // Math
-  { label: "random", kind: 1, insertText: "random($1, $2)", insertTextRules: 4, detail: "Random float", documentation: "Generate a random number between min and max." },
-  { label: "randInt", kind: 1, insertText: "randInt($1, $2)", insertTextRules: 4, detail: "Random integer", documentation: "Generate a random integer between min and max (inclusive)." },
-  { label: "pick", kind: 1, insertText: "pick($1)", insertTextRules: 4, detail: "Random array element", documentation: "Pick a random element from an array." },
-  { label: "dist", kind: 1, insertText: "dist($1, $2)", insertTextRules: 4, detail: "Distance between points", documentation: "Calculate the distance between two points or objects." },
-  { label: "lerp", kind: 1, insertText: "lerp($1, $2, $3)", insertTextRules: 4, detail: "Linear interpolation", documentation: "Linearly interpolate between two values." },
-  { label: "clamp", kind: 1, insertText: "clamp($1, $2, $3)", insertTextRules: 4, detail: "Clamp value", documentation: "Clamp a value between min and max." },
-  
-  // Tween
-  { label: "tween", kind: 1, insertText: "tween($1, { $2 }, $3, \\"easeInOut\\")", insertTextRules: 4, detail: "Animate properties", documentation: "Smoothly animate object properties over time." },
-  
-  // Raycast
-  { label: "raycast", kind: 1, insertText: "raycast({ x: $1, y: $2, z: $3 }, { x: 0, y: 0, z: -1 }, 100)", insertTextRules: 4, detail: "Cast a ray", documentation: "Cast a ray and check for intersections." },
-  
-  // Log
-  { label: "log", kind: 1, insertText: "log($1)", insertTextRules: 4, detail: "Log to console", documentation: "Log a message to the script console." },
-  
-  // Containers
-  { label: "workspace", kind: 5, insertText: "workspace", detail: "Workspace container", documentation: "Container for live 3D world objects." },
-  { label: "lighting", kind: 5, insertText: "lighting", detail: "Lighting container", documentation: "Container for lights and atmosphere." },
-  { label: "replicatedStorage", kind: 5, insertText: "replicatedStorage", detail: "ReplicatedStorage container", documentation: "Container for templates and shared modules." },
-].map(item => ({
-  ...item,
-  kind: item.kind as Monaco.languages.CompletionItemKind,
-  range: undefined as any, // Will be set dynamically
-}));
+// ---------------------------------------------------------------------------
+// Completion items — exhaustive engine API catalogue
+// ---------------------------------------------------------------------------
 
-/**
- * Custom dark theme for the engine editor
- */
+type CompletionDef = {
+  label: string;
+  kind: number; // Monaco.languages.CompletionItemKind
+  detail: string;
+  doc: string;
+  insert: string;
+  snippet?: boolean; // if true, insertTextRules = InsertAsSnippet
+};
+
+const K = {
+  Function: 1,
+  Variable: 5,
+  Property: 9,
+  Keyword: 13,
+  Snippet: 14,
+  Module: 8,
+} as const;
+
+const COMPLETIONS: CompletionDef[] = [
+  // ─── Object lifecycle ───────────────────────────────────────────────────
+  {
+    label: "create",
+    kind: K.Function,
+    detail: "create(opts) → RuntimeObject",
+    doc: "Create a new object in the world.\n\nProperties:\n- name?: string\n- primitiveType?: 'cube'|'sphere'|'cylinder'|'plane'\n- position?: Vec3\n- rotation?: Vec3\n- scale?: Vec3\n- color?: string\n- anchored?: boolean\n- canCollide?: boolean\n- container?: ContainerName\n- parent?: RuntimeObject",
+    insert: "create({\n\tname: \"${1:Part}\",\n\tprimitiveType: \"${2:cube}\",\n\tposition: { x: ${3:0}, y: ${4:1}, z: ${5:0} },\n\tcolor: \"${6:#88aaff}\",\n})",
+    snippet: true,
+  },
+  {
+    label: "destroy",
+    kind: K.Function,
+    detail: "destroy(target: RuntimeObject | string) → void",
+    doc: "Destroy an object by reference or by name string.",
+    insert: "destroy(${1:obj})",
+    snippet: true,
+  },
+  {
+    label: "find",
+    kind: K.Function,
+    detail: "find(name: string) → RuntimeObject | null",
+    doc: "Search all containers for an object by name. Returns null if not found.",
+    insert: "find(\"${1:Name}\")",
+    snippet: true,
+  },
+  {
+    label: "spawn",
+    kind: K.Function,
+    detail: "spawn(templateName: string, overrides?) → RuntimeObject | null",
+    doc: "Clone a template from ReplicatedStorage into Workspace. Returns null if template not found.",
+    insert: "spawn(\"${1:TemplateName}\")",
+    snippet: true,
+  },
+
+  // ─── Containers ─────────────────────────────────────────────────────────
+  { label: "workspace", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Live 3D world objects. Rendered and simulated.", insert: "workspace" },
+  { label: "lighting", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Lights and atmosphere. Rendered but not simulated.", insert: "lighting" },
+  { label: "players", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Player avatars and per-player data. Contains active players at runtime.", insert: "players" },
+  { label: "replicatedStorage", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Templates and ModuleScripts. Not rendered — use spawn() to clone into Workspace.", insert: "replicatedStorage" },
+  { label: "serverScriptService", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Server-authoritative scripts. Not rendered.", insert: "serverScriptService" },
+  { label: "starterPlayer", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Scripts and objects cloned to each player on join.", insert: "starterPlayer" },
+
+  // ─── Player ─────────────────────────────────────────────────────────────
+  { label: "player", kind: K.Variable, detail: "RuntimePlayer", doc: "The local player object.", insert: "player" },
+  { label: "player.position", kind: K.Property, detail: "Vec3 — { x, y, z }", doc: "Player world position (feet).", insert: "player.position" },
+  { label: "player.rotation", kind: K.Property, detail: "Vec3 — { x, y, z } radians", doc: "Player rotation. rotation.y is yaw.", insert: "player.rotation" },
+  { label: "player.velocity", kind: K.Property, detail: "Vec3", doc: "Current player velocity.", insert: "player.velocity" },
+  { label: "player.health", kind: K.Property, detail: "number", doc: "Current health (0 – maxHealth).", insert: "player.health" },
+  { label: "player.maxHealth", kind: K.Property, detail: "number", doc: "Maximum health (default 100).", insert: "player.maxHealth" },
+  { label: "player.walkSpeed", kind: K.Property, detail: "number", doc: "Walk speed (default 6).", insert: "player.walkSpeed" },
+  { label: "player.runSpeed", kind: K.Property, detail: "number", doc: "Run speed when Shift held (default 12).", insert: "player.runSpeed" },
+  { label: "player.jumpPower", kind: K.Property, detail: "number", doc: "Jump force (default 8).", insert: "player.jumpPower" },
+  { label: "player.size", kind: K.Property, detail: "number", doc: "Avatar size multiplier (default 1).", insert: "player.size" },
+  { label: "player.killY", kind: K.Property, detail: "number", doc: "Auto-kill below this Y level (default -50).", insert: "player.killY" },
+  { label: "player.canFly", kind: K.Property, detail: "boolean", doc: "Allow the player to fly (Space = up, Shift = down).", insert: "player.canFly" },
+  { label: "player.autoFaceMovement", kind: K.Property, detail: "boolean", doc: "Auto-rotate player to face movement direction.", insert: "player.autoFaceMovement" },
+  { label: "player.spawnPoint", kind: K.Property, detail: "Vec3", doc: "Position used when player respawns.", insert: "player.spawnPoint" },
+  { label: "player.username", kind: K.Property, detail: "string (read-only)", doc: "Player's display name.", insert: "player.username" },
+  { label: "player.onGround", kind: K.Property, detail: "boolean (read-only)", doc: "True while player is standing on a surface.", insert: "player.onGround" },
+  {
+    label: "player.takeDamage",
+    kind: K.Function,
+    detail: "player.takeDamage(amount: number) → void",
+    doc: "Deal damage to the player. If health reaches 0, player dies and respawns.",
+    insert: "player.takeDamage(${1:10})",
+    snippet: true,
+  },
+  {
+    label: "player.heal",
+    kind: K.Function,
+    detail: "player.heal(amount: number) → void",
+    doc: "Restore player health (clamped to maxHealth).",
+    insert: "player.heal(${1:20})",
+    snippet: true,
+  },
+  {
+    label: "player.kill",
+    kind: K.Function,
+    detail: "player.kill() → void",
+    doc: "Instantly kill the player. Triggers ragdoll then respawn.",
+    insert: "player.kill()",
+    snippet: false,
+  },
+  {
+    label: "player.respawn",
+    kind: K.Function,
+    detail: "player.respawn() → void",
+    doc: "Respawn the player at player.spawnPoint.",
+    insert: "player.respawn()",
+    snippet: false,
+  },
+  {
+    label: "player.teleport",
+    kind: K.Function,
+    detail: "player.teleport(x, y, z) → void",
+    doc: "Teleport the player to an absolute world position.",
+    insert: "player.teleport(${1:0}, ${2:5}, ${3:0})",
+    snippet: true,
+  },
+  {
+    label: "player.inventory",
+    kind: K.Property,
+    detail: "Inventory",
+    doc: "Player inventory. Use .add(), .remove(), .has(), .get(), .equip(), .drop(), .clear().",
+    insert: "player.inventory",
+  },
+  {
+    label: "player.motors",
+    kind: K.Property,
+    detail: "MotorAPI",
+    doc: "Attach/detach objects to player body slots: rightHand, leftHand, head, back, chest.",
+    insert: "player.motors",
+  },
+
+  // ─── Object events ──────────────────────────────────────────────────────
+  {
+    label: "obj.on",
+    kind: K.Function,
+    detail: "obj.on(event, fn) → unsubscribe",
+    doc: "Subscribe to an object event. Internal events: touched, untouched, touchStarted, touchEnded, clicked, destroyed, collisionStarted, collisionEnded, woke, slept.\nCustom events: any name you choose — pair with obj.emit().\nReturns an unsubscribe function.",
+    insert: ".on(\"${1:touched}\", (${2:other}) => {\n\t${3}\n})",
+    snippet: true,
+  },
+  {
+    label: "obj.off",
+    kind: K.Function,
+    detail: "obj.off(event, fn) → void",
+    doc: "Unsubscribe a handler from an object event.",
+    insert: ".off(\"${1:event}\", ${2:handler})",
+    snippet: true,
+  },
+  {
+    label: "obj.emit",
+    kind: K.Function,
+    detail: "obj.emit(event, ...args) → boolean",
+    doc: "Fire a custom event on this object. All listeners registered with obj.on(event) will be called.\n\nIMPORTANT: You cannot emit engine-internal events (touched, clicked, destroyed, etc.). Attempting to do so logs an error and returns false.\n\nReturns true on success, false if the event name is reserved.",
+    insert: ".emit(\"${1:myEvent}\", ${2})",
+    snippet: true,
+  },
+
+  // ─── Keyboard / mouse ────────────────────────────────────────────────────
+  { label: "keyboard", kind: K.Variable, detail: "KeyboardAPI", doc: "Keyboard input API.", insert: "keyboard" },
+  {
+    label: "keyboard.onPress",
+    kind: K.Function,
+    detail: "keyboard.onPress(key, fn) → unsubscribe",
+    doc: "Fire fn once each time the key is pressed down.\nKey names: letter keys ('a'-'z'), 'space', 'shift', 'control', 'alt', 'enter', 'escape', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'.",
+    insert: "keyboard.onPress(\"${1:e}\", () => {\n\t${2}\n})",
+    snippet: true,
+  },
+  {
+    label: "keyboard.onRelease",
+    kind: K.Function,
+    detail: "keyboard.onRelease(key, fn) → unsubscribe",
+    doc: "Fire fn once each time the key is released.",
+    insert: "keyboard.onRelease(\"${1:e}\", () => {\n\t${2}\n})",
+    snippet: true,
+  },
+  {
+    label: "keyboard.isDown",
+    kind: K.Function,
+    detail: "keyboard.isDown(key) → boolean",
+    doc: "Returns true while the key is currently held down. Useful inside update loops.",
+    insert: "keyboard.isDown(\"${1:w}\")",
+    snippet: true,
+  },
+  { label: "mouse", kind: K.Variable, detail: "MouseAPI", doc: "Mouse input API.", insert: "mouse" },
+  {
+    label: "mouse.onClick",
+    kind: K.Function,
+    detail: "mouse.onClick(fn) → unsubscribe",
+    doc: "Called on every 3D viewport click. Callback receives the clicked RuntimeObject or null (background).",
+    insert: "mouse.onClick((obj) => {\n\tif (obj) {\n\t\t${1}\n\t}\n})",
+    snippet: true,
+  },
+  { label: "onKey", kind: K.Function, detail: "onKey(key, fn) → unsubscribe", doc: "Shorthand for keyboard.onPress(key, fn).", insert: "onKey(\"${1:e}\", () => {\n\t${2}\n})", snippet: true },
+
+  // ─── Timing ──────────────────────────────────────────────────────────────
+  { label: "time", kind: K.Variable, detail: "number — seconds elapsed", doc: "Total game time elapsed since Play started, updated each frame.", insert: "time" },
+  { label: "dt", kind: K.Variable, detail: "number — seconds since last frame", doc: "Delta time (seconds) since the previous frame. Use in update loops: pos += speed * dt.", insert: "dt" },
+  { label: "now", kind: K.Function, detail: "now() → number", doc: "Returns current game time (same as the `time` global).", insert: "now()" },
+  {
+    label: "every",
+    kind: K.Function,
+    detail: "every(seconds, fn) → cancel()",
+    doc: "Call fn repeatedly at the given interval (seconds). Returns a cancel function.",
+    insert: "every(${1:1}, () => {\n\t${2}\n})",
+    snippet: true,
+  },
+  {
+    label: "after",
+    kind: K.Function,
+    detail: "after(seconds, fn) → cancel()",
+    doc: "Call fn once after a delay (seconds). Returns a cancel function.",
+    insert: "after(${1:2}, () => {\n\t${2}\n})",
+    snippet: true,
+  },
+  {
+    label: "wait",
+    kind: K.Function,
+    detail: "await wait(seconds) → Promise<void>",
+    doc: "Pause async script execution for the given duration. Must be used with await inside an async context.",
+    insert: "await wait(${1:1})",
+    snippet: true,
+  },
+  {
+    label: "onUpdate",
+    kind: K.Function,
+    detail: "onUpdate(fn) → unsubscribe",
+    doc: "Shorthand for runService.update.on(fn). Runs fn every frame with (dt, time).",
+    insert: "onUpdate((dt) => {\n\t${1}\n})",
+    snippet: true,
+  },
+
+  // ─── runService ──────────────────────────────────────────────────────────
+  { label: "runService", kind: K.Variable, detail: "RunServiceAPI", doc: "Game loop event channels. Phase order: input → animation → replication → physics → render → update.", insert: "runService" },
+  {
+    label: "runService.update.on",
+    kind: K.Function,
+    detail: "runService.update.on(fn) → unsubscribe",
+    doc: "Run fn every frame (post-physics, pre-render). Receives (dt, time).",
+    insert: "runService.update.on((dt) => {\n\t${1}\n})",
+    snippet: true,
+  },
+  {
+    label: "runService.physics.on",
+    kind: K.Function,
+    detail: "runService.physics.on(fn) → unsubscribe",
+    doc: "Run fn during the physics step. Receives (dt, time).",
+    insert: "runService.physics.on((dt) => {\n\t${1}\n})",
+    snippet: true,
+  },
+  {
+    label: "runService.render.on",
+    kind: K.Function,
+    detail: "runService.render.on(fn) → unsubscribe",
+    doc: "Run fn just before rendering. Receives (dt, time).",
+    insert: "runService.render.on((dt) => {\n\t${1}\n})",
+    snippet: true,
+  },
+
+  // ─── World events ────────────────────────────────────────────────────────
+  { label: "world", kind: K.Variable, detail: "WorldAPI", doc: "Global game-lifecycle events.", insert: "world" },
+  { label: "world.onPlayerSpawned", kind: K.Function, detail: "world.onPlayerSpawned(fn)", doc: "Called when the player spawns or respawns.", insert: "world.onPlayerSpawned((p) => {\n\t${1}\n})", snippet: true },
+  { label: "world.onPlayerDied", kind: K.Function, detail: "world.onPlayerDied(fn)", doc: "Called when the player dies.", insert: "world.onPlayerDied((p) => {\n\t${1}\n})", snippet: true },
+  { label: "world.onObjectAdded", kind: K.Function, detail: "world.onObjectAdded(fn)", doc: "Called when any object is added to the world.", insert: "world.onObjectAdded((obj) => {\n\t${1}\n})", snippet: true },
+  { label: "world.onObjectRemoved", kind: K.Function, detail: "world.onObjectRemoved(fn)", doc: "Called when any object is removed from the world.", insert: "world.onObjectRemoved((obj) => {\n\t${1}\n})", snippet: true },
+
+  // ─── Camera ──────────────────────────────────────────────────────────────
+  { label: "camera", kind: K.Variable, detail: "RuntimeCamera", doc: "Camera settings. Modes: thirdPerson, firstPerson, scripted, free.", insert: "camera" },
+  { label: "camera.mode", kind: K.Property, detail: "string", doc: "Camera mode: 'thirdPerson' (default), 'firstPerson', 'scripted', 'free'.", insert: "camera.mode" },
+  { label: "camera.distance", kind: K.Property, detail: "number", doc: "Third-person distance from player (default 6).", insert: "camera.distance" },
+  { label: "camera.fov", kind: K.Property, detail: "number (degrees)", doc: "Field of view in degrees (default 60).", insert: "camera.fov" },
+  { label: "camera.sensitivity", kind: K.Property, detail: "number", doc: "Mouse sensitivity multiplier (default 1).", insert: "camera.sensitivity" },
+  { label: "camera.offset", kind: K.Property, detail: "Vec3", doc: "Look-at offset relative to player feet.", insert: "camera.offset" },
+  { label: "camera.position", kind: K.Property, detail: "Vec3", doc: "Camera world position (set in 'scripted' mode).", insert: "camera.position" },
+  { label: "camera.lookAt", kind: K.Property, detail: "Vec3", doc: "Camera look-at target (set in 'scripted' mode).", insert: "camera.lookAt" },
+
+  // ─── Physics ─────────────────────────────────────────────────────────────
+  { label: "physics", kind: K.Variable, detail: "RuntimePhysics", doc: "Global physics settings.", insert: "physics" },
+  { label: "physics.gravity", kind: K.Property, detail: "number (m/s²)", doc: "Global gravity (default 9.81). Set to 0 for zero-G.", insert: "physics.gravity" },
+  { label: "physics.airDrag", kind: K.Property, detail: "number", doc: "Air resistance applied to unanchored objects (default 0).", insert: "physics.airDrag" },
+
+  // ─── State ───────────────────────────────────────────────────────────────
+  { label: "state", kind: K.Variable, detail: "RuntimeState", doc: "Global key-value store for game state. Supports reactive subscriptions.", insert: "state" },
+  { label: "state.set", kind: K.Function, detail: "state.set(key, value) → void", doc: "Set a state value. Triggers listeners registered with state.on().", insert: "state.set(\"${1:key}\", ${2:value})", snippet: true },
+  { label: "state.get", kind: K.Function, detail: "state.get(key) → any", doc: "Read a state value. Returns undefined if not set.", insert: "state.get(\"${1:key}\")", snippet: true },
+  { label: "state.on", kind: K.Function, detail: "state.on(key, fn) → unsubscribe", doc: "Watch a state key for changes. fn(newValue, oldValue).", insert: "state.on(\"${1:key}\", (val) => {\n\t${2}\n})", snippet: true },
+  { label: "state.keys", kind: K.Function, detail: "state.keys() → string[]", doc: "Returns all keys currently stored in state.", insert: "state.keys()" },
+  { label: "state.getAll", kind: K.Function, detail: "state.getAll() → Record<string, any>", doc: "Returns a snapshot of all state values.", insert: "state.getAll()" },
+
+  // ─── GUI ─────────────────────────────────────────────────────────────────
+  { label: "gui", kind: K.Variable, detail: "GuiAPI", doc: "Script-driven HUD overlay. Elements are positioned with anchor + offset.", insert: "gui" },
+  {
+    label: "gui.text",
+    kind: K.Function,
+    detail: "gui.text(id, text, opts?) → void",
+    doc: "Display a text element on screen.\n\nOpts: anchor ('tl','tc','tr','cl','cc','cr','bl','bc','br'), x, y (px offset), size (font size), color (hex), bg (background).",
+    insert: "gui.text(\"${1:label}\", \"${2:Hello}\", { anchor: \"${3:tc}\", y: ${4:16}, size: ${5:18} })",
+    snippet: true,
+  },
+  {
+    label: "gui.button",
+    kind: K.Function,
+    detail: "gui.button(id, text, opts?, onClick?) → void",
+    doc: "Create a clickable button on screen. onClick receives the game API.",
+    insert: "gui.button(\"${1:btn}\", \"${2:Click me}\", { anchor: \"${3:br}\", x: 24, y: 24 }, () => {\n\t${4}\n})",
+    snippet: true,
+  },
+  {
+    label: "gui.clear",
+    kind: K.Function,
+    detail: "gui.clear(id?) → void",
+    doc: "Remove a GUI element by id, or clear all elements if id is omitted.",
+    insert: "gui.clear(${1})",
+    snippet: true,
+  },
+
+  // ─── Tags ────────────────────────────────────────────────────────────────
+  { label: "tags", kind: K.Variable, detail: "TagsAPI", doc: "Tag objects for group queries.", insert: "tags" },
+  { label: "tags.add", kind: K.Function, detail: "tags.add(obj, tag) → void", doc: "Add a tag to an object.", insert: "tags.add(${1:obj}, \"${2:enemy}\")", snippet: true },
+  { label: "tags.remove", kind: K.Function, detail: "tags.remove(obj, tag) → void", doc: "Remove a tag from an object.", insert: "tags.remove(${1:obj}, \"${2:tag}\")", snippet: true },
+  { label: "tags.has", kind: K.Function, detail: "tags.has(obj, tag) → boolean", doc: "Check if an object has a tag.", insert: "tags.has(${1:obj}, \"${2:tag}\")", snippet: true },
+  { label: "tags.get", kind: K.Function, detail: "tags.get(tag) → RuntimeObject[]", doc: "Return all objects with the given tag.", insert: "tags.get(\"${1:enemy}\")", snippet: true },
+  { label: "tags.all", kind: K.Function, detail: "tags.all(obj) → string[]", doc: "Return all tags on an object.", insert: "tags.all(${1:obj})", snippet: true },
+
+  // ─── Math ────────────────────────────────────────────────────────────────
+  { label: "random", kind: K.Function, detail: "random(min, max) → number", doc: "Random float between min (inclusive) and max (exclusive).", insert: "random(${1:0}, ${2:10})", snippet: true },
+  { label: "randInt", kind: K.Function, detail: "randInt(min, max) → number", doc: "Random integer between min and max (inclusive).", insert: "randInt(${1:1}, ${2:6})", snippet: true },
+  { label: "pick", kind: K.Function, detail: "pick(arr) → T", doc: "Pick a random element from an array.", insert: "pick([${1}])", snippet: true },
+  { label: "dist", kind: K.Function, detail: "dist(a, b) → number", doc: "Distance between two Vec3 objects or RuntimeObjects.", insert: "dist(${1:a}, ${2:b})", snippet: true },
+  { label: "lerp", kind: K.Function, detail: "lerp(a, b, t) → number", doc: "Linear interpolation between a and b by factor t (0–1).", insert: "lerp(${1:0}, ${2:100}, ${3:0.5})", snippet: true },
+  { label: "clamp", kind: K.Function, detail: "clamp(n, min, max) → number", doc: "Clamp n between min and max.", insert: "clamp(${1:n}, ${2:0}, ${3:1})", snippet: true },
+
+  // ─── Raycasting ──────────────────────────────────────────────────────────
+  {
+    label: "raycast",
+    kind: K.Function,
+    detail: "raycast(origin, direction, maxDist?, params?) → RaycastResult | null",
+    doc: "Cast a ray. Returns { object, distance, point, normal } or null.\n\nParams: { ignore: RuntimeObject[], filter: (o) => boolean, maxDistance: number }",
+    insert: "raycast(\n\tplayer.position,\n\t{ x: 0, y: -1, z: 0 },\n\t${1:50}\n)",
+    snippet: true,
+  },
+
+  // ─── Tweens ──────────────────────────────────────────────────────────────
+  {
+    label: "tween",
+    kind: K.Function,
+    detail: "tween(target, to, duration, easing?, onDone?) → cancel()",
+    doc: "Smoothly animate any numeric properties on target over duration (seconds).\n\nEasing: 'linear', 'easeInQuad', 'easeOutQuad', 'easeInOutQuad', 'easeInCubic', 'easeOutCubic', 'easeInOutCubic'.",
+    insert: "tween(${1:obj}.position, { x: ${2:10} }, ${3:1}, \"${4:easeOutQuad}\")",
+    snippet: true,
+  },
+
+  // ─── Networking ──────────────────────────────────────────────────────────
+  { label: "network", kind: K.Variable, detail: "NetworkAPI", doc: "Real-time networking API for multiplayer. Uses server/client channels.", insert: "network" },
+  { label: "network.server.broadcast", kind: K.Function, detail: "network.server.broadcast(channel, payload)", doc: "Send a message from server to all connected clients.", insert: "network.server.broadcast(\"${1:channel}\", ${2:payload})", snippet: true },
+  { label: "network.server.on", kind: K.Function, detail: "network.server.on(channel, fn) → unsubscribe", doc: "Listen for client messages on the server.", insert: "network.server.on(\"${1:channel}\", (payload) => {\n\t${2}\n})", snippet: true },
+  { label: "network.client.send", kind: K.Function, detail: "network.client.send(channel, payload)", doc: "Send a message from client to server.", insert: "network.client.send(\"${1:channel}\", ${2:payload})", snippet: true },
+  { label: "network.client.on", kind: K.Function, detail: "network.client.on(channel, fn) → unsubscribe", doc: "Listen for server messages on the client.", insert: "network.client.on(\"${1:channel}\", (payload) => {\n\t${2}\n})", snippet: true },
+
+  // ─── Modules ─────────────────────────────────────────────────────────────
+  { label: "require", kind: K.Function, detail: "require(moduleName) → any", doc: "Load a ModuleScript from ReplicatedStorage by name. Returns the module's exports.", insert: "require(\"${1:MyModule}\")", snippet: true },
+  { label: "exports", kind: K.Variable, detail: "any", doc: "In a ModuleScript — use this object to expose your public API.", insert: "exports" },
+
+  // ─── Debug ───────────────────────────────────────────────────────────────
+  { label: "log", kind: K.Function, detail: "log(...args) → void", doc: "Print a message to the in-game console. Supports multiple arguments.", insert: "log(${1})", snippet: true },
+  { label: "debug", kind: K.Variable, detail: "DebugAPI", doc: "Advanced debugging utilities.", insert: "debug" },
+  { label: "debug.getChildren", kind: K.Function, detail: "debug.getChildren(obj) → RuntimeObject[]", doc: "Get direct children of an object.", insert: "debug.getChildren(${1:obj})", snippet: true },
+  { label: "debug.getDescendants", kind: K.Function, detail: "debug.getDescendants(obj) → RuntimeObject[]", doc: "Get all descendants of an object recursively.", insert: "debug.getDescendants(${1:obj})", snippet: true },
+  { label: "debug.getFullName", kind: K.Function, detail: "debug.getFullName(obj) → string", doc: "Get the full dotted path of an object (e.g. 'Workspace.Platform.Coin').", insert: "debug.getFullName(${1:obj})", snippet: true },
+
+  // ─── Tasks ───────────────────────────────────────────────────────────────
+  { label: "task", kind: K.Variable, detail: "TaskAPI", doc: "Coroutine-style task scheduling.", insert: "task" },
+  { label: "task.spawn", kind: K.Function, detail: "task.spawn(fn, ...args)", doc: "Run fn in a new concurrent task (doesn't block current script).", insert: "task.spawn(() => {\n\t${1}\n})", snippet: true },
+  { label: "task.delay", kind: K.Function, detail: "task.delay(seconds, fn)", doc: "Run fn after a delay without blocking the current script.", insert: "task.delay(${1:1}, () => {\n\t${2}\n})", snippet: true },
+  { label: "task.wait", kind: K.Function, detail: "await task.wait(seconds)", doc: "Async wait — same as await wait().", insert: "await task.wait(${1:1})", snippet: true },
+
+  // ─── Inventory ───────────────────────────────────────────────────────────
+  {
+    label: "player.inventory.add",
+    kind: K.Function,
+    detail: "inventory.add(name, opts?) → InventoryItem | null",
+    doc: "Add items to the player's inventory.\n\nOpts: { count?: number, template?: string, data?: Record<string, any> }\n\nReturns null if inventory is full.",
+    insert: "player.inventory.add(\"${1:Item}\")",
+    snippet: true,
+  },
+  { label: "player.inventory.remove", kind: K.Function, detail: "inventory.remove(name, count?)", doc: "Remove items from inventory. Returns number removed.", insert: "player.inventory.remove(\"${1:Item}\")", snippet: true },
+  { label: "player.inventory.has", kind: K.Function, detail: "inventory.has(name, count?) → boolean", doc: "Check if inventory contains at least count of item.", insert: "player.inventory.has(\"${1:Item}\")", snippet: true },
+  { label: "player.inventory.get", kind: K.Function, detail: "inventory.get(name) → InventoryItem | null", doc: "Get an item from inventory by name.", insert: "player.inventory.get(\"${1:Item}\")", snippet: true },
+  { label: "player.inventory.equip", kind: K.Function, detail: "inventory.equip(name | null)", doc: "Equip an item (or pass null to unequip).", insert: "player.inventory.equip(\"${1:Item}\")", snippet: true },
+  { label: "player.inventory.drop", kind: K.Function, detail: "inventory.drop(name, count?) → RuntimeObject | null", doc: "Drop items in front of player. Spawns from ReplicatedStorage template if available.", insert: "player.inventory.drop(\"${1:Item}\")", snippet: true },
+  { label: "player.inventory.clear", kind: K.Function, detail: "inventory.clear()", doc: "Remove all items from inventory.", insert: "player.inventory.clear()" },
+  { label: "player.inventory.items", kind: K.Property, detail: "InventoryItem[]", doc: "Array of all items in inventory.", insert: "player.inventory.items" },
+  { label: "player.inventory.equipped", kind: K.Property, detail: "InventoryItem | null", doc: "Currently equipped item, or null.", insert: "player.inventory.equipped" },
+  { label: "player.inventory.maxSlots", kind: K.Property, detail: "number", doc: "Maximum inventory capacity (default 32).", insert: "player.inventory.maxSlots" },
+
+  // ─── Motors ──────────────────────────────────────────────────────────────
+  {
+    label: "player.motors.attach",
+    kind: K.Function,
+    detail: "motors.attach(slot, obj, offset?, rotation?)",
+    doc: "Attach an object to a player body slot.\nSlots: 'rightHand', 'leftHand', 'head', 'back', 'chest'",
+    insert: "player.motors.attach(\"${1:rightHand}\", ${2:obj})",
+    snippet: true,
+  },
+  { label: "player.motors.detach", kind: K.Function, detail: "motors.detach(slot) → RuntimeObject | null", doc: "Detach the object in a body slot. Returns the detached object.", insert: "player.motors.detach(\"${1:rightHand}\")", snippet: true },
+  { label: "player.motors.get", kind: K.Function, detail: "motors.get(slot) → RuntimeObject | null", doc: "Get the object currently attached to a body slot.", insert: "player.motors.get(\"${1:rightHand}\")", snippet: true },
+
+  // ─── Classes ─────────────────────────────────────────────────────────────
+  {
+    label: "Emitter",
+    kind: K.Module,
+    detail: "class Emitter<T>",
+    doc: "Custom typed event emitter.\n\nUsage:\nconst bus = new Emitter();\nbus.on('event', fn);\nbus.emit('event', ...args);",
+    insert: "new Emitter()",
+  },
+  {
+    label: "Class",
+    kind: K.Module,
+    detail: "Class(base) → extended class",
+    doc: "OOP class builder for engine-style inheritance.",
+    insert: "Class(${1})",
+    snippet: true,
+  },
+];
+
+/** Custom dark theme — keep the exact same look */
 export const ENGINE_EDITOR_THEME: Monaco.editor.IStandaloneThemeData = {
   base: "vs-dark",
   inherit: true,
@@ -538,110 +546,145 @@ export const ENGINE_EDITOR_THEME: Monaco.editor.IStandaloneThemeData = {
 };
 
 /**
- * Configure Monaco editor for the engine scripting environment.
+ * Configure Monaco for the engine editor.
+ * - Kills ALL built-in JS/TS IntelliSense
+ * - Registers our own completion + hover providers
  */
 export function configureMonacoForEngine(monaco: typeof Monaco): void {
-  // Register the engine theme
+  // Register theme
   monaco.editor.defineTheme("engine-dark", ENGINE_EDITOR_THEME);
-  
-  // Add type definitions for autocomplete
+
+  // ── DISABLE built-in TypeScript/JavaScript completions ──────────────────
+  // Turn off the TS language service entirely for JS
   monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
-    noSemanticValidation: false,
-    noSyntaxValidation: false,
+    noSemanticValidation: true,   // no red squiggles from TS inference
+    noSyntaxValidation: false,    // keep syntax errors (missing bracket etc.)
   });
-  
+
   monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
     target: monaco.languages.typescript.ScriptTarget.ESNext,
     allowNonTsExtensions: true,
-    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-    module: monaco.languages.typescript.ModuleKind.CommonJS,
+    noLib: true, // DO NOT include standard lib — kills built-in completions
+    module: monaco.languages.typescript.ModuleKind.None,
     noEmit: true,
-    lib: ["esnext"],
   });
-  
-  // Add type definitions
+
+  // Add our type definitions only for hover (not for inference — noLib: true)
   monaco.languages.typescript.javascriptDefaults.addExtraLib(
     ENGINE_TYPE_DEFS,
     "ts:engine.d.ts"
   );
-  
-  // Register custom completion provider
+
+  // ── CUSTOM completion provider ────────────────────────────────────────────
+  const InsertAsSnippet = 4 as Monaco.languages.CompletionItemInsertTextRule;
+
   monaco.languages.registerCompletionItemProvider("javascript", {
-    provideCompletionItems: (model, position) => {
+    triggerCharacters: [".", " ", "(", '"', "'"],
+    provideCompletionItems(model, position) {
+      const line = model.getLineContent(position.lineNumber);
       const word = model.getWordUntilPosition(position);
-      const range = {
+      const charBefore = line[position.column - 2] ?? "";
+
+      const range: Monaco.IRange = {
         startLineNumber: position.lineNumber,
         endLineNumber: position.lineNumber,
         startColumn: word.startColumn,
         endColumn: word.endColumn,
       };
-      
-      return {
-        suggestions: AUTOCOMPLETE_ITEMS.map(item => ({
-          ...item,
+
+      // Build context-aware suggestions
+      const suggestions: Monaco.languages.CompletionItem[] = [];
+
+      for (const item of COMPLETIONS) {
+        // For dotted completions (e.g. "player.health"), only offer if the
+        // prefix before the dot matches, OR if the user typed the label start.
+        const isDotted = item.label.includes(".");
+
+        if (isDotted) {
+          const [prefix] = item.label.split(".");
+          // Show dotted members if cursor is after a dot and the text before
+          // the dot ends with our prefix, OR always as a global completion.
+          const textBefore = line.slice(0, position.column - 1);
+          const afterDot = charBefore === ".";
+
+          if (afterDot) {
+            // Check if the thing before the dot is our prefix
+            if (!textBefore.trimEnd().endsWith(prefix)) {
+              // Still add if label starts with what user typed
+              if (!item.label.startsWith(word.word) && word.word.length > 0) continue;
+            }
+          }
+        }
+
+        suggestions.push({
+          label: item.label,
+          kind: item.kind as Monaco.languages.CompletionItemKind,
+          detail: item.detail,
+          documentation: { value: item.doc },
+          insertText: item.insert,
+          insertTextRules: item.snippet ? InsertAsSnippet : undefined,
           range,
-        })),
-      };
+          sortText: isDotted ? "b" + item.label : "a" + item.label,
+        });
+      }
+
+      return { suggestions, incomplete: false };
     },
   });
-  
-  // Register hover provider for documentation
+
+  // ── HOVER documentation provider ─────────────────────────────────────────
   monaco.languages.registerHoverProvider("javascript", {
-    provideHover: (model, position) => {
+    provideHover(model, position) {
       const word = model.getWordAtPosition(position);
       if (!word) return null;
-      
-      const item = AUTOCOMPLETE_ITEMS.find(
-        i => i.label === word.word || i.label.startsWith(word.word + ".")
+
+      const found = COMPLETIONS.find(
+        (i) => i.label === word.word || i.label.endsWith("." + word.word)
       );
-      
-      if (item && item.documentation) {
-        return {
-          contents: [{ value: \`**\${item.label}**\\n\\n\${item.documentation}\` }],
-        };
-      }
-      
-      return null;
+      if (!found) return null;
+
+      return {
+        contents: [
+          { value: `**${found.label}** — ${found.detail}` },
+          { value: found.doc },
+        ],
+      };
     },
   });
 }
 
 /**
- * Editor default options optimized for the engine scripting experience.
+ * Default Monaco editor options that disable ALL built-in suggestion triggers.
+ * Merge these into the MonacoEditor options prop.
  */
 export const ENGINE_EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   theme: "engine-dark",
-  language: "javascript",
   fontSize: 14,
-  fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+  fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
   fontLigatures: true,
   lineNumbers: "on",
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
-  automaticLayout: true,
+  wordWrap: "on",
   tabSize: 2,
   insertSpaces: true,
-  wordWrap: "on",
-  formatOnPaste: true,
-  formatOnType: true,
+  automaticLayout: true,
+  padding: { top: 12, bottom: 12 },
+  renderLineHighlight: "line",
+  // ── kill built-in autocomplete triggers ──
+  quickSuggestions: { other: true, comments: false, strings: false },
   suggestOnTriggerCharacters: true,
-  quickSuggestions: {
-    other: true,
-    comments: false,
-    strings: true,
-  },
-  parameterHints: { enabled: true },
-  suggest: {
-    showKeywords: true,
-    showSnippets: true,
-    showFunctions: true,
-    showVariables: true,
-    showClasses: true,
-    showMethods: true,
-    showProperties: true,
-  },
+  acceptSuggestionOnEnter: "on",
+  parameterHints: { enabled: false }, // no signature popup
+  // ── keep these on ──
+  formatOnPaste: false,
+  formatOnType: false,
+  tabCompletion: "off",
+  folding: true,
+  foldingHighlight: true,
   bracketPairColorization: { enabled: true },
-  autoClosingBrackets: "always",
-  autoClosingQuotes: "always",
-  autoIndent: "full",
+  guides: { bracketPairs: true },
 };
+
+// Legacy export for compat with older Editor.tsx imports
+export const AUTOCOMPLETE_ITEMS = COMPLETIONS;
