@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,28 +12,35 @@ import Profile from "@/pages/Profile";
 import Games from "@/pages/Games";
 import EditorPage from "@/pages/Editor";
 
-function Router() {
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (!isAuthenticated) return <Redirect to="/auth" />;
+  return <Component />;
+}
 
+function RootRoute() {
+  const { isAuthenticated, isLoading } = useAuth();
+  if (isLoading) return null;
+  if (isAuthenticated) return <Dashboard />;
+  return <Landing />;
+}
+
+function Router() {
   return (
     <Switch>
-      {/* Public routes */}
       <Route path="/auth" component={AuthPage} />
       <Route path="/games" component={Games} />
       <Route path="/profile/:userId" component={Profile} />
-      
-      {/* Conditional root route */}
-      {isLoading || !isAuthenticated ? (
-        <Route path="/" component={Landing} />
-      ) : (
-        <>
-          <Route path="/" component={Dashboard} />
-          <Route path="/dashboard" component={Dashboard} />
-          <Route path="/editor/:gameId" component={EditorPage} />
-        </>
-      )}
-      
-      {/* 404 */}
+      <Route path="/dashboard">
+        <ProtectedRoute component={Dashboard} />
+      </Route>
+      <Route path="/editor/:gameId">
+        <ProtectedRoute component={EditorPage} />
+      </Route>
+      <Route path="/">
+        <RootRoute />
+      </Route>
       <Route component={NotFound} />
     </Switch>
   );
