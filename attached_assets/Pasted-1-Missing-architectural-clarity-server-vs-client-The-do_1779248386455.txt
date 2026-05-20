@@ -1,0 +1,48 @@
+1. Missing architectural clarity (server vs client)
+
+The docs mention network, ServerScriptService, StarterPlayer, LocalScript vs Script, but never explain the execution model.
+
+· Does every script run on both server and client?
+· Where does player.inventory.add() execute – local, replicated, or server‑authoritative?
+· Are state and tags automatically synced?
+
+Without this, a beginner will write insecure or desynced multiplayer code. Add a “Network & Replication” section that clarifies authority.
+
+2. Overload of “magic” globals
+
+time, dt, now(), log, onKey, every – convenient, but also a source of confusion.
+
+· What happens if I declare my own let time = 5? Does it shadow the global?
+· Are these available in ModuleScripts too? The require example doesn’t show them.
+· I’d prefer a dedicated import or explicit namespace (e.g., Engine.time), but if globals are the design, at least warn about name collisions.
+
+3. Error handling and edge cases
+
+The doc says “Error messages include helpful hints”, but doesn’t show what a typical error looks like.
+
+· What if I create an object with a duplicate name inside the same container?
+· What happens when raycast hits nothing? (It returns null – that’s implied but not stated.)
+· If tween is cancelled mid‑animation, does it stop or jump to end value?
+
+A “Common Pitfalls & Error Messages” section (expanding the tiny one at the end) would be valuable.
+
+4. The “Advanced Classes” section feels tacked on
+
+Emitter, Callable, Class, weakRef, WeakTable – these are interesting but completely unexplained.
+
+· What problem does Callable solve?
+· How is Class different from ES6 classes?
+· Without examples or rationale, most users will ignore them. Either remove or give them proper mini‑tutorials.
+
+5. Missing performance / best‑practice notes
+
+· obj.on("touched") – if many objects use it, is there a limit? Should I unsubscribe when objects die?
+· every(0.5, ...) vs runService.update – which is cheaper?
+· find(name) searches all containers – O(n) across all objects. Document that, and suggest workspace.MyObject for O(1).
+· tags.get("enemy") – does it return a live view or a snapshot? If live, iterating while modifying tags might cause issues.
+
+6. Inconsistent property naming
+
+· obj.velocity is read/write – but player.velocity is presumably read‑only? Not stated.
+· obj.position vs camera.position – both exist, but camera’s is only writable in “scripted” mode. That’s documented for camera, but the property panel doesn’t mention read‑only status.
+· player.up – what is this exactly? World‑space up vector? Relative to local gravity? The doc just says “up direction vector”.

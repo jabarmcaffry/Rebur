@@ -18,33 +18,36 @@ This guide covers **everything** in the Rebur Engine: the editor interface, hier
 3. [Containers](#containers)
 4. [Properties Panel](#properties-panel)
 5. [Play Mode HUD](#play-mode-hud)
-6. [Scripting — Quick Start](#scripting--quick-start)
-7. [Globals Reference](#globals-reference)
-8. [Containers in Scripts](#containers-in-scripts)
-9. [Creating & Destroying Objects](#creating--destroying-objects)
-10. [Object Properties](#object-properties)
-11. [Object Events](#object-events)
-12. [Custom Events (obj.emit)](#custom-events-objemit)
-13. [Auto-Animation](#auto-animation)
-14. [Player](#player)
-15. [Inventory](#inventory)
-16. [Camera](#camera)
-17. [Input](#input)
-18. [Game Loop (runService)](#game-loop-runservice)
-19. [Timing Utilities](#timing-utilities)
-20. [World Events](#world-events)
-21. [State](#state)
-22. [Tags](#tags)
-23. [GUI](#gui)
-24. [Tweens](#tweens)
-25. [Raycasting](#raycasting)
-26. [Physics](#physics)
-27. [Networking](#networking)
-28. [Tasks](#tasks)
-29. [Modules (require)](#modules-require)
-30. [Debugging](#debugging)
-31. [Math Library](#math-library)
-32. [Advanced Classes](#advanced-classes)
+6. [Execution Model — How Scripts Run](#execution-model--how-scripts-run)
+7. [Network & Replication](#network--replication)
+8. [Scripting — Quick Start](#scripting--quick-start)
+9. [Globals Reference](#globals-reference)
+10. [Containers in Scripts](#containers-in-scripts)
+11. [Creating & Destroying Objects](#creating--destroying-objects)
+12. [Object Properties](#object-properties)
+13. [Object Events](#object-events)
+14. [Custom Events (obj.emit)](#custom-events-objemit)
+15. [Auto-Animation](#auto-animation)
+16. [Player](#player)
+17. [Inventory](#inventory)
+18. [Camera](#camera)
+19. [Input](#input)
+20. [Game Loop (runService)](#game-loop-runservice)
+21. [Timing Utilities](#timing-utilities)
+22. [World Events](#world-events)
+23. [State](#state)
+24. [Tags](#tags)
+25. [GUI](#gui)
+26. [Tweens](#tweens)
+27. [Raycasting](#raycasting)
+28. [Physics](#physics)
+29. [Networking API](#networking-api)
+30. [Tasks](#tasks)
+31. [Modules (require)](#modules-require)
+32. [Math Library](#math-library)
+33. [Advanced Classes](#advanced-classes)
+34. [Performance & Best Practices](#performance--best-practices)
+35. [Common Pitfalls & Error Messages](#common-pitfalls--error-messages)
 
 ---
 
@@ -178,6 +181,115 @@ Click the **Chat** button or press **/** to open the chat panel. Messages appear
 
 ---
 
+## Execution Model — How Scripts Run
+
+Understanding *where* and *when* scripts run prevents a lot of bugs.
+
+### Single-machine model
+Rebur Engine runs entirely in the browser. **There is no separate server process.** All scripts — Script, LocalScript, ModuleScript — execute in the same JavaScript environment. The distinction between script types is organisational and signals intent, not an enforced runtime boundary.
+
+| Script type | Intended use | Globals available |
+|-------------|-------------|-------------------|
+| **Script** | Game logic, physics, world state | All globals |
+| **LocalScript** | UI, input handling, per-player effects | All globals |
+| **ModuleScript** | Shared library code, called via \`require()\` | All globals |
+
+> **Practical rule**: think of Script/LocalScript/ModuleScript as naming conventions that tell other developers what a script does, not as a security boundary.
+
+### Execution order
+When Play starts, scripts execute in this order:
+
+1. **ServerScriptService** scripts — first, before objects appear
+2. **StarterPlayer** scripts — once per player join
+3. **Workspace / Lighting** scripts — as objects are loaded
+4. **Players** scripts — after the player avatar spawns
+
+Each script body runs **once** from top to bottom. Ongoing logic must use events or timers.
+
+\`\`\`js
+// ✅ Correct — react to events
+coin.on("touched", () => {
+  player.inventory.add("Coin");
+  destroy(coin);
+});
+
+// ⚠️ Incorrect — loop runs once at start and immediately exits
+for (let i = 0; i < 10; i++) {
+  // This finishes in microseconds, not over time
+}
+\`\`\`
+
+### Are globals like \`state\`, \`tags\`, and \`player\` automatically synced?
+Currently **no automatic network replication** exists between different browser tabs or players. Within a single Play session everything shares one runtime, so \`state.set()\`, \`tags\`, and \`player\` are consistent everywhere in that session. For true multiplayer (multiple connected clients), use the \`network\` API to explicitly send and receive messages. See [Network & Replication](#network--replication).
+
+### player.inventory — local or replicated?
+\`player.inventory.add()\` updates the **local runtime** only. If you need inventory to survive respawn or be visible to other scripts you must persist it yourself using \`state\`:
+
+\`\`\`js
+// Pattern: persist inventory count in state so all scripts can read it
+coin.on("touched", () => {
+  player.inventory.add("Coin");
+  state.set("coins", (state.get("coins") ?? 0) + 1);
+  gui.text("coins", "Coins: " + state.get("coins"));
+});
+\`\`\`
+
+---
+
+## Network & Replication
+
+> **Current status**: The networking API is a design-time scaffold. The methods below are available for structuring multiplayer-ready code, but live cross-client replication requires a hosted server back-end (not included in the single-player preview mode).
+
+### Authority model
+In a properly structured multiplayer game:
+
+| Responsibility | Where it runs |
+|---------------|---------------|
+| Player input capture | LocalScript (client) |
+| Movement validation | Script (server) |
+| Object positions | Replicated by server → clients |
+| Game state (score, phase) | Set on server, broadcast to clients |
+| GUI updates | LocalScript reads from replicated state |
+
+### Sending and receiving messages
+\`\`\`js
+// ── Server → all clients ────────────────────────────────────────────
+network.server.broadcast("updateScore", { score: 100 });
+
+// All clients listen:
+network.client.on("updateScore", ({ score }) => {
+  gui.text("score", "Score: " + score);
+});
+
+// ── Client → server ─────────────────────────────────────────────────
+network.client.send("buyItem", { item: "Sword" });
+
+// Server validates and responds:
+network.server.on("buyItem", (payload, clientId) => {
+  // validate payload.item, deduct cost, etc.
+  spawn(payload.item);
+  network.server.sendTo(clientId, "itemGranted", { item: payload.item });
+});
+\`\`\`
+
+### Security principle
+**Never trust the client.** Always validate game-critical data (damage, purchases, positions) on the server side. A client can send any payload it wants — the server is the authority.
+
+\`\`\`js
+// ❌ Insecure: client sets its own health
+network.server.on("setHealth", ({ hp }) => {
+  player.health = hp;           // client can cheat — never do this
+});
+
+// ✅ Secure: server computes the result
+network.server.on("takeDamage", ({ amount }) => {
+  const clamped = Math.max(0, Math.min(amount, 100)); // validate range
+  player.takeDamage(clamped);
+});
+\`\`\`
+
+---
+
 ## Scripting — Quick Start
 
 Scripts run **once** when Play starts. Register event listeners for ongoing logic.
@@ -204,7 +316,7 @@ coin.on("touched", () => {
 
 ## Globals Reference
 
-All of these are available directly — no imports needed:
+All of these are available directly — **no imports needed**. They are injected into every Script and LocalScript as bare identifiers.
 
 | Category | Globals |
 |----------|---------|
@@ -221,17 +333,57 @@ All of these are available directly — no imports needed:
 | **Debug** | \`log\`, \`debug\` |
 | **Classes** | \`Emitter\`, \`Callable\`, \`Class\`, \`weakRef\`, \`WeakTable\` |
 
+### ⚠️ Name-collision warning
+Because these are plain globals, declaring a local variable with the same name **shadows** the engine global for the rest of that scope:
+
+\`\`\`js
+// ❌ Shadows the engine's time global
+let time = 5;
+log(time);          // → 5 (your variable, not engine time)
+log(now());         // → use now() as the safe alias
+
+// ❌ Shadows the dt global
+function update(dt) {
+  // inside here, dt is your argument — that's fine
+  // but engine dt is gone until the function returns
+}
+
+// ✅ Safe pattern: prefix your own variables
+let myTime = 0;
+let elapsed = 0;
+\`\`\`
+
+**Globals to be careful around**: \`time\`, \`dt\`, \`log\`, \`state\`, \`world\`, \`player\`, \`camera\`, \`find\`, \`create\`, \`destroy\`, \`spawn\`, \`random\`.
+
+### Are globals available in ModuleScripts?
+**Yes.** ModuleScripts share the same injected environment. \`player\`, \`state\`, \`log\`, etc. are all available inside a module. However, since modules are designed to be reusable libraries, it's better practice to accept \`player\` or \`state\` as function arguments rather than reading globals directly — it makes the module easier to test.
+
+\`\`\`js
+// MathUtils (ModuleScript) — no globals needed, clean interface
+exports.takeDamage = (amount, maxAmount) => {
+  return Math.max(0, Math.min(amount, maxAmount));
+};
+
+// Enemy (ModuleScript) — uses player global (acceptable but couples the module)
+exports.checkProximity = (obj, radius) => {
+  return dist(obj, player) < radius;  // 'dist' and 'player' are globals
+};
+\`\`\`
+
 ---
 
 ## Containers in Scripts
 
 \`\`\`js
-// Access by name (fast — O(1) lookup)
+// Access by name — O(1) lookup, fastest
 const baseplate = workspace.Baseplate;
 const sun = lighting.Sun;
 
-// Search all containers
+// Search all containers — O(n) across ALL objects, use sparingly
 const coin = find("Coin");
+
+// Prefer the container-specific access when you know where it lives:
+const coin2 = workspace.Coin;       // much faster than find("Coin")
 
 // Iterate all Workspace objects
 for (const name in workspace) {
@@ -242,8 +394,7 @@ for (const name in workspace) {
 
 At runtime, \`players\` contains the active player:
 \`\`\`js
-// The local player is always in players
-const me = players[player.username]; // same as the player global
+const me = players[player.username]; // same object as the player global
 \`\`\`
 
 ---
@@ -271,13 +422,16 @@ const enemy = spawn("EnemyTemplate", {
   color: "#ff4444",
 });
 
-// Find an existing object (searches all containers)
-const obj = find("BasePlate");
+// Find an existing object
+const obj = workspace.BasePlate;   // O(1) — preferred
+const obj2 = find("BasePlate");    // O(n) — searches all containers
 
 // Destroy
 destroy(box);        // by reference
-destroy("Box");      // by name
+destroy("Box");      // by name — searches all containers
 \`\`\`
+
+> **Duplicate names**: If two objects share the same name in the same container, \`workspace.MyName\` returns the first match. Duplicate names won't cause an error but make lookups unpredictable. Keep names unique within each container.
 
 ---
 
@@ -285,38 +439,40 @@ destroy("Box");      // by name
 
 \`\`\`js
 // Transform
-obj.position        // { x, y, z }
-obj.rotation        // { x, y, z } radians
-obj.scale           // { x, y, z }
-obj.velocity        // { x, y, z } current velocity (read/write)
+obj.position        // { x, y, z }  ← read/write
+obj.rotation        // { x, y, z } radians  ← read/write
+obj.scale           // { x, y, z }  ← read/write
+obj.velocity        // { x, y, z } current velocity  ← read/write
+                    // Writing velocity gives the object an instant impulse.
+                    // Note: player.velocity is READ-ONLY (managed by the physics engine).
 
 // Appearance
-obj.color           // "#rrggbb"
-obj.visible         // boolean
-obj.transparency    // 0 (opaque) to 1 (invisible)
+obj.color           // "#rrggbb"  ← read/write
+obj.visible         // boolean  ← read/write
+obj.transparency    // 0 (opaque) to 1 (invisible)  ← read/write
 
 // Physics
-obj.anchored        // true = won't move
-obj.canCollide      // false = passes through
-obj.mass            // mass in kg (affects collision response)
-obj.friction        // 0–1
+obj.anchored        // true = won't move  ← read/write
+obj.canCollide      // false = passes through  ← read/write
+obj.mass            // mass in kg  ← read/write
+obj.friction        // 0–1  ← read/write
 
 // Per-object gravity (pulls nearby objects toward this object)
 obj.gravity = { strength: 9.81, radius: 30 };
 obj.gravity = false;  // disable
 
-// Custom attributes (arbitrary data)
+// Custom attributes (arbitrary data storage)
 obj.setAttribute("hp", 100);
 obj.getAttribute("hp");     // → 100
 obj.getAttributes();        // → { hp: 100, ... }
 
 // Hierarchy
-obj.parentId            // parent object ID (string | null)
-obj.children            // RuntimeObject[]
-obj.setParent(other);   // reparent
+obj.parentId            // parent object ID (string | null)  ← read-only
+obj.children            // RuntimeObject[]  ← read-only (live array)
+obj.setParent(other);   // reparent ← use this to change parent
 obj.findFirstChild("ChildName");
 
-// Identity (read-only)
+// Identity (all read-only)
 obj.id              // unique runtime ID
 obj.name            // display name
 obj.type            // "primitive" | "light" | "spawn" | "model" | ...
@@ -334,8 +490,13 @@ Events let you react to things happening to objects.
 // ─── Engine-internal events (fired by the engine automatically) ───────────
 
 // Player or object touches this object
-obj.on("touched", (other) => {
+const unsub = obj.on("touched", (other) => {
   log("touched by", other.username ?? other.name);
+});
+
+// Always unsubscribe when the object is destroyed to avoid memory leaks:
+obj.on("destroyed", () => {
+  unsub();
 });
 
 // Touch ends
@@ -379,9 +540,11 @@ obj.onPropertyChanged("color").on("changed", (prop, newVal, oldVal) => {
 });
 
 // All on() calls return an unsubscribe function:
-const unsub = obj.on("touched", handler);
-unsub();  // stop listening
+const stop = obj.on("touched", handler);
+stop();  // stop listening
 \`\`\`
+
+> **Memory note**: Listeners survive as long as the object lives. If you create many objects with \`on("touched")\` listeners and destroy them without calling \`unsub()\`, the listeners are cleaned up automatically via the \`"destroyed"\` event. For long-running scripts that subscribe many times, store and call the unsubscribe.
 
 ---
 
@@ -390,10 +553,9 @@ unsub();  // stop listening
 You can define **your own** events on any object. Custom events are fully user-controlled and fire all registered listeners.
 
 \`\`\`js
-// Define a custom event
 const door = find("Door");
 
-// Anyone can listen
+// Listen
 door.on("opened", (who) => {
   log(who, "opened the door");
 });
@@ -402,18 +564,17 @@ door.on("locked", () => {
   door.color = "#ef4444";
 });
 
-// You can emit your custom events freely
+// Emit your custom events freely
 door.emit("opened", player.username);
 door.emit("locked");
 
 // ⚠️ You CANNOT emit engine-internal events:
-door.emit("touched");    // ERROR: "touched" is reserved for engine-internal use
-door.emit("clicked");    // ERROR: "clicked" is reserved for engine-internal use
-// The engine logs an error and returns false. Your game keeps running.
+door.emit("touched");    // ERROR: "touched" is reserved — returns false, logs error
+door.emit("clicked");    // ERROR: "clicked" is reserved — returns false, logs error
 
-// All custom event names (not in the reserved list) work:
-door.emit("myCustomEvent", arg1, arg2);  // ✅ fine
-door.emit("exploded", { force: 100 });   // ✅ fine
+// Any other name works:
+door.emit("myCustomEvent", arg1, arg2);  // ✅
+door.emit("exploded", { force: 100 });   // ✅
 \`\`\`
 
 **Reserved (engine-internal) event names:**
@@ -450,41 +611,55 @@ obj.autoBob = undefined;
 
 ## Player
 
+Properties marked **read-only** are managed by the physics engine. Writing to them has no effect.
+
 \`\`\`js
 // Identity
-player.username         // display name (read-only)
-player.color            // avatar color hex
+player.username         // display name  ← read-only
+player.color            // avatar color hex  ← read/write
 
 // Transform
-player.position         // { x, y, z } — feet position
-player.rotation         // { x, y, z } — rotation.y is yaw
-player.velocity         // { x, y, z }
-player.up               // up direction vector (changes with per-object gravity)
-player.onGround         // true while standing on something
+player.position         // { x, y, z } feet position  ← read/write
+player.rotation         // { x, y, z } rotation.y is yaw  ← read/write
+player.velocity         // { x, y, z }  ← READ-ONLY — set by physics each frame
+                        //   To launch the player, use:
+                        //   player.velocity = { x: 0, y: 15, z: 0 } temporarily,
+                        //   but physics will override it next frame.
+                        //   For a permanent boost use player.jumpPower instead.
+
+player.up               // World-space up vector  ← read-only
+                        //   Normally { x:0, y:1, z:0 }.
+                        //   Changes when the player is near a gravity-well object:
+                        //   e.g. standing on a spherical planet makes player.up
+                        //   point away from the planet's center. All movement,
+                        //   jumping, and the camera use this vector, so walking
+                        //   on the underside of a platform "just works".
+
+player.onGround         // true while standing on something  ← read-only
 
 // Health
-player.health = 100;
-player.maxHealth = 100;
-player.takeDamage(25);
-player.heal(50);
-player.kill();           // triggers ragdoll + respawn
-player.respawn();
+player.health           // current HP  ← read/write
+player.maxHealth        // max HP  ← read/write
+player.takeDamage(25);  // subtracts and triggers death if ≤ 0
+player.heal(50);        // adds, clamped to maxHealth
+player.kill();          // instant death → ragdoll + respawn
+player.respawn();       // teleport to spawn point, restore full health
 
 // Movement
-player.walkSpeed = 6;       // normal walk speed
-player.runSpeed = 12;       // Shift = run
-player.jumpPower = 8;
-player.size = 1;            // avatar scale
-player.autoFaceMovement = true;  // auto-rotate to face movement
+player.walkSpeed = 6;       // normal walk speed  ← read/write
+player.runSpeed = 12;       // Shift = run  ← read/write
+player.jumpPower = 8;       // jump impulse  ← read/write
+player.size = 1;            // avatar scale  ← read/write
+player.autoFaceMovement = true;  // auto-rotate to face movement direction
+
+// Flying
+player.canFly = true;       // Space = fly up, Shift = fly down  ← read/write
 
 // Physics
-player.killY = -50;         // auto-die below this Y
-player.ragdoll;             // true while dying (read-only)
+player.killY = -50;         // auto-die below this Y  ← read/write
+player.ragdoll;             // true while dying  ← read-only
 player.collisionRadius = 0.4;
 player.collisionHalfHeight = 0.9;
-
-// Flying (enable in-game flight)
-player.canFly = true;       // Space = fly up, Shift = fly down
 
 // Teleport
 player.teleport(10, 5, 0);
@@ -504,7 +679,7 @@ player.inventory.add("Sword", { count: 1, template: "SwordTemplate", data: { dam
 player.inventory.has("Coin");          // true/false
 player.inventory.has("Coin", 5);       // has at least 5?
 player.inventory.get("Coin");          // InventoryItem | null
-player.inventory.items;                // all items
+player.inventory.items;                // all items (snapshot array)
 
 // Remove
 player.inventory.remove("Coin");       // remove 1
@@ -512,7 +687,7 @@ player.inventory.remove("Coin", 3);    // remove up to 3
 
 // Equip
 player.inventory.equip("Sword");
-player.inventory.equipped;             // current item or null
+player.inventory.equipped;             // current item or null  ← read-only
 player.inventory.equip(null);          // unequip
 
 // Drop into world (spawns template from ReplicatedStorage if available)
@@ -523,6 +698,8 @@ player.inventory.maxSlots = 32;
 player.inventory.clear();
 \`\`\`
 
+> **Persistence**: Inventory is local to the current Play session. On respawn it is preserved. On Leave it is lost unless you save it to \`state\` yourself.
+
 ---
 
 ## Camera
@@ -531,25 +708,28 @@ player.inventory.clear();
 // Modes
 camera.mode = "thirdPerson";  // default — orbits player
 camera.mode = "firstPerson";  // inside player head
-camera.mode = "scripted";     // fully manual — set position + lookAt
+camera.mode = "scripted";     // fully manual — you set position + lookAt each frame
 camera.mode = "free";         // detached orbit
 
 // Third-person
-camera.distance = 6;
+camera.distance = 6;          // read/write
 camera.minDistance = 2;
 camera.maxDistance = 20;
 camera.offset = { x: 0, y: 1.95, z: 0 };
 
 // General
-camera.fov = 60;             // degrees
+camera.fov = 60;             // degrees  ← read/write in all modes
 camera.sensitivity = 1;
 camera.lockYaw = false;
 camera.lockPitch = false;
 
-// Scripted mode
+// Scripted mode — position and lookAt are ONLY writable in "scripted" mode.
+// In any other mode, writing to them has no effect.
 camera.mode = "scripted";
-camera.position = { x: 0, y: 10, z: 10 };
-camera.lookAt = { x: 0, y: 0, z: 0 };
+camera.position = { x: 0, y: 10, z: 10 };   // read/write (scripted only)
+camera.lookAt   = { x: 0, y: 0,  z: 0  };   // read/write (scripted only)
+
+// In thirdPerson/firstPerson, camera.position is read-only (engine-computed).
 \`\`\`
 
 ---
@@ -561,10 +741,10 @@ camera.lookAt = { x: 0, y: 0, z: 0 };
 keyboard.onPress("e", () => log("E pressed"));
 keyboard.onRelease("e", () => log("E released"));
 
-// Shorthand
+// Shorthand (press only)
 onKey("e", () => log("E pressed"));
 
-// Held check (use inside update loop)
+// Held check — use inside an update loop, not at top level
 runService.update.on((dt) => {
   if (keyboard.isDown("e")) {
     player.position.y += 2 * dt;
@@ -574,10 +754,11 @@ runService.update.on((dt) => {
 // Special keys: "space", "shift", "control", "alt", "enter", "escape"
 // Arrow keys: "arrowup", "arrowdown", "arrowleft", "arrowright"
 
-// 3D click
+// 3D viewport click — fires on every click; obj is null if nothing was hit
 mouse.onClick((obj) => {
   if (obj) log("Clicked", obj.name);
   else     log("Clicked empty space");
+  // obj is null when raycast hits nothing — always check before using it
 });
 \`\`\`
 
@@ -601,27 +782,30 @@ runService.render.on((dt, time) => {
   // Just before rendering
 });
 
-// Convenience alias
+// Convenience alias — equivalent to runService.update.on
 onUpdate((dt) => { });
 \`\`\`
+
+> **every() vs runService.update**: Use \`every(seconds, fn)\` for infrequent actions (spawn enemies every 5s, heal every 1s). Use \`runService.update.on()\` for smooth per-frame logic (movement, camera, interpolation). Both are efficient; \`every\` is lighter because it skips most frames.
 
 ---
 
 ## Timing Utilities
 
 \`\`\`js
-time;        // total elapsed game time (seconds)
-dt;          // seconds since last frame
-now();       // same as time
+time;        // total elapsed game time in seconds (read-only global)
+dt;          // seconds since last frame (read-only global)
+             // ⚠️ Don't shadow these with local variables of the same name.
+now();       // same as time — safe alias if you need to pass it as a value
 
-// Repeat
+// Repeat — returns a cancel function
 const stop = every(0.5, () => log("tick"));
-stop();      // cancel
+stop();      // cancel the interval
 
 // Once
 after(2, () => log("2 seconds later"));
 
-// Async
+// Async suspend
 async function example() {
   log("start");
   await wait(1.5);
@@ -645,7 +829,7 @@ world.onObjectRemoved((obj) => log("removed:", obj.name));
 
 ## State
 
-Global reactive key-value store — changes trigger listeners.
+Global reactive key-value store — changes trigger listeners. State is shared across all scripts in a session.
 
 \`\`\`js
 state.set("phase", "Lobby");
@@ -655,9 +839,10 @@ state.get("phase");   // "Lobby"
 state.keys();         // ["phase", "score"]
 state.getAll();       // { phase: "Lobby", score: 0 }
 
-state.on("phase", (newVal, oldVal) => {
+const unsub = state.on("phase", (newVal, oldVal) => {
   log("Phase:", oldVal, "→", newVal);
 });
+// Call unsub() to stop listening when no longer needed.
 
 keyboard.onPress("p", () => state.set("phase", "Playing"));
 \`\`\`
@@ -672,14 +857,19 @@ tags.add(obj, "boss");
 
 tags.has(obj, "enemy");     // true
 tags.all(obj);              // ["enemy", "boss"]
-tags.get("enemy");          // all objects with the "enemy" tag
-tags.remove(obj, "boss");
 
-// Example: damage all enemies
-for (const e of tags.get("enemy")) {
+// tags.get() returns a SNAPSHOT array — a copy at the moment of the call.
+// It is safe to iterate and destroy objects inside the loop.
+const enemies = tags.get("enemy");
+for (const e of enemies) {
   e.setAttribute("hp", (e.getAttribute("hp") ?? 100) - 10);
+  if (e.getAttribute("hp") <= 0) destroy(e);  // safe — iterating a snapshot
 }
+
+tags.remove(obj, "boss");
 \`\`\`
+
+> **tags.get() is a snapshot**: the returned array reflects the tag state at call time. Adding or removing tags during iteration does not affect the current loop.
 
 ---
 
@@ -696,7 +886,7 @@ gui.text("score", "Score: 0", {
   bg: "rgba(0,0,0,0.5)",
 });
 
-// Update
+// Update existing element (only the text changes, options are preserved)
 gui.text("score", "Score: 42");
 
 // Button
@@ -714,17 +904,17 @@ gui.clear();
 ## Tweens
 
 \`\`\`js
-// Basic tween
-tween(obj.position, { x: 10 }, 2);
+// Basic tween — returns a cancel function
+const cancel = tween(obj.position, { x: 10 }, 2);
 
 // With easing
 tween(obj.position, { y: 10 }, 1, "easeOutQuad");
 
-// With callback
+// With completion callback
 tween(obj.position, { x: 0 }, 1, "linear", () => log("done"));
 
-// Cancel
-const cancel = tween(obj.position, { x: 100 }, 10);
+// Cancel mid-animation — stops at the current interpolated value.
+// The target value is NOT applied; the object stays where it was when cancel() ran.
 cancel();
 
 // Easings: "linear", "easeInQuad", "easeOutQuad", "easeInOutQuad",
@@ -746,11 +936,14 @@ const hit = raycast(
   }
 );
 
+// raycast() returns null when nothing is hit — always check before reading properties
 if (hit) {
   log("Hit:", hit.object.name);
   log("Distance:", hit.distance.toFixed(2));
   log("Point:", hit.point);
   log("Normal:", hit.normal);
+} else {
+  log("Nothing hit within range");
 }
 \`\`\`
 
@@ -775,24 +968,33 @@ obj.anchored = false;     // let gravity affect it
 obj.canCollide = true;
 obj.mass = 2;
 obj.friction = 0.5;
-obj.velocity = { x: 0, y: 10, z: 0 };  // set directly
+obj.velocity = { x: 0, y: 10, z: 0 };  // direct write (note: player.velocity is read-only)
 \`\`\`
 
 ---
 
-## Networking
+## Networking API
+
+See [Network & Replication](#network--replication) for architecture guidance.
 
 \`\`\`js
 // Server → all clients
 network.server.broadcast("updateScore", { score: 100 });
-network.client.on("updateScore", ({ score }) => {
-  gui.text("score", "Score: " + score);
-});
+
+// Server → one client
+network.server.sendTo(clientId, "itemGranted", { item: "Sword" });
 
 // Client → server
 network.client.send("requestSpawn", { type: "enemy" });
-network.server.on("requestSpawn", (payload) => {
+
+// Listen (server side)
+network.server.on("requestSpawn", (payload, clientId) => {
   spawn(payload.type);
+});
+
+// Listen (client side)
+network.client.on("updateScore", ({ score }) => {
+  gui.text("score", "Score: " + score);
 });
 \`\`\`
 
@@ -809,7 +1011,7 @@ task.spawn(() => {
 // Delay without blocking
 task.delay(2, () => log("2 seconds later"));
 
-// Async wait
+// Async loop
 async function loop() {
   while (true) {
     log("tick");
@@ -823,48 +1025,22 @@ task.spawn(loop);
 
 ## Modules (require)
 
+ModuleScripts live in **ReplicatedStorage** and are called with \`require()\`.
+
 \`\`\`js
-// In ReplicatedStorage → create a ModuleScript named "MathUtils"
-// MathUtils script:
+// ── MathUtils (ModuleScript in ReplicatedStorage) ──────────────────────────
 exports.square = (n) => n * n;
 exports.clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-// In any other script:
+// ── Any other script ───────────────────────────────────────────────────────
 const MathUtils = require("MathUtils");
 log(MathUtils.square(5));   // 25
+
+// Modules are cached — require("MathUtils") always returns the same object.
+// Mutating a module's exports affects every script that required it.
 \`\`\`
 
----
-
-## Debugging
-
-\`\`\`js
-// Print to in-game console (color-coded: green=info, red=error, yellow=warning)
-log("Hello", player.position);
-
-// Debug API
-debug.getChildren(obj);         // RuntimeObject[]
-debug.getDescendants(obj);      // all descendants recursively
-debug.getFullName(obj);         // "Workspace.Platform.Coin"
-debug.getPropertyNames(obj);    // all property names
-debug.getObjectsWithTag("tag"); // same as tags.get()
-debug.getEventConnections(obj); // number of active listeners
-
-// Error messages include:
-// - Script name
-// - Line number (approximate)
-// - Helpful hint for common mistakes
-
-// Example script error output:
-// [MyScript] Runtime error on line 12: Cannot read properties of null
-// Check for a typo, missing object, wrong container, or unsupported API use.
-\`\`\`
-
-**Common mistakes:**
-- \`workspace.Box\` is \`null\` — object doesn't exist or is in a different container
-- \`obj.on("touched")\` never fires — check that obj.canCollide is true
-- Scripts run top-to-bottom once. Use \`runService.update.on()\` for per-frame logic.
-- \`obj.emit("clicked")\` logs an error — \`clicked\` is engine-reserved; use a different name.
+> All engine globals (\`player\`, \`state\`, \`log\`, etc.) are available inside ModuleScripts. Consider accepting dependencies as arguments instead of reading globals directly — it makes modules easier to reuse.
 
 ---
 
@@ -875,38 +1051,245 @@ random(0, 10);           // float in [0, 10)
 randInt(1, 6);           // integer in [1, 6]
 pick(["a", "b", "c"]);   // random element
 
-dist(obj, player);       // 3D distance
+dist(obj, player);       // 3D Euclidean distance
 dist({ x:0,y:0,z:0 }, { x:3,y:4,z:0 }); // 5
 
 lerp(0, 100, 0.5);       // 50
 clamp(15, 0, 10);        // 10
 
-// Also available: Math.sin, Math.cos, Math.atan2, Math.hypot, Math.abs, etc.
+// Standard JS Math also works: Math.sin, Math.cos, Math.atan2, Math.abs, etc.
 \`\`\`
 
 ---
 
 ## Advanced Classes
 
-\`\`\`js
-// Emitter — custom typed event bus
-const events = new Emitter();
-events.on("explode", (force) => log("boom", force));
-events.emit("explode", 100);
+### Emitter — typed event bus
 
-// Class — OOP inheritance helper
+Use \`Emitter\` when you want a **private event channel** that doesn't belong to any scene object. Useful for decoupling systems (e.g., an enemy manager that broadcasts events to the UI without hard-coding references).
+
+\`\`\`js
+const gameEvents = new Emitter();
+
+// Any script can listen
+gameEvents.on("enemyKilled", ({ name, reward }) => {
+  state.set("score", (state.get("score") ?? 0) + reward);
+  gui.text("score", "Score: " + state.get("score"));
+});
+
+// Any script can emit
+gameEvents.emit("enemyKilled", { name: "Goblin", reward: 10 });
+
+// Returns unsubscribe
+const unsub = gameEvents.on("enemyKilled", handler);
+unsub(); // stop listening
+\`\`\`
+
+### Callable — wrappable function
+
+\`Callable\` turns a class instance into a function that can be called directly. Use it when you want an object with methods *and* a default "call" behaviour — common for operators like damage calculators or factories.
+
+\`\`\`js
+const DamageCalc = new Callable((base, multiplier = 1) => {
+  return Math.floor(base * multiplier);
+});
+
+DamageCalc.withCrit = (base) => DamageCalc(base, 2);  // add methods
+
+log(DamageCalc(10));           // → 10
+log(DamageCalc(10, 1.5));      // → 15
+log(DamageCalc.withCrit(10));  // → 20
+\`\`\`
+
+### Class — OOP inheritance helper
+
+\`Class\` is a thin wrapper around ES6 classes that adds automatic \`super\` chaining and a few engine conveniences. It is **not** different from a regular ES6 class for most uses — you can use plain \`class\` syntax instead. \`Class\` is useful when you want to call \`super()\` implicitly and get engine mixins for free.
+
+\`\`\`js
 const Enemy = Class(class {
-  constructor(name) {
-    this.obj = create({ name, primitiveType: "sphere", color: "#ff4444" });
-    this.hp = 100;
+  constructor(name, hp = 100) {
+    this.obj = create({ name, primitiveType: "sphere", color: "#ff4444",
+                        position: { x: 0, y: 1, z: 0 } });
+    this.hp  = hp;
+
+    // Clean up the scene object when this Enemy is garbage-collected
+    this.obj.on("destroyed", () => this.obj = null);
   }
+
   damage(n) {
     this.hp -= n;
-    if (this.hp <= 0) destroy(this.obj);
+    if (this.hp <= 0) this.die();
+  }
+
+  die() {
+    if (this.obj) destroy(this.obj);
+    log(this.obj?.name ?? "Enemy", "died");
   }
 });
 
-const goblin = new Enemy("Goblin");
-goblin.damage(50);
+const goblin = new Enemy("Goblin", 50);
+goblin.damage(30);   // still alive
+goblin.damage(25);   // dies
+
+// Inheritance
+const Boss = Class(class extends Enemy {
+  constructor(name) {
+    super(name, 500);          // 500 HP
+    this.phase = 1;
+  }
+  damage(n) {
+    if (this.phase === 1 && this.hp - n < 250) {
+      this.phase = 2;
+      log("Boss enters phase 2!");
+    }
+    super.damage(n);
+  }
+});
+\`\`\`
+
+### weakRef and WeakTable
+
+\`weakRef(obj)\` stores a reference that does **not** prevent garbage collection. Use it when you want to track an object without keeping it alive.
+
+\`\`\`js
+const ref = weakRef(someObj);
+// Later:
+const alive = ref.deref();   // returns the object if still alive, or undefined
+if (alive) alive.color = "#00ff00";
+\`\`\`
+
+\`WeakTable\` is a Map keyed by weakRefs — entries disappear automatically when their key is collected. Useful for per-object metadata that you don't want to manually clean up.
+
+\`\`\`js
+const meta = new WeakTable();
+meta.set(enemy, { spawnTime: time });
+
+// Later:
+const info = meta.get(enemy);  // undefined if enemy was garbage-collected
+\`\`\`
+
+---
+
+## Performance & Best Practices
+
+### Object lookup
+| Method | Speed | When to use |
+|--------|-------|-------------|
+| \`workspace.MyObject\` | O(1) — fastest | You know the container |
+| \`find("MyObject")\` | O(n) — scans all containers | You don't know the container, or it might move |
+| \`tags.get("enemy")\` | O(1) snapshot | Querying groups of objects |
+
+> Prefer \`workspace.MyName\` over \`find("MyName")\` inside hot update loops.
+
+### Unsubscribing listeners
+Every \`on()\` call adds an entry to an internal list. Objects that are destroyed clean up their own listeners automatically. However, for long-running scripts that attach and detach many listeners dynamically, store the unsubscribe function and call it when done:
+
+\`\`\`js
+const unsubs = [];
+
+world.onObjectAdded((obj) => {
+  if (obj.name.startsWith("Coin")) {
+    const u = obj.on("touched", () => {
+      player.inventory.add("Coin");
+      destroy(obj);
+    });
+    unsubs.push(u);
+  }
+});
+
+// On cleanup:
+unsubs.forEach(u => u());
+\`\`\`
+
+### every() interval limit
+There is no hard cap on the number of active \`every()\` intervals, but each one runs its callback on the main thread. Avoid creating hundreds of intervals simultaneously. Prefer grouping logic into a single \`runService.update.on()\` loop that checks a list of objects.
+
+\`\`\`js
+// ❌ Bad — one interval per enemy
+for (const e of enemies) {
+  every(0.5, () => e.damage(5));
+}
+
+// ✅ Better — one loop, all enemies
+every(0.5, () => {
+  for (const e of enemies) e.damage(5);
+});
+\`\`\`
+
+### tags.get — snapshot vs live
+\`tags.get("tag")\` returns a **snapshot array** (a copy). It is safe to destroy objects while iterating the result. It is **not** a live view — changes to tags after the call are not reflected in the returned array.
+
+---
+
+## Common Pitfalls & Error Messages
+
+### Error format
+All script errors appear in the in-game console (open via ☰ → Show Console):
+
+\`\`\`
+[ScriptName] Runtime error on line 12: Cannot read properties of null (reading 'color')
+Hint: 'workspace.Box' returned null — check the object name and container.
+\`\`\`
+
+The hint tries to identify the likely cause. Common ones:
+
+| Error message | Likely cause | Fix |
+|--------------|-------------|-----|
+| \`Cannot read properties of null\` | \`workspace.X\` returned null — object doesn't exist or is in a different container | Check spelling, container, and that the object was created before the script ran |
+| \`obj.emit("touched") blocked\` | Tried to emit a reserved event name | Use a different event name for custom events |
+| \`require("X") returned undefined\` | ModuleScript named "X" not found in ReplicatedStorage | Check the module name and container |
+| \`ReferenceError: X is not defined\` | Used a variable before declaring it, or shadowed a global | Declare variables with \`let\`/\`const\`, avoid naming them the same as engine globals |
+
+### Null raycast
+\`raycast()\` returns \`null\` when nothing is hit within the max distance. Always check:
+
+\`\`\`js
+const hit = raycast(player.position, { x: 0, y: -1, z: 0 }, 50);
+if (hit) {
+  log(hit.object.name);     // safe
+} else {
+  log("Floor not found");   // handle the miss
+}
+// ❌ Never: log(hit.object.name) without checking hit first — will throw
+\`\`\`
+
+### touched fires on entry only
+\`obj.on("touched")\` fires **once per contact-enter**. If the player stays inside the object it will not keep firing. Use \`"untouched"\` to detect when contact ends, or poll inside \`runService.update.on()\`.
+
+### touched never fires
+- Check that \`obj.canCollide\` is \`true\` on the object.
+- Objects in containers other than \`Workspace\` or \`Lighting\` are not physics-simulated.
+
+### Shadowing engine globals
+\`\`\`js
+let time = 10;     // now 'time' refers to your variable, not elapsed game time
+let dt   = 0.016;  // now 'dt' is always 0.016 regardless of frame rate
+\`\`\`
+Use unique names like \`myTimer\`, \`elapsed\`, \`frameDelta\`.
+
+### Tween cancelled mid-animation
+When you call \`cancel()\` on a tween, the object **stops at its current interpolated value**. It does not snap to the target. If you need it at the target, set the property directly after cancelling:
+
+\`\`\`js
+const cancel = tween(obj.position, { x: 10 }, 5);
+// ... some time passes ...
+cancel();
+obj.position.x = 10;  // force to target if needed
+\`\`\`
+
+### Duplicate object names
+Creating two objects with the same name in the same container won't throw an error, but \`workspace.MyName\` will return only the first match. Use distinct names or use \`tags\` to group similar objects.
+
+\`\`\`js
+// ❌ Two coins with the same name — workspace.Coin only finds the first one
+create({ name: "Coin", ... });
+create({ name: "Coin", ... });
+
+// ✅ Unique names + tags
+create({ name: "Coin_1", ... });
+create({ name: "Coin_2", ... });
+tags.add(workspace.Coin_1, "coin");
+tags.add(workspace.Coin_2, "coin");
+// Then collect with: for (const c of tags.get("coin")) { ... }
 \`\`\`
 `;
