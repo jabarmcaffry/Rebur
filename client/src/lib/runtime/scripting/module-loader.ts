@@ -35,7 +35,7 @@ export function compileScript(
     return { name, run: (api: GameAPI) => fn(api) };
   } catch (e: any) {
     pushLog(`[${name}] compile error: ${e.message ?? e}`);
-    return { name, error: e.message ?? String(e) };
+    return { name, run: null, error: e.message ?? String(e) };
   }
 }
 

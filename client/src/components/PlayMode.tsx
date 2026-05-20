@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid } from "@react-three/drei";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { X, Terminal, Heart, Settings, MessageSquare, Send, RotateCcw, LogOut, Gauge, Lock, Play } from "lucide-react";
+import {
+  X, Terminal, Heart, Settings, MessageSquare, Send,
+  RotateCcw, LogOut, Gauge, Lock, Play, Users, BarChart3,
+} from "lucide-react";
 import { GameRuntime } from "@/lib/runtime";
 import type { GameObject, Script } from "@shared/schema";
 import SVGScene from "@/components/SVGScene";
@@ -13,6 +16,7 @@ import VirtualJoystick from "@/components/play/VirtualJoystick";
 import Primitive from "@/components/play/Primitive";
 import Avatar from "@/components/play/Avatar";
 import ChaseCameraRig from "@/components/play/ChaseCameraRig";
+import { MultiplayerManager, type RemotePlayer } from "@/lib/multiplayer";
 
 interface ChatMessage {
   id: number;
@@ -25,15 +29,18 @@ export default function PlayMode({
   objects,
   scripts,
   username,
+  gameId,
   onExit,
 }: {
   objects: GameObject[];
   scripts: Script[];
   username: string;
+  gameId: string;
   onExit: (logs: string[]) => void;
 }) {
   const runtime = useMemo(
     () => new GameRuntime(objects, scripts, username, "#3b82f6"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -57,8 +64,12 @@ export default function PlayMode({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shiftLock, setShiftLock] = useState(false);
   const [showFps, setShowFps] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ frames: 0, lastTime: performance.now() });
+
+  // Leaderboard
+  const [showLeaderboard, setShowLeaderboard] = useState(true);
 
   // Chat state
   const [chatOpen, setChatOpen] = useState(false);
@@ -69,6 +80,22 @@ export default function PlayMode({
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const msgCounter = useRef(1);
+
+  // Multiplayer
+  const [remotePlayers, setRemotePlayers] = useState<RemotePlayer[]>([]);
+  const [mpConnected, setMpConnected] = useState(false);
+  const multiRef = useRef<MultiplayerManager | null>(null);
+
+  useEffect(() => {
+    const mp = new MultiplayerManager(gameId, username);
+    mp.onPlayersChanged = () => {
+      setRemotePlayers(mp.getPlayerList());
+      setMpConnected(mp.connected);
+    };
+    mp.connect();
+    multiRef.current = mp;
+    return () => { mp.disconnect(); multiRef.current = null; };
+  }, [gameId, username]);
 
   // Expose shiftLock to runtime input
   useEffect(() => {
@@ -98,7 +125,6 @@ export default function PlayMode({
   // Keyboard input
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      // Don't capture keys when chat is open
       if (chatOpen && e.target instanceof HTMLInputElement) return;
 
       runtime.input.keys[e.key.toLowerCase()] = true;
@@ -117,7 +143,10 @@ export default function PlayMode({
         setChatOpen(true);
         e.preventDefault();
       }
-      computeMove();
+      if (e.key === "Tab") {
+        setShowLeaderboard((v) => !v);
+        e.preventDefault();
+      }
     };
     const onUp = (e: KeyboardEvent) => {
       runtime.input.keys[e.key.toLowerCase()] = false;
@@ -143,12 +172,23 @@ export default function PlayMode({
     runtime.start();
     let raf = 0;
     let last = performance.now();
+    let mpTick = 0;
     const tickFn = () => {
       const now = performance.now();
       const dt = Math.min((now - last) / 1000, 0.1);
       last = now;
       runtime.step(dt);
       setTick((t) => (t + 1) % 1000000);
+
+      // Send position to multiplayer every ~6 frames (≈100 ms at 60 fps)
+      mpTick++;
+      if (mpTick >= 6) {
+        mpTick = 0;
+        multiRef.current?.updatePosition(
+          runtime.player.position,
+          runtime.player.rotation.y
+        );
+      }
 
       // FPS counter
       const fpsd = fpsRef.current;
@@ -178,6 +218,9 @@ export default function PlayMode({
     setMenuOpen(false);
     setSettingsOpen(false);
   };
+
+  const p = runtime.player;
+  const totalPlayers = 1 + remotePlayers.length;
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0e1116]" data-testid="play-mode-root">
@@ -227,7 +270,7 @@ export default function PlayMode({
 
       {/* ── TOP-LEFT HUD BAR ── */}
       <div className="absolute top-3 left-3 z-20 flex flex-col gap-2">
-        {/* Menu button — Roblox style */}
+        {/* Menu button */}
         <button
           onClick={() => { setMenuOpen((v) => !v); setSettingsOpen(false); }}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/70 backdrop-blur border border-white/10 text-white text-sm font-semibold hover:bg-black/90 transition-colors select-none"
@@ -248,18 +291,28 @@ export default function PlayMode({
           <MessageSquare className="w-3.5 h-3.5" />
           <span className="hidden sm:inline text-xs">Chat</span>
         </button>
+
+        {/* Leaderboard toggle button */}
+        <button
+          onClick={() => setShowLeaderboard((v) => !v)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur border border-white/10 text-white/80 text-sm hover:bg-black/80 transition-colors"
+          title="Toggle leaderboard (Tab)"
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline text-xs">{totalPlayers}</span>
+        </button>
       </div>
 
       {/* ── MENU DROPDOWN ── */}
       {menuOpen && (
         <div className="absolute top-14 left-3 z-30 w-64 rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-[#1a1d2e]/95 backdrop-blur">
-          {/* Header */}
           <div className="px-4 py-3 border-b border-white/10 bg-[#252840]/60">
             <p className="text-white font-semibold text-sm">{username}</p>
-            <p className="text-white/50 text-xs">Playing</p>
+            <p className="text-white/50 text-xs">
+              {mpConnected ? `Online · ${totalPlayers} player${totalPlayers !== 1 ? "s" : ""}` : "Playing"}
+            </p>
           </div>
 
-          {/* Menu items */}
           <div className="p-2 flex flex-col gap-1">
             <button
               onClick={handleResume}
@@ -274,7 +327,7 @@ export default function PlayMode({
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-white/90 hover:bg-white/10 transition-colors text-sm text-left"
             >
               <RotateCcw className="w-4 h-4 text-blue-400" />
-              Reset Avatar
+              Reset Character
             </button>
 
             <button
@@ -288,6 +341,7 @@ export default function PlayMode({
 
             {settingsOpen && (
               <div className="mx-1 mb-1 rounded-lg bg-black/30 border border-white/5 p-3 flex flex-col gap-3">
+
                 {/* Shift Lock */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -302,7 +356,7 @@ export default function PlayMode({
                   </button>
                 </div>
 
-                {/* FPS Counter */}
+                {/* Show FPS */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Gauge className="w-3.5 h-3.5 text-white/60" />
@@ -313,6 +367,34 @@ export default function PlayMode({
                     className={`relative w-10 h-5 rounded-full transition-colors ${showFps ? "bg-blue-500" : "bg-white/20"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showFps ? "translate-x-5" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+
+                {/* Show Stats */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-3.5 h-3.5 text-white/60" />
+                    <span className="text-white/80 text-xs">Show Stats</span>
+                  </div>
+                  <button
+                    onClick={() => setShowStats((v) => !v)}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showStats ? "bg-blue-500" : "bg-white/20"}`}
+                  >
+                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showStats ? "translate-x-5" : "translate-x-0.5"}`} />
+                  </button>
+                </div>
+
+                {/* Leaderboard */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-3.5 h-3.5 text-white/60" />
+                    <span className="text-white/80 text-xs">Leaderboard</span>
+                  </div>
+                  <button
+                    onClick={() => setShowLeaderboard((v) => !v)}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showLeaderboard ? "bg-blue-500" : "bg-white/20"}`}
+                  >
+                    <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showLeaderboard ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
                 </div>
               </div>
@@ -339,30 +421,84 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* ── FPS COUNTER ── */}
-      {showFps && (
-        <div className="absolute top-3 right-3 z-20 px-2 py-1 rounded-md bg-black/70 backdrop-blur border border-white/10 text-green-400 font-mono text-xs tabular-nums">
-          {fps} FPS
+      {/* ── TOP-RIGHT INDICATORS ── */}
+      <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-2">
+        {showFps && (
+          <div className="px-2 py-1 rounded-md bg-black/70 backdrop-blur border border-white/10 text-green-400 font-mono text-xs tabular-nums">
+            {fps} FPS
+          </div>
+        )}
+        {p.health < p.maxHealth && (
+          <div
+            className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/55 backdrop-blur"
+            data-testid="hud-health"
+          >
+            <Heart className="w-3.5 h-3.5 text-red-400" />
+            <div className="w-32 h-2 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full bg-red-500 transition-[width] duration-150"
+                style={{ width: `${Math.max(0, (p.health / p.maxHealth) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[11px] text-white/80 tabular-nums">
+              {Math.round(p.health)}/{p.maxHealth}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── STATS OVERLAY ── */}
+      {showStats && (
+        <div className="absolute top-16 left-3 z-20 px-3 py-2 rounded-lg bg-black/70 backdrop-blur border border-white/10 font-mono text-xs text-white/80 space-y-0.5 pointer-events-none">
+          <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Stats</div>
+          <div>HP: <span className="text-green-400">{Math.round(p.health)}/{p.maxHealth}</span></div>
+          <div>X: <span className="text-blue-300">{p.position.x.toFixed(2)}</span></div>
+          <div>Y: <span className="text-blue-300">{p.position.y.toFixed(2)}</span></div>
+          <div>Z: <span className="text-blue-300">{p.position.z.toFixed(2)}</span></div>
+          <div>Speed: <span className="text-yellow-300">{Math.hypot(p.velocity.x, p.velocity.z).toFixed(2)}</span></div>
+          <div>Walk: <span className="text-white/60">{p.walkSpeed}</span> Run: <span className="text-white/60">{p.runSpeed}</span></div>
+          <div>Jump: <span className="text-white/60">{p.jumpPower}</span></div>
+          <div>Ground: <span className={p.onGround ? "text-green-400" : "text-red-400"}>{p.onGround ? "yes" : "no"}</span></div>
         </div>
       )}
 
-      {/* ── HEALTH BAR ── */}
-      {runtime.player.health < runtime.player.maxHealth && (
-        <div
-          className="absolute top-3 right-3 z-10 pointer-events-none flex items-center gap-2 px-2 py-1 rounded-md bg-black/55 backdrop-blur"
-          style={{ right: showFps ? "60px" : "12px" }}
-          data-testid="hud-health"
-        >
-          <Heart className="w-3.5 h-3.5 text-red-400" />
-          <div className="w-32 h-2 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full bg-red-500 transition-[width] duration-150"
-              style={{ width: `${Math.max(0, (runtime.player.health / runtime.player.maxHealth) * 100)}%` }}
-            />
+      {/* ── LEADERBOARD (right side) ── */}
+      {showLeaderboard && (
+        <div className="absolute top-3 right-3 z-20 w-52" style={{ top: showFps || p.health < p.maxHealth ? "90px" : "12px" }}>
+          <div className="rounded-xl overflow-hidden border border-white/10 bg-[#1a1d2e]/90 backdrop-blur shadow-2xl">
+            <div className="px-3 py-2 border-b border-white/10 bg-[#252840]/60 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-3.5 h-3.5 text-blue-400" />
+                <span className="text-white/80 text-xs font-semibold uppercase tracking-wide">Players</span>
+              </div>
+              <span className="text-white/40 text-xs">{totalPlayers}</span>
+            </div>
+            <div className="p-1.5 space-y-0.5 max-h-60 overflow-y-auto">
+              {/* Local player — always at top */}
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/20">
+                <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
+                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(p.health)}</span>
+                <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
+              </div>
+              {/* Remote players */}
+              {remotePlayers.map((rp) => (
+                <div key={rp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
+                  <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                  <span className="text-white/80 text-xs flex-1 truncate">{rp.username}</span>
+                </div>
+              ))}
+              {/* Offline placeholder when no remote players */}
+              {remotePlayers.length === 0 && (
+                <div className="px-2 py-2 text-center text-white/25 text-[10px]">
+                  {mpConnected ? "Only you here" : "Connecting…"}
+                </div>
+              )}
+            </div>
+            <div className="px-3 py-1.5 border-t border-white/5 text-[10px] text-white/30 text-center">
+              Tab to hide · Press / to chat
+            </div>
           </div>
-          <span className="text-[11px] text-white/80 tabular-nums">
-            {Math.round(runtime.player.health)}/{runtime.player.maxHealth}
-          </span>
         </div>
       )}
 
@@ -392,7 +528,7 @@ export default function PlayMode({
             <input
               ref={chatInputRef}
               className="flex-1 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-blue-500/50"
-              placeholder="Say something..."
+              placeholder="Say something…"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => {
@@ -411,7 +547,7 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* Chat messages that auto-disappear (bottom-left ambient) */}
+      {/* Chat messages ambient (bottom-left when closed) */}
       {!chatOpen && (
         <div className="absolute bottom-20 left-3 z-10 pointer-events-none flex flex-col gap-1">
           {messages.slice(-4).map((m) => (
@@ -448,7 +584,7 @@ export default function PlayMode({
 
       {/* ── DESKTOP HINT ── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md bg-black/40 backdrop-blur text-white/50 text-xs z-10 pointer-events-none hidden md:block">
-        WASD · Space to jump · / to chat · Esc for menu
+        WASD · Space to jump · Tab to see players · / to chat · Esc for menu
       </div>
 
       {/* ── CONSOLE PANEL ── */}
@@ -465,7 +601,7 @@ export default function PlayMode({
           </div>
           <ScrollArea className="flex-1 p-2">
             {runtime.logs.length === 0 ? (
-              <div className="text-xs text-white/30 italic px-1">No output yet. Use log("...") in scripts.</div>
+              <div className="text-xs text-white/30 italic px-1">No output yet. Use log("…") in scripts.</div>
             ) : (
               <div className="font-mono text-xs space-y-0.5">
                 {runtime.logs.map((line, i) => {

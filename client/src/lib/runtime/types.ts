@@ -1,6 +1,5 @@
 // types.ts
-import type { RaycastParams, RaycastResult } from "./raycast";
-import type { NetSnapshot, NetInput } from "./network";
+import type { RaycastResult } from "./raycast";
 import type { Easing } from "./tween";
 
 import type { EventChannel as _EventChannel, EventsAPI as _EventsAPI } from "./events/event-bus";
@@ -16,10 +15,10 @@ type MouseAPI = _MouseAPI;
 type WorldAPI = _WorldAPI;
 type RuntimeInput = _RuntimeInput;
 
-export type { RaycastResult, RaycastParams } from "./raycast";
+export type { RaycastResult } from "./raycast";
 export type { NetSnapshot, NetInput } from "./network";
 
-export { EventBus, type EventChannel, type EngineEvents, type EventsAPI } from "./events/event-bus";
+export { EventBus, type EventChannel, type EventsAPI } from "./events/event-bus";
 export { type KeyboardAPI, createKeyboardAPI, processKeyboardInput } from "./events/keyboard";
 export { type MouseAPI, createMouseAPI, processMouseClick } from "./events/mouse";
 export { type WorldAPI, createWorldAPI } from "./events/world-events";
@@ -49,7 +48,6 @@ export type ObjectProperties = {
   autoMove?: { direction: Vec3; speed: number };
 };
 
-/** Engine-reserved object event names (cannot be emitted from scripts) */
 export type ObjectEventName =
   | "touched"
   | "untouched"
@@ -97,24 +95,18 @@ export type RuntimeObject = {
   animationSpeed?: number;
   animationLoop?: boolean;
   modelScale?: number;
-  // Events — on/off/emit unified interface
   on: (event: string, fn: (...args: any[]) => void) => () => void;
   off: (event: string, fn: (...args: any[]) => void) => void;
-  /** Emit a custom (non-internal) event. Logs an error if event name is engine-reserved. */
   emit: (event: string, ...args: any[]) => boolean;
-  // Property change signals
   onPropertyChanged: (property: string) => { on: (event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void) => () => void; off: (event: "changed", fn: any) => void };
   GetPropertyChangedSignal: (property: string) => { on: (event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void) => () => void; off: (event: "changed", fn: any) => void };
-  // Attributes
   setAttribute: (key: string, value: any) => void;
   getAttribute: (key: string) => any;
   getAttributes: () => Record<string, any>;
-  // Hierarchy
   parentId: string | null;
   readonly children: RuntimeObject[];
   findFirstChild: (name: string) => RuntimeObject | null;
   setParent: (parent: RuntimeObject | null) => void;
-  // Internal
   _gravityExclusions: Set<string>;
   __cleanup: Set<() => void>;
 };
@@ -175,8 +167,6 @@ export type RuntimePlayer = {
   respawn: () => void;
 };
 
-export type RuntimeInput = _RuntimeInput;
-
 export type RuntimePhysics = {
   gravity: number;
   airDrag: number;
@@ -187,7 +177,7 @@ export type RuntimeState = {
   get: (key: string) => any;
   on: (key: string, fn: (value: any, prev: any) => void) => () => void;
   keys: () => string[];
-  getAll: () => Record<string, any>;
+  getAll?: () => Record<string, any>;
 };
 
 export type GuiElement = {
@@ -309,10 +299,4 @@ export type CompiledScript = {
   error?: string;
 };
 
-export type { EventBus } from "./events/event-bus";
-export type { KeyboardAPI } from "./events/keyboard";
-export type { MouseAPI } from "./events/mouse";
-export type { WorldAPI } from "./events/world-events";
-
-// Re-export DEFAULT_PROPERTIES from helpers so existing imports keep working
 export { DEFAULT_PROPERTIES } from "./utils/helpers";

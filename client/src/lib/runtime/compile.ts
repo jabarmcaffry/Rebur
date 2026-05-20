@@ -82,6 +82,6 @@ export function compileScript(code: string, name: string): CompiledScript {
     const msg = e?.message ?? String(e);
     const line = scriptLineFromStack(e?.stack);
     const where = line ? `line ${line}: ` : "";
-    return { name, error: `Syntax error in your script at ${where}${msg}` };
+    return { name, run: null, error: `Syntax error in your script at ${where}${msg}` };
   }
 }

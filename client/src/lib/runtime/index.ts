@@ -7,9 +7,7 @@ export * from "./types";
 export * from "./api";
 export * from "./compile";
 
-// Modular exports for events, input, and loop
-export * from "./events";
-export * from "./input";
+// Loop utilities — events and input re-exported from ./types to avoid EngineEvents conflict
 export * from "./loop";
 
 // Player subsystems - export only non-conflicting types

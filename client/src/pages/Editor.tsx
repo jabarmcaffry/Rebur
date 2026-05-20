@@ -1671,6 +1671,7 @@ export default function EditorPage() {
           objects={objects}
           scripts={scripts}
           username={username}
+          gameId={gameId}
           onExit={handlePlayExit}
         />
       )}
