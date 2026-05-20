@@ -1480,6 +1480,7 @@ export class GameRuntime {
         return () => { subs?.delete(fn); }; 
       },
       keys: () => Array.from(this._stateValues.keys()),
+      getAll: () => Object.fromEntries(this._stateValues),
     };
     return this._stateApi;
   }

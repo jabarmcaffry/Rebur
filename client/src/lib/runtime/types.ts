@@ -173,8 +173,6 @@ export type RuntimePlayer = {
   kill: () => void;
   teleport: (x: number, y: number, z: number) => void;
   respawn: () => void;
-  canFly?: boolean;
-  flying?: boolean;
 };
 
 export type RuntimeInput = _RuntimeInput;

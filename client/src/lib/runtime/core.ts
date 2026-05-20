@@ -830,6 +830,7 @@ export class GameRuntime {
       set: (key, value) => { const v = String(value), prev = this._stateValues.get(key); if (prev === v) return; this._stateValues.set(key, v); const subs = this._stateSubs.get(key); if (!subs) return; for (const fn of subs) { try { fn(v, prev); } catch (e: any) { this.pushLog(`state.on("${key}") error: ${formatErr(e)}`); } } },
       on: (key, fn) => { let subs = this._stateSubs.get(key); if (!subs) { subs = new Set(); this._stateSubs.set(key, subs); } subs.add(fn); return () => { subs?.delete(fn); }; },
       keys: () => Array.from(this._stateValues.keys()),
+      getAll: () => Object.fromEntries(this._stateValues),
     };
     return this._stateApi;
   }

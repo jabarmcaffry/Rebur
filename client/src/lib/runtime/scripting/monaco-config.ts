@@ -78,8 +78,6 @@ interface RuntimePlayer {
   autoFaceMovement: boolean;
   ragdoll: boolean;
   killY: number;
-  canFly?: boolean;
-  flying?: boolean;
   takeDamage(n: number): void;
   heal(n: number): void;
   kill(): void;
@@ -167,7 +165,6 @@ const COMPLETIONS: CompletionDef[] = [
   { label: "player.jumpPower", kind: K.Property, detail: "number", doc: "Jump force (default 8).", insert: "player.jumpPower" },
   { label: "player.size", kind: K.Property, detail: "number", doc: "Avatar size multiplier (default 1).", insert: "player.size" },
   { label: "player.killY", kind: K.Property, detail: "number", doc: "Auto-kill below this Y level (default -50).", insert: "player.killY" },
-  { label: "player.canFly", kind: K.Property, detail: "boolean", doc: "Allow the player to fly (Space = up, Shift = down).", insert: "player.canFly" },
   { label: "player.autoFaceMovement", kind: K.Property, detail: "boolean", doc: "Auto-rotate player to face movement direction.", insert: "player.autoFaceMovement" },
   { label: "player.spawnPoint", kind: K.Property, detail: "Vec3", doc: "Position used when player respawns.", insert: "player.spawnPoint" },
   { label: "player.username", kind: K.Property, detail: "string (read-only)", doc: "Player's display name.", insert: "player.username" },

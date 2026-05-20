@@ -652,9 +652,6 @@ player.jumpPower = 8;       // jump impulse  ← read/write
 player.size = 1;            // avatar scale  ← read/write
 player.autoFaceMovement = true;  // auto-rotate to face movement direction
 
-// Flying
-player.canFly = true;       // Space = fly up, Shift = fly down  ← read/write
-
 // Physics
 player.killY = -50;         // auto-die below this Y  ← read/write
 player.ragdoll;             // true while dying  ← read-only
