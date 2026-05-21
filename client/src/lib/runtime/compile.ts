@@ -50,6 +50,8 @@ export function compileScript(code: string, name: string): CompiledScript {
        const after = game.after;
        const wait = game.wait;
        const now = game.now;
+       const time = game.time;
+       const dt = game.dt;
        const random = game.random;
        const randInt = game.randInt;
        const pick = game.pick;

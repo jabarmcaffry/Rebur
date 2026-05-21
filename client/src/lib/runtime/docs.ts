@@ -846,11 +846,23 @@ example();
 
 ## World Events
 
+World events use the standardized \`.on()\` pattern. All callbacks return an unsubscribe function.
+
 \`\`\`js
-world.onPlayerSpawned((p) => log(p.username, "spawned"));
-world.onPlayerDied((p) => log(p.username, "died"));
-world.onObjectAdded((obj) => log("added:", obj.name));
-world.onObjectRemoved((obj) => log("removed:", obj.name));
+// Player events
+world.on("playerSpawned", (p) => log(p.username, "spawned"));
+world.on("playerDied", (p) => log(p.username, "died"));
+
+// Object lifecycle events
+world.on("objectAdded", (obj) => log("added:", obj.name));
+world.on("objectRemoved", (obj) => log("removed:", obj.name));
+
+// Unsubscribe when done
+const unsub = world.on("playerSpawned", handler);
+unsub();  // stop listening
+
+// Use world.off() to remove a specific handler
+world.off("playerDied", handler);
 \`\`\`
 
 ---
@@ -1215,7 +1227,7 @@ Every \`on()\` call adds an entry to an internal list. Objects that are destroye
 \`\`\`js
 const unsubs = [];
 
-world.onObjectAdded((obj) => {
+world.on("objectAdded", (obj) => {
   if (obj.name.startsWith("Coin")) {
     const u = obj.on("touched", () => {
       player.inventory.add("Coin");

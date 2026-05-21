@@ -194,7 +194,8 @@ export class TaskScheduler {
 }
 
 // ========== weakRef ==========
-export function weakRef<T extends object>(obj: T): { get: () => T | null } {
+// Creates a weak reference wrapper that mirrors native WeakRef API
+export function weakRef<T extends object>(obj: T): { deref: () => T | undefined } {
   const ref = new WeakRef(obj);
-  return { get: () => ref.deref() ?? null };
+  return { deref: () => ref.deref() };
 }

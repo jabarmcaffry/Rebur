@@ -83,6 +83,9 @@ interface RuntimePlayer {
   respawn(): void;
   readonly inventory: Inventory;
   motors: { attach(slot: string, obj: RuntimeObject, offset?: Vec3, rotation?: Vec3): void; detach(slot: string): RuntimeObject | null; get(slot: string): RuntimeObject | null; animation: string; };
+  on(event: string, fn: (...args: any[]) => void): () => void;
+  off(event: string, fn: (...args: any[]) => void): void;
+  emit(event: string, ...args: any[]): boolean;
 }
 `;
 
@@ -376,11 +379,23 @@ const COMPLETIONS: CompletionDef[] = [
   },
 
   // ─── World events ────────────────────────────────────────────────────────
-  { label: "world", kind: K.Variable, detail: "WorldAPI", doc: "Global game-lifecycle events.", insert: "world" },
-  { label: "world.onPlayerSpawned", kind: K.Function, detail: "world.onPlayerSpawned(fn)", doc: "Called when the player spawns or respawns.", insert: "world.onPlayerSpawned((p) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onPlayerDied", kind: K.Function, detail: "world.onPlayerDied(fn)", doc: "Called when the player dies.", insert: "world.onPlayerDied((p) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onObjectAdded", kind: K.Function, detail: "world.onObjectAdded(fn)", doc: "Called when any object is added to the world.", insert: "world.onObjectAdded((obj) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onObjectRemoved", kind: K.Function, detail: "world.onObjectRemoved(fn)", doc: "Called when any object is removed from the world.", insert: "world.onObjectRemoved((obj) => {\n\t${1}\n})", snippet: true },
+  { label: "world", kind: K.Variable, detail: "WorldAPI", doc: "Global game-lifecycle events. Use world.on(event, fn) to listen.", insert: "world" },
+  { 
+    label: "world.on", 
+    kind: K.Function, 
+    detail: "world.on(event, fn) → unsubscribe", 
+    doc: "Subscribe to world events.\n\nEvents:\n- 'playerSpawned' - (player) => {}\n- 'playerDied' - (player) => {}\n- 'objectAdded' - (obj) => {}\n- 'objectRemoved' - (obj) => {}\n\nReturns an unsubscribe function.", 
+    insert: "world.on(\"${1|playerSpawned,playerDied,objectAdded,objectRemoved|}\", (${2:arg}) => {\n\t${3}\n})", 
+    snippet: true 
+  },
+  { 
+    label: "world.off", 
+    kind: K.Function, 
+    detail: "world.off(event, fn) → void", 
+    doc: "Unsubscribe a handler from a world event.", 
+    insert: "world.off(\"${1:event}\", ${2:handler})", 
+    snippet: true 
+  },
 
   // ─── Camera ──────────────────────────────────────────────────────────────
   { label: "camera", kind: K.Variable, detail: "RuntimeCamera", doc: "Camera settings. Modes: thirdPerson, firstPerson, scripted, free.", insert: "camera" },
@@ -534,10 +549,32 @@ const COMPLETIONS: CompletionDef[] = [
   {
     label: "Class",
     kind: K.Module,
-    detail: "Class(base) → extended class",
-    doc: "OOP class builder for engine-style inheritance.",
-    insert: "Class(${1})",
+    detail: "Class(name, base?) → constructor",
+    doc: "OOP class builder for engine-style inheritance.\n\nUsage:\nconst Enemy = Class('Enemy');\nEnemy.prototype.construct = function() { this.hp = 100; };\nconst e = new Enemy();",
+    insert: "Class(\"${1:MyClass}\")",
     snippet: true,
+  },
+  {
+    label: "weakRef",
+    kind: K.Function,
+    detail: "weakRef(obj) → { deref() }",
+    doc: "Create a weak reference to an object. The reference does not prevent garbage collection.\n\nUsage:\nconst ref = weakRef(obj);\nconst alive = ref.deref(); // returns obj or undefined",
+    insert: "weakRef(${1:obj})",
+    snippet: true,
+  },
+  {
+    label: "WeakTable",
+    kind: K.Module,
+    detail: "class WeakTable<K, V>",
+    doc: "Map keyed by weak references — entries disappear automatically when keys are garbage collected.\n\nUsage:\nconst meta = new WeakTable();\nmeta.set(obj, { data: 123 });\nmeta.get(obj); // { data: 123 } or undefined",
+    insert: "new WeakTable()",
+  },
+  {
+    label: "Callable",
+    kind: K.Module,
+    detail: "Callable(fn?) → callable",
+    doc: "Create a function-like value that can be invoked and has methods.\n\nUsage:\nconst c = Callable();\nc.setHandler((x) => x * 2);\nc(5); // 10",
+    insert: "Callable()",
   },
 ];
 
