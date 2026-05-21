@@ -31,6 +31,7 @@ import {
 } from "./types";
 
 import { Emitter, Callable, WeakTable, Class, TagManager, TaskScheduler, weakRef } from "./api";
+import { RESERVED_OBJECT_EVENTS } from "./oop/runtime-object-proxy";
 import { compileScript } from "./compile";
 
 // Modular imports - extracted for maintainability
