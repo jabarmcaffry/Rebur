@@ -419,24 +419,14 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
       const bus = deps.getObjectEventBus(deps.objectId);
       bus.off(event as any, fn as any);
     },
-    onPropertyChanged(property: string) {
-      let bus = propertyEvents.get(property);
-      if (!bus) { bus = new EventBus(); propertyEvents.set(property, bus); }
-      const api: EventsAPI = {
-        on: (event: any, fn: any) => {
-          const disconnect = bus!.on(event, fn);
-          cleanupSet.add(disconnect);
-          return () => {
-            disconnect();
-            cleanupSet.delete(disconnect);
-          };
-        },
-        off: (event: any, fn: any) => bus!.off(event, fn),
-      };
-      return api;
-    },
-    GetPropertyChangedSignal(property: string) {
-      return obj.onPropertyChanged(property);
+    emit(event: string, ...args: any[]) {
+      if (RESERVED_OBJECT_EVENTS.has(event)) {
+        deps.pushLog(`obj.emit("${event}"): "${event}" is an engine-reserved event and cannot be emitted from user code.`);
+        return false;
+      }
+      const bus = deps.getObjectEventBus(deps.objectId);
+      bus.emit(event as any, args as any);
+      return true;
     },
 
     // Attributes
