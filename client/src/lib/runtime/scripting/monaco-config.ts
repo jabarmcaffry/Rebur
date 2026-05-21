@@ -53,7 +53,6 @@ interface RuntimeObject {
   findFirstChild(name: string): RuntimeObject | null;
   setParent(parent: RuntimeObject | null): void;
   setAttribute(key: string, value: any): void;
-  setAttribute(key: string, value: any): void;
   getAttribute(key: string): any;
   getAttributes(): Record<string, any>;
 }
