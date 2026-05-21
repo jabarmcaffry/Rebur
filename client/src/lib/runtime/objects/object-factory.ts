@@ -7,6 +7,7 @@
 
 import type { RuntimeObject, ContainerName, Vec3, ObjectEventName } from "../types";
 import { EventBus } from "../events/event-bus";
+import { RESERVED_OBJECT_EVENTS } from "../oop/runtime-object-proxy";
 import type { HierarchyIndex } from "../hierarchy";
 import { newId, clamp01, readProperties, DEFAULT_PROPERTIES } from "../utils/helpers";
 import type { GameObject } from "@shared/schema";
@@ -58,8 +59,7 @@ export function createRuntimeObjectFromSnapshot(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set<string>(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -112,8 +112,7 @@ export function createRuntimeObject(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set<string>(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -158,8 +157,7 @@ export function cloneTemplate(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -217,29 +215,16 @@ function mountObjectEvents(
     ctx.objectEvents.get(id)?.off(event as any, fn as any);
   };
 
-  // Property changed signal - camelCase API (preferred)
-  const propertyChangedImpl = (property: string) => {
-    let bus = propertyEvents.get(property);
-    if (!bus) {
-      bus = new EventBus();
-      propertyEvents.set(property, bus);
+  proxy.emit = (event: string, ...args: any[]) => {
+    if (RESERVED_OBJECT_EVENTS.has(event)) {
+      console.warn(`obj.emit("${event}"): "${event}" is engine-reserved and cannot be emitted from user code.`);
+      return false;
     }
-    return {
-      on: (event: any, fn: any) => {
-        const disconnect = bus!.on(event, fn);
-        cleanupSet.add(disconnect);
-        return () => {
-          disconnect();
-          cleanupSet.delete(disconnect);
-        };
-      },
-      off: (event: any, fn: any) => bus!.off(event, fn)
-    };
+    let bus = ctx.objectEvents.get(id);
+    if (!bus) { bus = new EventBus(); ctx.objectEvents.set(id, bus); }
+    bus.emit(event as any, args as any);
+    return true;
   };
-  
-  proxy.onPropertyChanged = propertyChangedImpl;
-  // Deprecated alias for backward compatibility
-  proxy.GetPropertyChangedSignal = propertyChangedImpl;
 
   // Attributes
   proxy.setAttribute = (key: string, value: any) => {

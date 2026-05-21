@@ -534,9 +534,9 @@ obj.on("collisionEnded", (other) => { });
 obj.on("woke", () => { });
 obj.on("slept", () => { });
 
-// Property changed
-obj.onPropertyChanged("color").on("changed", (prop, newVal, oldVal) => {
-  log("color changed:", oldVal, "→", newVal);
+// Listen for ANY property change via the "changed" event
+obj.on("changed", (prop, newVal, oldVal) => {
+  log(prop, "changed:", oldVal, "→", newVal);
 });
 
 // All on() calls return an unsubscribe function:

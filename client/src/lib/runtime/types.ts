@@ -98,8 +98,6 @@ export type RuntimeObject = {
   on: (event: string, fn: (...args: any[]) => void) => () => void;
   off: (event: string, fn: (...args: any[]) => void) => void;
   emit: (event: string, ...args: any[]) => boolean;
-  onPropertyChanged: (property: string) => { on: (event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void) => () => void; off: (event: "changed", fn: any) => void };
-  GetPropertyChangedSignal: (property: string) => { on: (event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void) => () => void; off: (event: "changed", fn: any) => void };
   setAttribute: (key: string, value: any) => void;
   getAttribute: (key: string) => any;
   getAttributes: () => Record<string, any>;

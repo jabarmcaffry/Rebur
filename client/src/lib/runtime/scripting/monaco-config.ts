@@ -52,8 +52,6 @@ interface RuntimeObject {
   emit(event: string, ...args: any[]): boolean;
   findFirstChild(name: string): RuntimeObject | null;
   setParent(parent: RuntimeObject | null): void;
-  onPropertyChanged(property: string): { on(event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void): () => void };
-  GetPropertyChangedSignal(property: string): { on(event: "changed", fn: (prop: string, newVal: any, oldVal: any) => void): () => void };
   setAttribute(key: string, value: any): void;
   getAttribute(key: string): any;
   getAttributes(): Record<string, any>;

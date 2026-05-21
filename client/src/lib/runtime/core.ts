@@ -31,6 +31,7 @@ import {
 } from "./types";
 
 import { Emitter, Callable, WeakTable, Class, TagManager, TaskScheduler, weakRef } from "./api";
+import { RESERVED_OBJECT_EVENTS } from "./oop/runtime-object-proxy";
 import { compileScript } from "./compile";
 
 // Modular imports - extracted for maintainability
@@ -231,8 +232,7 @@ export class GameRuntime {
         children: [],
         findFirstChild: () => null,
         setParent: () => {},
-        onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-        GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+        emit: () => false,
         _gravityExclusions: new Set<string>(),
         setAttribute: () => {},
         getAttribute: () => undefined,
@@ -552,27 +552,16 @@ export class GameRuntime {
     proxy.off = (event, fn) => {
       this._objectEvents.get(id)?.off(event as any, fn as any);
     };
-    
-    // Property changed signal - camelCase API (preferred)
-    const propertyChangedImpl = (property: string) => {
-      let bus = propertyEvents.get(property);
-      if (!bus) { bus = new EventBus(); propertyEvents.set(property, bus); }
-      const api = {
-        on: (event: any, fn: any) => {
-          const disconnect = bus!.on(event, fn);
-          cleanupSet.add(disconnect);
-          return () => {
-            disconnect();
-            cleanupSet.delete(disconnect);
-          };
-        },
-        off: (event: any, fn: any) => bus!.off(event, fn)
-      };
-      return api;
+    proxy.emit = (event: string, ...args: any[]) => {
+      if (RESERVED_OBJECT_EVENTS.has(event)) {
+        this.pushLog(`obj.emit("${event}"): "${event}" is an engine-reserved event and cannot be emitted from user code.`);
+        return false;
+      }
+      let bus = this._objectEvents.get(id);
+      if (!bus) { bus = new EventBus(); this._objectEvents.set(id, bus); }
+      bus.emit(event as any, args, (e: any) => this.pushLog(`obj.emit("${event}") handler error: ${formatErr(e)}`));
+      return true;
     };
-    proxy.onPropertyChanged = propertyChangedImpl;
-    // Deprecated alias for backward compatibility
-    proxy.GetPropertyChangedSignal = propertyChangedImpl;
 
     proxy.setAttribute = (key: string, value: any) => {
       const old = attributes.get(key);
@@ -697,8 +686,7 @@ export class GameRuntime {
       children: [],
       findFirstChild: () => null,
       setParent: () => {},
-      onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-      GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+      emit: () => false,
       _gravityExclusions: new Set<string>(),
       setAttribute: () => {},
       getAttribute: () => undefined,
@@ -741,8 +729,7 @@ export class GameRuntime {
       children: [],
       findFirstChild: () => null,
       setParent: () => {},
-      onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-      GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+      emit: () => false,
       _gravityExclusions: new Set(),
       setAttribute: () => {},
       getAttribute: () => undefined,
