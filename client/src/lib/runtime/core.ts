@@ -551,6 +551,16 @@ export class GameRuntime {
     proxy.off = (event, fn) => {
       this._objectEvents.get(id)?.off(event as any, fn as any);
     };
+    proxy.emit = (event: string, ...args: any[]) => {
+      if (RESERVED_OBJECT_EVENTS.has(event)) {
+        this.pushLog(`obj.emit("${event}"): "${event}" is an engine-reserved event and cannot be emitted from user code.`);
+        return false;
+      }
+      let bus = this._objectEvents.get(id);
+      if (!bus) { bus = new EventBus(); this._objectEvents.set(id, bus); }
+      bus.emit(event as any, args, (e: any) => this.pushLog(`obj.emit("${event}") handler error: ${formatErr(e)}`));
+      return true;
+    };
 
     proxy.setAttribute = (key: string, value: any) => {
       const old = attributes.get(key);
