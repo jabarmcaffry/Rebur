@@ -13,6 +13,13 @@ import { Transform, Velocity, Visual, Physics, AutoBehavior, ObjectHandle } from
 import type { Vec3, RuntimeObject, ContainerName, ObjectEventName } from "../types";
 import { EventBus, type EventsAPI } from "../types";
 
+/** Engine-reserved event names that user code cannot emit via obj.emit(). */
+export const RESERVED_OBJECT_EVENTS = new Set<string>([
+  "touched", "untouched", "touchStarted", "touchEnded",
+  "clicked", "destroyed", "changed", "propertyChanged",
+  "collisionStarted", "collisionEnded", "woke", "slept",
+]);
+
 /** Dependencies needed to create a RuntimeObject proxy */
 export interface RuntimeObjectProxyDeps {
   /** The ECS world to read from */
