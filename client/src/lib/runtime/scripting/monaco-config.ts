@@ -83,6 +83,9 @@ interface RuntimePlayer {
   respawn(): void;
   readonly inventory: Inventory;
   motors: { attach(slot: string, obj: RuntimeObject, offset?: Vec3, rotation?: Vec3): void; detach(slot: string): RuntimeObject | null; get(slot: string): RuntimeObject | null; animation: string; };
+  on(event: string, fn: (...args: any[]) => void): () => void;
+  off(event: string, fn: (...args: any[]) => void): void;
+  emit(event: string, ...args: any[]): boolean;
 }
 `;
 
@@ -546,10 +549,32 @@ const COMPLETIONS: CompletionDef[] = [
   {
     label: "Class",
     kind: K.Module,
-    detail: "Class(base) → extended class",
-    doc: "OOP class builder for engine-style inheritance.",
-    insert: "Class(${1})",
+    detail: "Class(name, base?) → constructor",
+    doc: "OOP class builder for engine-style inheritance.\n\nUsage:\nconst Enemy = Class('Enemy');\nEnemy.prototype.construct = function() { this.hp = 100; };\nconst e = new Enemy();",
+    insert: "Class(\"${1:MyClass}\")",
     snippet: true,
+  },
+  {
+    label: "weakRef",
+    kind: K.Function,
+    detail: "weakRef(obj) → { deref() }",
+    doc: "Create a weak reference to an object. The reference does not prevent garbage collection.\n\nUsage:\nconst ref = weakRef(obj);\nconst alive = ref.deref(); // returns obj or undefined",
+    insert: "weakRef(${1:obj})",
+    snippet: true,
+  },
+  {
+    label: "WeakTable",
+    kind: K.Module,
+    detail: "class WeakTable<K, V>",
+    doc: "Map keyed by weak references — entries disappear automatically when keys are garbage collected.\n\nUsage:\nconst meta = new WeakTable();\nmeta.set(obj, { data: 123 });\nmeta.get(obj); // { data: 123 } or undefined",
+    insert: "new WeakTable()",
+  },
+  {
+    label: "Callable",
+    kind: K.Module,
+    detail: "Callable(fn?) → callable",
+    doc: "Create a function-like value that can be invoked and has methods.\n\nUsage:\nconst c = Callable();\nc.setHandler((x) => x * 2);\nc(5); // 10",
+    insert: "Callable()",
   },
 ];
 
