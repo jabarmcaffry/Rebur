@@ -214,6 +214,17 @@ function mountObjectEvents(
     ctx.objectEvents.get(id)?.off(event as any, fn as any);
   };
 
+  proxy.emit = (event: string, ...args: any[]) => {
+    if (RESERVED_OBJECT_EVENTS.has(event)) {
+      console.warn(`obj.emit("${event}"): "${event}" is engine-reserved and cannot be emitted from user code.`);
+      return false;
+    }
+    let bus = ctx.objectEvents.get(id);
+    if (!bus) { bus = new EventBus(); ctx.objectEvents.set(id, bus); }
+    bus.emit(event as any, args as any);
+    return true;
+  };
+
   // Attributes
   proxy.setAttribute = (key: string, value: any) => {
     const old = attributes.get(key);
