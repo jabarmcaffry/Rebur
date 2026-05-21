@@ -391,11 +391,16 @@ export class GameRuntime {
       kill: () => {},
       teleport: () => {},
       respawn: () => {},
+      // Event methods - stub, will be mounted properly
+      on: () => () => {},
+      off: () => {},
+      emit: () => false,
     };
 
     this.mountPlayerInventory();
     this.mountPlayerMethods();
     this.mountPlayerMotors();
+    this.mountPlayerEvents(); // Mount event system for player
     this.initRunService();
 
     // Compile regular scripts (not ModuleScripts)
@@ -639,6 +644,65 @@ export class GameRuntime {
       this._ragdollPos = null;
       this._events.emit("playerSpawned", [p], () => {});
       this.pushLog(`${p.username} respawned.`);
+    };
+  }
+
+  /**
+   * Mount event system for the player object.
+   * Wraps the player in a proxy that detects property changes and emits "changed" events.
+   * Also provides .on(), .off(), .emit() methods consistent with RuntimeObject.
+   */
+  private mountPlayerEvents() {
+    const playerId = "__player__"; // Special ID for player events
+    const cleanupSet = new Set<() => void>();
+    const rawPlayer = this.player;
+    
+    // Reserved player events that scripts cannot emit
+    const RESERVED_PLAYER_EVENTS = new Set(["changed"]);
+    
+    // Wrap player in proxy to detect property changes
+    this.player = new Proxy(rawPlayer, {
+      set: (target, prop, value) => {
+        const propName = prop as string;
+        const oldValue = (target as any)[propName];
+        // Only emit changed event for actual value changes
+        if (oldValue !== value) {
+          (target as any)[propName] = value;
+          // Emit "changed" event with (propertyName, newValue, oldValue)
+          this._objectEventBus.emit(playerId, "changed", [propName, value, oldValue]);
+        }
+        return true;
+      },
+      get: (target, prop) => {
+        // Return the actual value for most properties
+        return (target as any)[prop];
+      }
+    });
+    
+    // Mount event methods on the proxied player
+    this.player.on = (event: string, fn: (...args: any[]) => void) => {
+      const disconnect = this._objectEventBus.on(playerId, event, fn);
+      cleanupSet.add(disconnect);
+      return () => {
+        disconnect();
+        cleanupSet.delete(disconnect);
+      };
+    };
+    
+    this.player.off = (event: string, fn: (...args: any[]) => void) => {
+      this._objectEventBus.off(playerId, event, fn);
+    };
+    
+    // Script-facing emit — only custom events allowed
+    this.player.emit = (event: string, ...args: any[]): boolean => {
+      if (RESERVED_PLAYER_EVENTS.has(event)) {
+        this.pushLog(`player.emit("${event}"): "${event}" is an engine-reserved event and cannot be emitted from user code.`);
+        return false;
+      }
+      this._objectEventBus.emit(playerId, event, args, (e) => {
+        this.pushLog(`player.emit("${event}") handler error: ${formatErr(e)}`);
+      });
+      return true;
     };
   }
 

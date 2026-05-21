@@ -663,6 +663,37 @@ player.teleport(10, 5, 0);
 player.spawnPoint = { x: 0, y: 5, z: 0 };
 \`\`\`
 
+### Player Events
+
+The player object supports the same event pattern as objects. Use \`player.on()\` to listen for property changes.
+
+\`\`\`js
+// Listen for ANY property change on the player
+player.on("changed", (prop, newVal, oldVal) => {
+  if (prop === "health") {
+    gui.text("healthHUD", "Health: " + Math.max(0, Math.floor(newVal)));
+    if (newVal <= 0) {
+      gui.text("infoHUD", "You died!", { anchor: "bc", y: 40 });
+    }
+  }
+});
+
+// Custom events — you can emit your own events on the player
+player.on("levelUp", (newLevel) => {
+  gui.text("info", "Level Up! Now level " + newLevel);
+});
+
+// Emit custom events (reserved events like "changed" cannot be emitted)
+player.emit("levelUp", 5);  // ✅ Works
+player.emit("changed");     // ❌ Blocked — "changed" is engine-reserved
+
+// All on() calls return an unsubscribe function
+const unsub = player.on("changed", handler);
+unsub();  // stop listening
+\`\`\`
+
+**Reserved player event:** \`changed\` — fired automatically by the engine when any player property changes.
+
 ---
 
 ## Inventory
