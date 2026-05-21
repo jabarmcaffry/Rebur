@@ -130,6 +130,8 @@ export type PlayerInventory = {
   clear: () => void;
 };
 
+export type PlayerEventName = "changed" | string;
+
 export type RuntimePlayer = {
   username: string;
   color: string;
@@ -163,6 +165,10 @@ export type RuntimePlayer = {
   kill: () => void;
   teleport: (x: number, y: number, z: number) => void;
   respawn: () => void;
+  // Event methods - same pattern as RuntimeObject
+  on: (event: PlayerEventName, fn: (...args: any[]) => void) => () => void;
+  off: (event: PlayerEventName, fn: (...args: any[]) => void) => void;
+  emit: (event: string, ...args: any[]) => boolean;
 };
 
 export type RuntimePhysics = {

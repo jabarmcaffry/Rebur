@@ -222,6 +222,32 @@ const COMPLETIONS: CompletionDef[] = [
     insert: "player.motors",
   },
 
+  // ─── Player events ──────────────────────────────────────────────────────
+  {
+    label: "player.on",
+    kind: K.Function,
+    detail: "player.on(event, fn) → unsubscribe",
+    doc: "Subscribe to a player event. The 'changed' event fires when any player property changes: (prop, newVal, oldVal) => { }.\nCustom events: any name you choose — pair with player.emit().\nReturns an unsubscribe function.",
+    insert: "player.on(\"${1:changed}\", (${2:prop, newVal, oldVal}) => {\n\t${3}\n})",
+    snippet: true,
+  },
+  {
+    label: "player.off",
+    kind: K.Function,
+    detail: "player.off(event, fn) → void",
+    doc: "Unsubscribe a handler from a player event.",
+    insert: "player.off(\"${1:event}\", ${2:handler})",
+    snippet: true,
+  },
+  {
+    label: "player.emit",
+    kind: K.Function,
+    detail: "player.emit(event, ...args) → boolean",
+    doc: "Fire a custom event on the player. All listeners registered with player.on(event) will be called.\n\nIMPORTANT: You cannot emit engine-reserved events ('changed'). Attempting to do so logs an error and returns false.\n\nReturns true on success, false if the event name is reserved.",
+    insert: "player.emit(\"${1:myEvent}\", ${2})",
+    snippet: true,
+  },
+
   // ─── Object events ──────────────────────────────────────────────────────
   {
     label: "obj.on",

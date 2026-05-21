@@ -53,6 +53,10 @@ export function createPlayer(config: PlayerConfig, motorState: Map<string, Motor
     kill: () => {},
     teleport: () => {},
     respawn: () => {},
+    // Event methods - stub, will be mounted properly by runtime
+    on: () => () => {},
+    off: () => {},
+    emit: () => false,
   };
 
   return player;

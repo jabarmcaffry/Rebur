@@ -310,6 +310,10 @@ export class GameRuntime {
       kill: () => {},
       teleport: () => {},
       respawn: () => {},
+      // Event methods - stub, will be mounted properly
+      on: () => () => {},
+      off: () => {},
+      emit: () => false,
     };
 
     this.mountPlayerInventory();
