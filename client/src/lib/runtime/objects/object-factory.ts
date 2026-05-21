@@ -58,8 +58,7 @@ export function createRuntimeObjectFromSnapshot(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set<string>(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -112,8 +111,7 @@ export function createRuntimeObject(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set<string>(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -158,8 +156,7 @@ export function cloneTemplate(
     children: [],
     findFirstChild: () => null,
     setParent: () => {},
-    onPropertyChanged: () => ({ on: () => () => {}, off: () => {} }),
-    GetPropertyChangedSignal: () => ({ on: () => () => {}, off: () => {} }),
+    emit: () => false,
     _gravityExclusions: new Set(),
     setAttribute: () => {},
     getAttribute: () => undefined,
@@ -216,30 +213,6 @@ function mountObjectEvents(
   proxy.off = (event: ObjectEventName, fn: (...args: any[]) => void) => {
     ctx.objectEvents.get(id)?.off(event as any, fn as any);
   };
-
-  // Property changed signal - camelCase API (preferred)
-  const propertyChangedImpl = (property: string) => {
-    let bus = propertyEvents.get(property);
-    if (!bus) {
-      bus = new EventBus();
-      propertyEvents.set(property, bus);
-    }
-    return {
-      on: (event: any, fn: any) => {
-        const disconnect = bus!.on(event, fn);
-        cleanupSet.add(disconnect);
-        return () => {
-          disconnect();
-          cleanupSet.delete(disconnect);
-        };
-      },
-      off: (event: any, fn: any) => bus!.off(event, fn)
-    };
-  };
-  
-  proxy.onPropertyChanged = propertyChangedImpl;
-  // Deprecated alias for backward compatibility
-  proxy.GetPropertyChangedSignal = propertyChangedImpl;
 
   // Attributes
   proxy.setAttribute = (key: string, value: any) => {
