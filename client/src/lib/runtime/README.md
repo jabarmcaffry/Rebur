@@ -107,14 +107,14 @@ runtime/
 
 ## Architecture Overview
 
-### Core Orchestrator (`core.ts`)
+### Core Orchestrator (`game-runtime.ts`)
 
-The `GameRuntime` class in `core.ts` is the main orchestrator that:
+The `GameRuntime` class in `game-runtime.ts` is the main orchestrator that:
 - Initializes all subsystems on construction
 - Coordinates the game loop phases
 - Provides the unified API surface for scripts
 
-**Important**: `core.ts` should NOT contain business logic directly. It delegates to the modular subsystems. If you need to add new functionality, create it in the appropriate subsystem module and import it into `core.ts`.
+**Important**: `game-runtime.ts` should NOT contain business logic directly. It delegates to the modular subsystems. If you need to add new functionality, create it in the appropriate subsystem module and import it into `game-runtime.ts`.
 
 ### Subsystem Pattern
 

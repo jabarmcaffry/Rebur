@@ -376,11 +376,23 @@ const COMPLETIONS: CompletionDef[] = [
   },
 
   // ─── World events ────────────────────────────────────────────────────────
-  { label: "world", kind: K.Variable, detail: "WorldAPI", doc: "Global game-lifecycle events.", insert: "world" },
-  { label: "world.onPlayerSpawned", kind: K.Function, detail: "world.onPlayerSpawned(fn)", doc: "Called when the player spawns or respawns.", insert: "world.onPlayerSpawned((p) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onPlayerDied", kind: K.Function, detail: "world.onPlayerDied(fn)", doc: "Called when the player dies.", insert: "world.onPlayerDied((p) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onObjectAdded", kind: K.Function, detail: "world.onObjectAdded(fn)", doc: "Called when any object is added to the world.", insert: "world.onObjectAdded((obj) => {\n\t${1}\n})", snippet: true },
-  { label: "world.onObjectRemoved", kind: K.Function, detail: "world.onObjectRemoved(fn)", doc: "Called when any object is removed from the world.", insert: "world.onObjectRemoved((obj) => {\n\t${1}\n})", snippet: true },
+  { label: "world", kind: K.Variable, detail: "WorldAPI", doc: "Global game-lifecycle events. Use world.on(event, fn) to listen.", insert: "world" },
+  { 
+    label: "world.on", 
+    kind: K.Function, 
+    detail: "world.on(event, fn) → unsubscribe", 
+    doc: "Subscribe to world events.\n\nEvents:\n- 'playerSpawned' - (player) => {}\n- 'playerDied' - (player) => {}\n- 'objectAdded' - (obj) => {}\n- 'objectRemoved' - (obj) => {}\n\nReturns an unsubscribe function.", 
+    insert: "world.on(\"${1|playerSpawned,playerDied,objectAdded,objectRemoved|}\", (${2:arg}) => {\n\t${3}\n})", 
+    snippet: true 
+  },
+  { 
+    label: "world.off", 
+    kind: K.Function, 
+    detail: "world.off(event, fn) → void", 
+    doc: "Unsubscribe a handler from a world event.", 
+    insert: "world.off(\"${1:event}\", ${2:handler})", 
+    snippet: true 
+  },
 
   // ─── Camera ──────────────────────────────────────────────────────────────
   { label: "camera", kind: K.Variable, detail: "RuntimeCamera", doc: "Camera settings. Modes: thirdPerson, firstPerson, scripted, free.", insert: "camera" },

@@ -130,7 +130,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "World lifecycle events",
-    code: `world.onPlayerSpawned((p) => log(p.username, "spawned"));\nworld.onPlayerDied((p) => log(p.username, "died"));\nworld.onObjectAdded((o) => log("added", o.name));\nworld.onObjectRemoved((o) => log("removed", o.name));\n`,
+    code: `world.on("playerSpawned", (p) => log(p.username, "spawned"));\nworld.on("playerDied", (p) => log(p.username, "died"));\nworld.on("objectAdded", (o) => log("added", o.name));\nworld.on("objectRemoved", (o) => log("removed", o.name));\n`,
   },
   {
     label: "Spawn from ReplicatedStorage",

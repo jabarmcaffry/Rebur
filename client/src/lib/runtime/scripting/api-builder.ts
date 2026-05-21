@@ -255,12 +255,10 @@ export function buildApi(
     },
   };
 
-  // World API
+  // World API - uses standardized .on() pattern
   const worldApi: WorldAPI = {
-    onObjectAdded: (fn) => ctx.events.on("objectAdded", fn),
-    onObjectRemoved: (fn) => ctx.events.on("objectRemoved", fn),
-    onPlayerSpawned: (fn) => ctx.events.on("playerSpawned", fn),
-    onPlayerDied: (fn) => ctx.events.on("playerDied", fn),
+    on: (event, fn) => ctx.events.on(event as keyof EngineEvents, fn as any),
+    off: (event, fn) => ctx.events.off(event as keyof EngineEvents, fn as any),
   };
 
   // Timing functions

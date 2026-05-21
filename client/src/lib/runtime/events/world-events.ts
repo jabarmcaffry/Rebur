@@ -1,41 +1,40 @@
 /**
  * World Events System
  * 
- * Handles world lifecycle events (object added/removed, player spawned/died).
+ * Handles world lifecycle events using standardized .on("event") pattern.
  */
 
 import type { RuntimeObject, RuntimePlayer } from "../types";
 import type { EventBus, EngineEvents } from "./event-bus";
 
 /**
- * World API exposed to scripts
+ * World event names
+ */
+export type WorldEventName = 
+  | "objectAdded"
+  | "objectRemoved"
+  | "playerSpawned"
+  | "playerDied";
+
+/**
+ * World API exposed to scripts - uses standardized .on() pattern
  */
 export interface WorldAPI {
-  onObjectAdded: (fn: (obj: RuntimeObject) => void) => () => void;
-  onObjectRemoved: (fn: (obj: RuntimeObject) => void) => () => void;
-  onPlayerSpawned: (fn: (player: RuntimePlayer) => void) => () => void;
-  onPlayerDied: (fn: (player: RuntimePlayer) => void) => () => void;
+  on: (event: WorldEventName, fn: (...args: any[]) => void) => () => void;
+  off: (event: WorldEventName, fn: (...args: any[]) => void) => void;
 }
 
 /**
- * Create world API
+ * Create world API with .on() pattern
  */
 export function createWorldAPI(events: EventBus<EngineEvents>): WorldAPI {
   return {
-    onObjectAdded(fn: (obj: RuntimeObject) => void): () => void {
-      return events.on("objectAdded", fn);
+    on(event: WorldEventName, fn: (...args: any[]) => void): () => void {
+      return events.on(event as keyof EngineEvents, fn as any);
     },
 
-    onObjectRemoved(fn: (obj: RuntimeObject) => void): () => void {
-      return events.on("objectRemoved", fn);
-    },
-
-    onPlayerSpawned(fn: (player: RuntimePlayer) => void): () => void {
-      return events.on("playerSpawned", fn);
-    },
-
-    onPlayerDied(fn: (player: RuntimePlayer) => void): () => void {
-      return events.on("playerDied", fn);
+    off(event: WorldEventName, fn: (...args: any[]) => void): void {
+      events.off(event as keyof EngineEvents, fn as any);
     },
   };
 }
