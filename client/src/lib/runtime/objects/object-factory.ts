@@ -7,6 +7,7 @@
 
 import type { RuntimeObject, ContainerName, Vec3, ObjectEventName } from "../types";
 import { EventBus } from "../events/event-bus";
+import { RESERVED_OBJECT_EVENTS } from "../oop/runtime-object-proxy";
 import type { HierarchyIndex } from "../hierarchy";
 import { newId, clamp01, readProperties, DEFAULT_PROPERTIES } from "../utils/helpers";
 import type { GameObject } from "@shared/schema";
