@@ -515,32 +515,36 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* ── CHAT PANEL ── */}
+      {/* ── CHAT PANEL (anchored right under the Chat button) ── */}
       {chatOpen && (
-        <div className="absolute bottom-20 left-2 z-50 w-72 rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-            <span className="text-white/70 text-xs font-semibold uppercase tracking-wide">Chat</span>
-            <button onClick={() => setChatOpen(false)} className="text-white/40 hover:text-white">
+        <div className="absolute top-12 left-2 z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl overflow-hidden border border-white/15 bg-black/90 backdrop-blur-xl shadow-2xl flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
+            <span className="text-white text-xs font-semibold uppercase tracking-wider">Chat</span>
+            <button onClick={() => setChatOpen(false)} className="text-white/50 hover:text-white">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
-          <ScrollArea className="h-40">
+          <ScrollArea className="h-48">
             <div className="p-2 flex flex-col gap-1">
               {messages.map((m) => (
                 <div key={m.id} className="text-xs leading-snug">
-                  <span className={`font-semibold ${m.username === "System" ? "text-neutral-100" : "text-neutral-200"}`}>
-                    {m.username}:&nbsp;
-                  </span>
-                  <span className="text-white/80">{m.text}</span>
+                  {m.username === "System" ? (
+                    <span className="text-white/40 italic">{m.text}</span>
+                  ) : (
+                    <>
+                      <span className="font-semibold text-white">{m.username}:&nbsp;</span>
+                      <span className="text-white/85">{m.text}</span>
+                    </>
+                  )}
                 </div>
               ))}
               <div ref={chatEndRef} />
             </div>
           </ScrollArea>
-          <div className="flex items-center gap-1.5 px-2 py-2 border-t border-white/10">
+          <div className="flex items-center gap-1.5 px-2 py-2 border-t border-white/10 bg-white/5">
             <input
               ref={chatInputRef}
-              className="flex-1 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-white/40"
+              className="flex-1 bg-black/60 border border-white/15 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-white"
               placeholder="Say something…"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
@@ -552,7 +556,7 @@ export default function PlayMode({
             />
             <button
               onClick={sendChat}
-              className="p-1.5 rounded-md bg-blue-600 hover:bg-neutral-200 text-white transition-colors"
+              className="p-1.5 rounded-md bg-white text-black hover:bg-white/80 transition-colors"
             >
               <Send className="w-3 h-3" />
             </button>
@@ -560,12 +564,12 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* Chat messages ambient (bottom-left when closed) */}
+      {/* Ambient recent messages (bottom-left when chat closed) — user messages only */}
       {!chatOpen && (
         <div className="absolute bottom-20 left-2 z-40 pointer-events-none flex flex-col gap-1">
-          {messages.slice(-4).map((m) => (
-            <div key={m.id} className="text-xs text-white/70 bg-black/40 backdrop-blur rounded px-2 py-0.5 max-w-[260px] truncate">
-              <span className={`font-semibold ${m.username === "System" ? "text-neutral-300" : "text-neutral-200"}`}>{m.username}: </span>
+          {messages.filter((m) => m.username !== "System").slice(-4).map((m) => (
+            <div key={m.id} className="text-xs text-white bg-black/60 backdrop-blur rounded px-2 py-0.5 max-w-[260px] truncate">
+              <span className="font-semibold">{m.username}: </span>
               {m.text}
             </div>
           ))}
