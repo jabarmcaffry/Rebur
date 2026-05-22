@@ -16,7 +16,7 @@ export default function GuiOverlay({
   const items = Array.from(runtime.gui.values());
   if (items.length === 0) return null;
   return (
-    <div className="absolute inset-0 z-20 pointer-events-none" data-testid="gui-overlay">
+    <div className="absolute inset-0 z-10 pointer-events-none" data-testid="gui-overlay">
       {items.map((el) => {
         const style: React.CSSProperties = {
           position: "absolute",
