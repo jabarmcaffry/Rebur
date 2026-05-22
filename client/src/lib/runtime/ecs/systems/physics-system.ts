@@ -142,6 +142,10 @@ export const PhysicsSystem = defineSystem({
         playerPhys.moveForward.x = fwdNorm.x;
         playerPhys.moveForward.y = fwdNorm.y;
         playerPhys.moveForward.z = fwdNorm.z;
+
+        // Roblox-style 3rd person: character always faces away from the camera
+        // (i.e. faces the camera-forward direction). Yaw = atan2(forward.x, forward.z).
+        transform.rotation.y = Math.atan2(fwdNorm.x, fwdNorm.z);
         
         // Calculate right vector.
         const right = vec3Cross(playerPhys.moveForward, playerPhys.up);
