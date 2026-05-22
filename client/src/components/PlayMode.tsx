@@ -39,7 +39,7 @@ export default function PlayMode({
   onExit: (logs: string[]) => void;
 }) {
   const runtime = useMemo(
-    () => new GameRuntime(objects, scripts, username, "#3b82f6"),
+    () => new GameRuntime(objects, scripts, username, "#ffffff"),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
@@ -224,7 +224,7 @@ export default function PlayMode({
   const totalPlayers = 1 + remotePlayers.length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0e1116]" data-testid="play-mode-root">
+    <div className="fixed inset-0 z-50 bg-[#0a0a0a]" data-testid="play-mode-root">
       {/* 3D or SVG canvas */}
       {webglAvailable ? (
         <PlayCanvasErrorBoundary
@@ -237,19 +237,19 @@ export default function PlayMode({
             camera={{ position: [0, 4, 8], fov: 60 }}
             onPointerMissed={() => runtime.emitClick(null)}
           >
-            <color attach="background" args={["#1a1d24"]} />
+            <color attach="background" args={["#0a0a0a"]} />
             <ambientLight intensity={0.4} />
             <directionalLight position={[10, 14, 6]} intensity={0.9} castShadow shadow-mapSize={[2048, 2048]} />
-            <hemisphereLight args={["#88aaff", "#332211", 0.4]} />
+            <hemisphereLight args={["#e5e5e5", "#262626", 0.4]} />
             <Grid
               args={[80, 80]}
               position={[0, 0.51, 0]}
               cellSize={1}
               cellThickness={0.5}
-              cellColor="#4a5160"
+              cellColor="#262626"
               sectionSize={5}
               sectionThickness={1}
-              sectionColor="#6a7384"
+              sectionColor="#404040"
               fadeDistance={60}
               infiniteGrid
             />
@@ -606,7 +606,7 @@ export default function PlayMode({
 
       {/* ── CONSOLE PANEL ── */}
       {showConsole && (
-        <div className="absolute bottom-0 left-0 right-0 h-52 bg-[#0e1116]/95 backdrop-blur border-t border-white/10 z-30 flex flex-col">
+        <div className="absolute bottom-0 left-0 right-0 h-52 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-30 flex flex-col">
           <div className="flex items-center justify-between px-3 h-7 border-b border-white/10">
             <div className="flex items-center gap-2">
               <Terminal className="w-3 h-3 text-neutral-300" />

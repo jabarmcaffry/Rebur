@@ -578,37 +578,47 @@ const COMPLETIONS: CompletionDef[] = [
   },
 ];
 
-/** Custom dark theme — keep the exact same look */
+/** Custom dark theme — clean black and white aesthetic */
 export const ENGINE_EDITOR_THEME: Monaco.editor.IStandaloneThemeData = {
   base: "vs-dark",
   inherit: true,
   rules: [
-    { token: "comment", foreground: "6A9955" },
-    { token: "keyword", foreground: "C586C0" },
-    { token: "string", foreground: "CE9178" },
-    { token: "number", foreground: "B5CEA8" },
-    { token: "type", foreground: "4EC9B0" },
-    { token: "function", foreground: "DCDCAA" },
-    { token: "variable", foreground: "9CDCFE" },
-    { token: "identifier", foreground: "9CDCFE" },
+    { token: "comment", foreground: "6b7280" },
+    { token: "keyword", foreground: "d4d4d4" },
+    { token: "string", foreground: "a3a3a3" },
+    { token: "number", foreground: "e5e5e5" },
+    { token: "type", foreground: "d4d4d4" },
+    { token: "function", foreground: "f5f5f5" },
+    { token: "variable", foreground: "e5e5e5" },
+    { token: "identifier", foreground: "e5e5e5" },
   ],
   colors: {
-    "editor.background": "#1a1a2e",
-    "editor.foreground": "#e0e0e0",
-    "editor.lineHighlightBackground": "#252540",
-    "editor.selectionBackground": "#3d3d5c",
-    "editorLineNumber.foreground": "#6c6c8a",
-    "editorIndentGuide.background": "#2a2a4a",
-    "editor.wordHighlightBackground": "#3d3d5c",
+    "editor.background": "#0a0a0a",
+    "editor.foreground": "#e5e5e5",
+    "editor.lineHighlightBackground": "#171717",
+    "editor.selectionBackground": "#262626",
+    "editorLineNumber.foreground": "#525252",
+    "editorIndentGuide.background": "#262626",
+    "editor.wordHighlightBackground": "#262626",
+    "editorCursor.foreground": "#ffffff",
+    "editor.lineHighlightBorder": "#262626",
   },
 };
+
+// Track whether we've already configured Monaco to prevent duplicate registrations
+let monacoConfigured = false;
 
 /**
  * Configure Monaco for the engine editor.
  * - Kills ALL built-in JS/TS IntelliSense
  * - Registers our own completion + hover providers
+ * - Only runs once to prevent duplicate completions
  */
 export function configureMonacoForEngine(monaco: typeof Monaco): void {
+  // Prevent duplicate registrations - this fixes the 3x autocomplete issue
+  if (monacoConfigured) return;
+  monacoConfigured = true;
+
   // Register theme
   monaco.editor.defineTheme("engine-dark", ENGINE_EDITOR_THEME);
 
