@@ -307,8 +307,8 @@ export default function PlayMode({
 
       {/* ── MENU DROPDOWN ── */}
       {menuOpen && (
-        <div className="absolute top-14 left-3 z-30 w-64 rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-[#1a1d2e]/95 backdrop-blur">
-          <div className="px-4 py-3 border-b border-white/10 bg-[#252840]/60">
+        <div className="absolute top-12 left-2 z-50 w-64 rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-neutral-900/95 backdrop-blur">
+          <div className="px-4 py-3 border-b border-white/10 bg-neutral-800/70">
             <p className="text-white font-semibold text-sm">{username}</p>
             <p className="text-white/50 text-xs">
               {mpConnected ? `Online · ${totalPlayers} player${totalPlayers !== 1 ? "s" : ""}` : "Playing"}
@@ -320,7 +320,7 @@ export default function PlayMode({
               onClick={handleResume}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-white/90 hover:bg-white/10 transition-colors text-sm text-left"
             >
-              <Play className="w-4 h-4 text-green-400" />
+              <Play className="w-4 h-4 text-neutral-100" />
               Resume
             </button>
 
@@ -328,7 +328,7 @@ export default function PlayMode({
               onClick={handleResetAvatar}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-white/90 hover:bg-white/10 transition-colors text-sm text-left"
             >
-              <RotateCcw className="w-4 h-4 text-blue-400" />
+              <RotateCcw className="w-4 h-4 text-neutral-200" />
               Reset Character
             </button>
 
@@ -336,7 +336,7 @@ export default function PlayMode({
               onClick={() => { setSettingsOpen((v) => !v); }}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-white/90 hover:bg-white/10 transition-colors text-sm text-left"
             >
-              <Settings className="w-4 h-4 text-yellow-400" />
+              <Settings className="w-4 h-4 text-neutral-100" />
               Settings
               <span className="ml-auto text-white/30 text-xs">{settingsOpen ? "▴" : "▾"}</span>
             </button>
@@ -352,7 +352,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShiftLock((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${shiftLock ? "bg-blue-500" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${shiftLock ? "bg-neutral-200" : "bg-white/20"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${shiftLock ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -366,7 +366,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowFps((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showFps ? "bg-blue-500" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showFps ? "bg-neutral-200" : "bg-white/20"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showFps ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -380,7 +380,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowStats((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showStats ? "bg-blue-500" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showStats ? "bg-neutral-200" : "bg-white/20"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showStats ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -394,7 +394,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowLeaderboard((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showLeaderboard ? "bg-blue-500" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showLeaderboard ? "bg-neutral-200" : "bg-white/20"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showLeaderboard ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -408,7 +408,7 @@ export default function PlayMode({
               onClick={() => setShowConsole((v) => !v)}
               className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-white/90 hover:bg-white/10 transition-colors text-sm text-left"
             >
-              <Terminal className="w-4 h-4 text-purple-400" />
+              <Terminal className="w-4 h-4 text-neutral-300" />
               {showConsole ? "Hide Console" : "Show Console"}
             </button>
 
@@ -424,9 +424,9 @@ export default function PlayMode({
       )}
 
       {/* ── TOP-RIGHT INDICATORS ── */}
-      <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-2">
+      <div className="absolute top-12 right-2 z-40 flex flex-col items-end gap-2">
         {showFps && (
-          <div className="px-2 py-1 rounded-md bg-black/70 backdrop-blur border border-white/10 text-green-400 font-mono text-xs tabular-nums">
+          <div className="px-2 py-1 rounded-md bg-black/70 backdrop-blur border border-white/10 text-neutral-100 font-mono text-xs tabular-nums">
             {fps} FPS
           </div>
         )}
@@ -451,34 +451,34 @@ export default function PlayMode({
 
       {/* ── STATS OVERLAY ── */}
       {showStats && (
-        <div className="absolute top-16 left-3 z-20 px-3 py-2 rounded-lg bg-black/70 backdrop-blur border border-white/10 font-mono text-xs text-white/80 space-y-0.5 pointer-events-none">
+        <div className="absolute top-14 left-2 z-40 px-3 py-2 rounded-lg bg-black/70 backdrop-blur border border-white/10 font-mono text-xs text-white/80 space-y-0.5 pointer-events-none">
           <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Stats</div>
-          <div>HP: <span className="text-green-400">{Math.round(p.health)}/{p.maxHealth}</span></div>
-          <div>X: <span className="text-blue-300">{p.position.x.toFixed(2)}</span></div>
-          <div>Y: <span className="text-blue-300">{p.position.y.toFixed(2)}</span></div>
-          <div>Z: <span className="text-blue-300">{p.position.z.toFixed(2)}</span></div>
-          <div>Speed: <span className="text-yellow-300">{Math.hypot(p.velocity.x, p.velocity.z).toFixed(2)}</span></div>
+          <div>HP: <span className="text-neutral-100">{Math.round(p.health)}/{p.maxHealth}</span></div>
+          <div>X: <span className="text-neutral-200">{p.position.x.toFixed(2)}</span></div>
+          <div>Y: <span className="text-neutral-200">{p.position.y.toFixed(2)}</span></div>
+          <div>Z: <span className="text-neutral-200">{p.position.z.toFixed(2)}</span></div>
+          <div>Speed: <span className="text-neutral-300">{Math.hypot(p.velocity.x, p.velocity.z).toFixed(2)}</span></div>
           <div>Walk: <span className="text-white/60">{p.walkSpeed}</span> Run: <span className="text-white/60">{p.runSpeed}</span></div>
           <div>Jump: <span className="text-white/60">{p.jumpPower}</span></div>
-          <div>Ground: <span className={p.onGround ? "text-green-400" : "text-red-400"}>{p.onGround ? "yes" : "no"}</span></div>
+          <div>Ground: <span className={p.onGround ? "text-neutral-100" : "text-red-400"}>{p.onGround ? "yes" : "no"}</span></div>
         </div>
       )}
 
       {/* ── LEADERBOARD (right side) ── */}
       {showLeaderboard && (
-        <div className="absolute top-3 right-3 z-20 w-52" style={{ top: showFps || p.health < p.maxHealth ? "90px" : "12px" }}>
-          <div className="rounded-xl overflow-hidden border border-white/10 bg-[#1a1d2e]/90 backdrop-blur shadow-2xl">
-            <div className="px-3 py-2 border-b border-white/10 bg-[#252840]/60 flex items-center justify-between">
+        <div className="absolute top-12 right-2 z-50 w-56" style={{ top: showFps || p.health < p.maxHealth ? "90px" : "12px" }}>
+          <div className="rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl">
+            <div className="px-3 py-2 border-b border-white/10 bg-neutral-800/70 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Users className="w-3.5 h-3.5 text-blue-400" />
+                <Users className="w-3.5 h-3.5 text-neutral-200" />
                 <span className="text-white/80 text-xs font-semibold uppercase tracking-wide">Players</span>
               </div>
               <span className="text-white/40 text-xs">{totalPlayers}</span>
             </div>
             <div className="p-1.5 space-y-0.5 max-h-60 overflow-y-auto">
               {/* Local player — always at top */}
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/20">
-                <div className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/10 border border-white/15">
+                <div className="w-2 h-2 rounded-full bg-neutral-300 shrink-0" />
                 <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
                 <span className="text-white/40 text-[10px] tabular-nums">{Math.round(p.health)}</span>
                 <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
@@ -506,7 +506,7 @@ export default function PlayMode({
 
       {/* ── CHAT PANEL ── */}
       {chatOpen && (
-        <div className="absolute bottom-20 left-3 z-20 w-72 rounded-xl overflow-hidden border border-white/10 bg-[#1a1d2e]/90 backdrop-blur shadow-2xl flex flex-col">
+        <div className="absolute bottom-20 left-2 z-50 w-72 rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl flex flex-col">
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="text-white/70 text-xs font-semibold uppercase tracking-wide">Chat</span>
             <button onClick={() => setChatOpen(false)} className="text-white/40 hover:text-white">
@@ -517,7 +517,7 @@ export default function PlayMode({
             <div className="p-2 flex flex-col gap-1">
               {messages.map((m) => (
                 <div key={m.id} className="text-xs leading-snug">
-                  <span className={`font-semibold ${m.username === "System" ? "text-yellow-400" : "text-blue-300"}`}>
+                  <span className={`font-semibold ${m.username === "System" ? "text-neutral-100" : "text-neutral-200"}`}>
                     {m.username}:&nbsp;
                   </span>
                   <span className="text-white/80">{m.text}</span>
@@ -529,7 +529,7 @@ export default function PlayMode({
           <div className="flex items-center gap-1.5 px-2 py-2 border-t border-white/10">
             <input
               ref={chatInputRef}
-              className="flex-1 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-blue-500/50"
+              className="flex-1 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-white/40"
               placeholder="Say something…"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
@@ -541,7 +541,7 @@ export default function PlayMode({
             />
             <button
               onClick={sendChat}
-              className="p-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+              className="p-1.5 rounded-md bg-blue-600 hover:bg-neutral-200 text-white transition-colors"
             >
               <Send className="w-3 h-3" />
             </button>
@@ -551,10 +551,10 @@ export default function PlayMode({
 
       {/* Chat messages ambient (bottom-left when closed) */}
       {!chatOpen && (
-        <div className="absolute bottom-20 left-3 z-10 pointer-events-none flex flex-col gap-1">
+        <div className="absolute bottom-20 left-2 z-40 pointer-events-none flex flex-col gap-1">
           {messages.slice(-4).map((m) => (
             <div key={m.id} className="text-xs text-white/70 bg-black/40 backdrop-blur rounded px-2 py-0.5 max-w-[260px] truncate">
-              <span className={`font-semibold ${m.username === "System" ? "text-yellow-300" : "text-blue-300"}`}>{m.username}: </span>
+              <span className={`font-semibold ${m.username === "System" ? "text-neutral-300" : "text-neutral-200"}`}>{m.username}: </span>
               {m.text}
             </div>
           ))}
@@ -594,7 +594,7 @@ export default function PlayMode({
         <div className="absolute bottom-0 left-0 right-0 h-52 bg-[#0e1116]/95 backdrop-blur border-t border-white/10 z-30 flex flex-col">
           <div className="flex items-center justify-between px-3 h-7 border-b border-white/10">
             <div className="flex items-center gap-2">
-              <Terminal className="w-3 h-3 text-purple-400" />
+              <Terminal className="w-3 h-3 text-neutral-300" />
               <span className="text-xs text-white/70 uppercase tracking-wide">Output ({runtime.logs.length})</span>
             </div>
             <button onClick={() => setShowConsole(false)} className="text-white/40 hover:text-white">
@@ -612,7 +612,7 @@ export default function PlayMode({
                   return (
                     <div
                       key={i}
-                      className={isError ? "text-red-400" : isWarning ? "text-yellow-400" : "text-green-300"}
+                      className={isError ? "text-red-400" : isWarning ? "text-neutral-100" : "text-green-300"}
                       data-testid={`console-line-${i}`}
                     >
                       {line}
