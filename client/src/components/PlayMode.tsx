@@ -268,40 +268,42 @@ export default function PlayMode({
         </>
       )}
 
-      {/* ── TOP-LEFT HUD BAR ── */}
-      <div className="absolute top-3 left-3 z-20 flex flex-col gap-2">
-        {/* Menu button */}
-        <button
-          onClick={() => { setMenuOpen((v) => !v); setSettingsOpen(false); }}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/70 backdrop-blur border border-white/10 text-white text-sm font-semibold hover:bg-black/90 transition-colors select-none"
-        >
-          <div className="flex flex-col gap-[3px] w-4">
-            <span className="block w-full h-[2px] bg-white rounded" />
-            <span className="block w-full h-[2px] bg-white rounded" />
-            <span className="block w-full h-[2px] bg-white rounded" />
-          </div>
-          <span className="hidden sm:inline">{username}</span>
-        </button>
+      {/* ── TOP BAR (Roblox-style: menu + chat + leaderboard inline) ── */}
+      <div className="absolute top-2 left-2 right-2 z-50 flex items-start justify-between gap-2 pointer-events-none">
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          <button
+            onClick={() => { setMenuOpen((v) => !v); setSettingsOpen(false); }}
+            className="flex items-center gap-2 px-3 h-9 rounded-md bg-black/75 backdrop-blur border border-white/15 text-white text-sm font-semibold hover:bg-neutral-800/90 transition-colors select-none"
+            title="Menu (Esc)"
+          >
+            <div className="flex flex-col gap-[3px] w-4">
+              <span className="block w-full h-[2px] bg-white rounded" />
+              <span className="block w-full h-[2px] bg-white rounded" />
+              <span className="block w-full h-[2px] bg-white rounded" />
+            </div>
+            <span className="hidden sm:inline text-neutral-100">{username}</span>
+          </button>
 
-        {/* Chat button */}
-        <button
-          onClick={() => setChatOpen((v) => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur border border-white/10 text-white/80 text-sm hover:bg-black/80 transition-colors"
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline text-xs">Chat</span>
-        </button>
+          <button
+            onClick={() => setChatOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-md bg-black/65 backdrop-blur border border-white/10 text-neutral-200 text-sm hover:bg-neutral-800/80 transition-colors"
+            title="Chat (/)"
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span className="hidden sm:inline text-xs">Chat</span>
+          </button>
 
-        {/* Leaderboard toggle button */}
-        <button
-          onClick={() => setShowLeaderboard((v) => !v)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur border border-white/10 text-white/80 text-sm hover:bg-black/80 transition-colors"
-          title="Toggle leaderboard (Tab)"
-        >
-          <Users className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline text-xs">{totalPlayers}</span>
-        </button>
+          <button
+            onClick={() => setShowLeaderboard((v) => !v)}
+            className="flex items-center gap-1.5 px-3 h-9 rounded-md bg-black/65 backdrop-blur border border-white/10 text-neutral-200 text-sm hover:bg-neutral-800/80 transition-colors"
+            title="Leaderboard (Tab)"
+          >
+            <Users className="w-4 h-4" />
+            <span className="text-xs tabular-nums">{totalPlayers}</span>
+          </button>
+        </div>
       </div>
+
 
       {/* ── MENU DROPDOWN ── */}
       {menuOpen && (
