@@ -124,6 +124,13 @@ export default function PlayMode({
 
   // Keyboard input
   useEffect(() => {
+    const computeMove = () => {
+      const k = runtime.input.keys;
+      const x = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
+      const z = (k["s"] || k["arrowdown"] ? 1 : 0) - (k["w"] || k["arrowup"] ? 1 : 0);
+      runtime.input.moveX = x;
+      runtime.input.moveZ = z;
+    };
     const onDown = (e: KeyboardEvent) => {
       if (chatOpen && e.target instanceof HTMLInputElement) return;
 
@@ -147,17 +154,11 @@ export default function PlayMode({
         setShowLeaderboard((v) => !v);
         e.preventDefault();
       }
+      computeMove();
     };
     const onUp = (e: KeyboardEvent) => {
       runtime.input.keys[e.key.toLowerCase()] = false;
       computeMove();
-    };
-    const computeMove = () => {
-      const k = runtime.input.keys;
-      const x = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
-      const z = (k["s"] || k["arrowdown"] ? 1 : 0) - (k["w"] || k["arrowup"] ? 1 : 0);
-      runtime.input.moveX = x;
-      runtime.input.moveZ = z;
     };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
