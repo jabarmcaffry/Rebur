@@ -269,34 +269,44 @@ export default function PlayMode({
         </>
       )}
 
-      {/* ── TOP BAR (Roblox-style: menu + chat + leaderboard inline) ── */}
+      {/* ── TOP BAR (Roblox-style: menu+chat left, leaderboard right) ── */}
       <div className="absolute top-2 left-2 right-2 z-50 flex items-start justify-between gap-2 pointer-events-none">
         <div className="flex items-center gap-1.5 pointer-events-auto">
           <button
             onClick={() => { setMenuOpen((v) => !v); setSettingsOpen(false); }}
-            className="flex items-center gap-2 px-3 h-9 rounded-md bg-black/75 backdrop-blur border border-white/15 text-white text-sm font-semibold hover:bg-neutral-800/90 transition-colors select-none"
+            className="flex items-center gap-2 px-3 h-9 rounded-md bg-black/85 backdrop-blur border border-white/20 text-white text-sm font-semibold hover:bg-white hover:text-black transition-colors select-none"
             title="Menu (Esc)"
           >
             <div className="flex flex-col gap-[3px] w-4">
-              <span className="block w-full h-[2px] bg-white rounded" />
-              <span className="block w-full h-[2px] bg-white rounded" />
-              <span className="block w-full h-[2px] bg-white rounded" />
+              <span className="block w-full h-[2px] bg-current rounded" />
+              <span className="block w-full h-[2px] bg-current rounded" />
+              <span className="block w-full h-[2px] bg-current rounded" />
             </div>
-            <span className="hidden sm:inline text-neutral-100">{username}</span>
+            <span className="hidden sm:inline">{username}</span>
           </button>
 
           <button
             onClick={() => setChatOpen((v) => !v)}
-            className="flex items-center gap-1.5 px-3 h-9 rounded-md bg-black/65 backdrop-blur border border-white/10 text-neutral-200 text-sm hover:bg-neutral-800/80 transition-colors"
+            className={`flex items-center gap-1.5 px-3 h-9 rounded-md backdrop-blur border text-sm transition-colors ${
+              chatOpen
+                ? "bg-white text-black border-white"
+                : "bg-black/85 border-white/20 text-white hover:bg-white hover:text-black"
+            }`}
             title="Chat (/)"
           >
             <MessageSquare className="w-4 h-4" />
             <span className="hidden sm:inline text-xs">Chat</span>
           </button>
+        </div>
 
+        <div className="pointer-events-auto">
           <button
             onClick={() => setShowLeaderboard((v) => !v)}
-            className="flex items-center gap-1.5 px-3 h-9 rounded-md bg-black/65 backdrop-blur border border-white/10 text-neutral-200 text-sm hover:bg-neutral-800/80 transition-colors"
+            className={`flex items-center gap-1.5 px-3 h-9 rounded-md backdrop-blur border text-sm transition-colors ${
+              showLeaderboard
+                ? "bg-white text-black border-white"
+                : "bg-black/85 border-white/20 text-white hover:bg-white hover:text-black"
+            }`}
             title="Leaderboard (Tab)"
           >
             <Users className="w-4 h-4" />
