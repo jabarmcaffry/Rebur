@@ -48,6 +48,9 @@ import {
   BookOpen,
   Terminal,
   Folder,
+  MoreVertical,
+  Upload,
+  GripVertical,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -231,7 +234,7 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
         {selected && (
           <mesh>
             <sphereGeometry args={[0.28, 12, 12]} />
-            <meshBasicMaterial color="#3b82f6" wireframe />
+            <meshBasicMaterial color="#ffffff" wireframe />
           </mesh>
         )}
       </group>
@@ -270,7 +273,7 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
       {selected && (
         <mesh>
           {geometry}
-          <meshBasicMaterial color="#3b82f6" wireframe />
+          <meshBasicMaterial color="#ffffff" wireframe />
         </mesh>
       )}
     </mesh>
@@ -297,6 +300,8 @@ export default function EditorPage() {
   const selectedMeshRef = useRef<THREE.Object3D | null>(null);
   const transformUpdateTimeout = useRef<number | null>(null);
   const pendingTransform = useRef<Partial<GameObject> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
 
   const { data: game } = useQuery<Game>({ queryKey: ["/api/games", gameId] });
   const { data: objects = [] } = useQuery<GameObject[]>({ queryKey: ["/api/games", gameId, "objects"] });
@@ -456,8 +461,56 @@ export default function EditorPage() {
       positionX: 0,
       positionY: isLight ? 3 : 0.5,
       positionZ: 0,
-      color: isLight ? "#ffffaa" : "#88aaff",
+      color: isLight ? "#ffffaa" : "#a3a3a3",
     });
+  };
+
+  /** Handle importing 3D model files (.glb, .gltf, .obj) */
+  const handleImport3DModel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const validExtensions = ['.glb', '.gltf', '.obj', '.fbx'];
+    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    
+    if (!validExtensions.includes(ext)) {
+      toast({
+        title: "Invalid file type",
+        description: "Please select a .glb, .gltf, .obj, or .fbx file",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Create a new model object in the workspace
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+    const count = objects.filter((o) => o.type === "model").length;
+    createObjectMutation.mutate({
+      name: `${baseName}${count > 0 ? count + 1 : ""}`,
+      type: "model",
+      primitiveType: null,
+      container: "Workspace",
+      positionX: 0,
+      positionY: 0,
+      positionZ: 0,
+      scaleX: 1,
+      scaleY: 1,
+      scaleZ: 1,
+      color: "#ffffff",
+      properties: { 
+        modelFile: file.name,
+        anchored: true,
+        canCollide: true,
+      },
+    } as Partial<GameObject>);
+    
+    toast({
+      title: "Model imported",
+      description: `${file.name} added to Workspace`,
+    });
+    
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   /** Objects that should appear in the 3D viewport — only Workspace + Lighting. */
@@ -619,7 +672,7 @@ export default function EditorPage() {
       positionX: 0,
       positionY: isLight ? 3 : 0.5,
       positionZ: 0,
-      color: isLight ? "#ffffaa" : "#88aaff",
+      color: isLight ? "#ffffaa" : "#a3a3a3",
     } as Partial<GameObject>);
   };
 
@@ -728,33 +781,46 @@ export default function EditorPage() {
 
   // A single script row in the hierarchy. Clicking it selects the script AND
   // jumps to the Scripts tab — the Scripts tab no longer has its own list.
-  const ScriptRow = ({ s, indent }: { s: Script; indent: number }) => (
-    <div
-      className={`group flex items-center gap-1 rounded-md hover-elevate ${
-        selectedScriptId === s.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
-      }`}
-      style={{ paddingLeft: indent }}
-      draggable
-      onDragStart={() => setDragItem({ kind: "script", id: s.id })}
-    >
-      <button
-        onClick={() => openScript(s)}
-        className="flex-1 min-w-0 text-left px-2 py-1.5 text-sm flex items-center gap-2"
-        data-testid={`row-script-${s.id}`}
+  const ScriptRow = ({ s, indent }: { s: Script; indent: number }) => {
+    const isDragging = draggingId === s.id;
+    return (
+      <div
+        className={`group flex items-center gap-0.5 rounded-md transition-all duration-150 ${
+          isDragging ? "opacity-50 scale-[0.98]" : "hover-elevate"
+        } ${
+          selectedScriptId === s.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
+        }`}
+        style={{ paddingLeft: indent }}
+        draggable
+        onDragStart={(e) => {
+          setDragItem({ kind: "script", id: s.id });
+          setDraggingId(s.id);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => setDraggingId(null)}
       >
-        <FileCode className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-        <span className="truncate">{s.name}</span>
-      </button>
-      <button
-        onClick={(e) => { e.stopPropagation(); deleteScriptMutation.mutate(s.id); }}
-        className="opacity-0 group-hover:opacity-100 p-1 mr-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-opacity"
-        title="Delete script"
-        data-testid={`button-delete-script-row-${s.id}`}
-      >
-        <Trash2 className="w-3 h-3" />
-      </button>
-    </div>
-  );
+        <div className="cursor-grab active:cursor-grabbing p-1 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity">
+          <GripVertical className="w-3 h-3 text-muted-foreground" />
+        </div>
+        <button
+          onClick={() => openScript(s)}
+          className="flex-1 min-w-0 text-left px-1 py-1.5 text-sm flex items-center gap-2"
+          data-testid={`row-script-${s.id}`}
+        >
+          <FileCode className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <span className="truncate">{s.name}</span>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); deleteScriptMutation.mutate(s.id); }}
+          className="opacity-0 group-hover:opacity-100 p-1 mr-1 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-opacity"
+          title="Delete script"
+          data-testid={`button-delete-script-row-${s.id}`}
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
+    );
+  };
 
   /** Popover menu: lets the user pick what to add (object / light / folder / model / script). */
   const AddItemMenu = ({
@@ -869,26 +935,54 @@ export default function EditorPage() {
     const childScripts = scriptsByObject[o.id] ?? [];
     const isGroup = o.type === "folder" || o.type === "model";
     const GroupIcon = o.type === "folder" ? Folder : o.type === "model" ? Layers : null;
+    const isDragging = draggingId === o.id;
+    const isDropTarget = dragItem && dragItem.id !== o.id && isGroup;
+    
     return (
       <div className="space-y-0.5">
         <div
           draggable
-          onDragStart={() => setDragItem({ kind: "object", id: o.id })}
-          onDragOver={(e) => { if (isGroup) e.preventDefault(); }}
+          onDragStart={(e) => {
+            setDragItem({ kind: "object", id: o.id });
+            setDraggingId(o.id);
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          onDragEnd={() => {
+            setDraggingId(null);
+          }}
+          onDragOver={(e) => { 
+            if (isGroup && dragItem && dragItem.id !== o.id) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+            }
+          }}
+          onDragEnter={(e) => {
+            if (isGroup && dragItem && dragItem.id !== o.id) {
+              e.preventDefault();
+            }
+          }}
           onDrop={(e) => {
             if (!isGroup) return;
             e.preventDefault();
             e.stopPropagation();
             moveHierarchyItem({ container: containerName, parentId: o.id });
+            setDraggingId(null);
           }}
-          className={`group flex items-center gap-1 rounded-md hover-elevate ${
+          className={`group flex items-center gap-0.5 rounded-md transition-all duration-150 ${
+            isDragging ? "opacity-50 scale-[0.98]" : ""
+          } ${
+            isDropTarget ? "ring-2 ring-primary/50 bg-primary/10" : "hover-elevate"
+          } ${
             selectedId === o.id ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
           }`}
           style={{ paddingLeft: indent }}
         >
+          <div className="cursor-grab active:cursor-grabbing p-1 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity">
+            <GripVertical className="w-3 h-3 text-muted-foreground" />
+          </div>
           <button
             onClick={() => { setSelectedId(o.id); setHierarchyOpen(false); }}
-            className="flex-1 min-w-0 text-left px-2 py-1.5 text-sm flex items-center gap-2"
+            className="flex-1 min-w-0 text-left px-1 py-1.5 text-sm flex items-center gap-2"
             data-testid={`row-object-${o.id}`}
           >
             {GroupIcon ? <GroupIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> : <ObjectIcon o={o} />}
@@ -1165,6 +1259,35 @@ export default function EditorPage() {
       {/* Top bar */}
       <header className="flex items-center justify-between gap-2 h-12 px-2 sm:px-3 border-b border-border bg-card/40 shrink-0">
         <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+          {/* Three-dot menu for importing 3D models */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="icon" variant="ghost" data-testid="button-menu-import">
+                <MoreVertical className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-48 p-1">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
+                Import
+              </div>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
+                data-testid="button-import-3d-model"
+              >
+                <Upload className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Import 3D Model</span>
+              </button>
+            </PopoverContent>
+          </Popover>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".glb,.gltf,.obj,.fbx"
+            onChange={handleImport3DModel}
+            className="hidden"
+            data-testid="input-import-model"
+          />
           <Link href="/dashboard">
             <Button size="sm" variant="ghost" data-testid="button-back-dashboard">
               <ArrowLeft className="w-4 h-4" />
@@ -1332,7 +1455,7 @@ export default function EditorPage() {
             </div>
 
             <TabsContent value="scene" className="flex-1 m-0 min-h-0">
-              <div className="w-full h-full bg-[#1a1d24] relative">
+              <div className="w-full h-full bg-[#0a0a0a] relative">
                 {webglAvailable ? (
                   <ViewportErrorBoundary
                     fallback={
@@ -1360,10 +1483,10 @@ export default function EditorPage() {
                         args={[40, 40]}
                         cellSize={1}
                         cellThickness={0.5}
-                        cellColor="#3a3f4b"
+                        cellColor="#262626"
                         sectionSize={5}
                         sectionThickness={1}
-                        sectionColor="#5a6378"
+                        sectionColor="#404040"
                         fadeDistance={40}
                         fadeStrength={1}
                         infiniteGrid
@@ -1396,7 +1519,7 @@ export default function EditorPage() {
                       </Suspense>
                       <OrbitControls makeDefault enableDamping />
                       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-                        <GizmoViewport axisColors={["#ef4444", "#22c55e", "#3b82f6"]} labelColor="white" />
+                        <GizmoViewport axisColors={["#ef4444", "#22c55e", "#a3a3a3"]} labelColor="white" />
                       </GizmoHelper>
                     </Canvas>
                   </ViewportErrorBoundary>

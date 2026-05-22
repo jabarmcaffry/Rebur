@@ -159,7 +159,7 @@ export default function Dashboard() {
             {games.map((game) => (
               <Card key={game.id} className="overflow-hidden hover-elevate" data-testid={`card-game-${game.id}`}>
                 <Link href={`/editor/${game.id}`} className="block">
-                  <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border-b border-card-border">
+                  <div className="aspect-video bg-gradient-to-br from-muted/50 to-muted/20 flex items-center justify-center border-b border-card-border">
                     {game.thumbnail ? (
                       <img src={game.thumbnail} alt={game.title} className="w-full h-full object-cover" />
                     ) : (
