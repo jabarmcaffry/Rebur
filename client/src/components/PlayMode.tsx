@@ -363,7 +363,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShiftLock((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${shiftLock ? "bg-neutral-200" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${shiftLock ? "bg-white" : "bg-white/15"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${shiftLock ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -377,7 +377,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowFps((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showFps ? "bg-neutral-200" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showFps ? "bg-white" : "bg-white/15"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showFps ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -391,7 +391,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowStats((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showStats ? "bg-neutral-200" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showStats ? "bg-white" : "bg-white/15"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showStats ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
@@ -405,7 +405,7 @@ export default function PlayMode({
                   </div>
                   <button
                     onClick={() => setShowLeaderboard((v) => !v)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${showLeaderboard ? "bg-neutral-200" : "bg-white/20"}`}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${showLeaderboard ? "bg-white" : "bg-white/15"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${showLeaderboard ? "translate-x-5" : "translate-x-0.5"}`} />
                   </button>
