@@ -150,15 +150,15 @@
 
   --sidebar-border: 220 10% 18%;
 
-  --sidebar-primary: 210 100% 55%;
+  --sidebar-primary: 0 0% 85%;
 
-  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-primary-foreground: 0 0% 10%;
 
-  --sidebar-accent: 220 15% 16%;
+  --sidebar-accent: 0 0% 18%;
 
   --sidebar-accent-foreground: 0 0% 95%;
 
-  --sidebar-ring: 210 100% 60%;
+  --sidebar-ring: 0 0% 60%;
 
   --popover: 220 15% 16%;
 
