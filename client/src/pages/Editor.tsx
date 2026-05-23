@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import {
   Box,
   Circle,
@@ -52,6 +53,12 @@ import {
   Upload,
   GripVertical,
   Globe,
+  Lock,
+  Code,
+  Users,
+  Eye,
+  EyeOff,
+  Share2,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -349,6 +356,10 @@ export default function EditorPage() {
   const pendingTransform = useRef<Partial<GameObject> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishDest, setPublishDest] = useState<"platform" | "embed" | "both">("platform");
+  const [publishAudience, setPublishAudience] = useState<"everyone" | "friends" | "private">("everyone");
+  const [publishDesc, setPublishDesc] = useState("");
 
   const { data: game } = useQuery<Game>({ queryKey: ["/api/games", gameId] });
   const { data: objects = [] } = useQuery<GameObject[]>({ queryKey: ["/api/games", gameId, "objects"] });
@@ -1353,24 +1364,27 @@ export default function EditorPage() {
                 Publish
               </div>
               <button
-                onClick={async () => {
-                  if (!game) return;
-                  const newState = !game.isPublished;
-                  await apiRequest("PATCH", `/api/games/${game.id}`, { isPublished: newState });
-                  queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
-                  toast({
-                    title: newState ? "Experience published!" : "Experience unpublished",
-                    description: newState
-                      ? "Your experience is now visible in Explore"
-                      : "Your experience is now private",
-                  });
-                }}
+                onClick={() => setPublishOpen(true)}
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
                 data-testid="button-publish-game"
               >
-                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>{game?.isPublished ? "Unpublish" : "Publish"}</span>
+                <Share2 className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Publish Settings…</span>
               </button>
+              {game?.isPublished && (
+                <button
+                  onClick={async () => {
+                    if (!game) return;
+                    await apiRequest("PATCH", `/api/games/${game.id}`, { isPublished: false });
+                    queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
+                    toast({ title: "Experience unpublished", description: "Now private" });
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left text-red-400"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Unpublish</span>
+                </button>
+              )}
             </PopoverContent>
           </Popover>
           <input
@@ -1891,6 +1905,138 @@ export default function EditorPage() {
           onExit={handlePlayExit}
         />
       )}
+
+      {/* Publish Settings Dialog */}
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent className="bg-[#141414] border-[#2a2a2a] text-white max-w-sm mx-auto rounded-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-0">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-violet-400" />
+              Publish Settings
+            </DialogTitle>
+            <DialogDescription className="text-gray-500 text-sm">
+              Choose how and where to share your experience.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="px-5 py-4 space-y-5">
+            {/* Publishing destination */}
+            <div>
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2 font-semibold">Where to publish</p>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: "platform", label: "Platform", icon: Globe, desc: "Show in Explore" },
+                  { value: "embed", label: "Embed", icon: Code, desc: "Get iframe code" },
+                  { value: "both", label: "Both", icon: Share2, desc: "Platform + Embed" },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPublishDest(opt.value)}
+                    className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all ${
+                      publishDest === opt.value
+                        ? "border-violet-500 bg-violet-500/10 text-violet-300"
+                        : "border-[#2a2a2a] bg-[#1a1a1a] text-gray-400 hover:border-[#3a3a3a]"
+                    }`}
+                  >
+                    <opt.icon className="w-4 h-4" />
+                    <span className="text-[11px] font-semibold">{opt.label}</span>
+                    <span className="text-[10px] text-center leading-tight opacity-70">{opt.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Audience */}
+            <div>
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-2 font-semibold">Who can play</p>
+              <div className="space-y-2">
+                {([
+                  { value: "everyone", label: "Everyone", icon: Globe, desc: "Any player can join", premium: false },
+                  { value: "friends", label: "Friends only", icon: Users, desc: "Only your friends", premium: true },
+                  { value: "private", label: "Private", icon: EyeOff, desc: "Only you", premium: false },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => !opt.premium && setPublishAudience(opt.value)}
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+                      publishAudience === opt.value && !opt.premium
+                        ? "border-violet-500 bg-violet-500/10"
+                        : opt.premium
+                        ? "border-[#2a2a2a] bg-[#1a1a1a] opacity-60 cursor-default"
+                        : "border-[#2a2a2a] bg-[#1a1a1a] hover:border-[#3a3a3a]"
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                      publishAudience === opt.value && !opt.premium ? "bg-violet-500/20" : "bg-[#222]"
+                    }`}>
+                      <opt.icon className={`w-4 h-4 ${publishAudience === opt.value && !opt.premium ? "text-violet-400" : "text-gray-500"}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium">{opt.label}</span>
+                        {opt.premium && (
+                          <span className="flex items-center gap-0.5 text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full font-semibold">
+                            <Lock className="w-2.5 h-2.5" />Premium
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
+                    </div>
+                    {publishAudience === opt.value && !opt.premium && (
+                      <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shrink-0">
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Embed code preview */}
+            {(publishDest === "embed" || publishDest === "both") && (
+              <div>
+                <p className="text-xs uppercase tracking-widest text-gray-500 mb-2 font-semibold">Embed code</p>
+                <div className="bg-[#0d0d0d] border border-[#2a2a2a] rounded-xl p-3 font-mono text-xs text-gray-400 break-all select-all">
+                  {`<iframe src="${window.location.origin}/play/${gameId}" width="800" height="600" frameborder="0" allowfullscreen></iframe>`}
+                </div>
+                <p className="text-[11px] text-gray-600 mt-1.5">Tap and copy the code above to embed this experience on any website.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="px-5 pb-5 flex gap-2">
+            <button
+              onClick={() => setPublishOpen(false)}
+              className="flex-1 py-3 rounded-xl border border-[#2a2a2a] text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!game) return;
+                const shouldPublish = publishDest === "platform" || publishDest === "both";
+                await apiRequest("PATCH", `/api/games/${game.id}`, {
+                  isPublished: shouldPublish,
+                });
+                queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
+                setPublishOpen(false);
+                toast({
+                  title: shouldPublish ? "Experience published!" : "Embed settings saved",
+                  description: publishDest === "platform"
+                    ? "Now visible in Explore"
+                    : publishDest === "embed"
+                    ? "Share the embed code to let others play"
+                    : "Visible in Explore and embeddable",
+                });
+              }}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold hover:from-violet-500 hover:to-indigo-500 transition-all active:scale-95"
+            >
+              Publish
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

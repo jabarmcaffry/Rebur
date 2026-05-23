@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import BottomNav from "@/components/BottomNav";
+import AvatarPortrait, { FriendPortrait } from "@/components/AvatarPortrait";
+import { getAvatarConfig } from "@/lib/avatarConfig";
 import { useAuth } from "@/hooks/useAuth";
-import { Plus, Play, Gamepad2, LogOut, Pencil, Globe, Clock } from "lucide-react";
+import { Plus, Gamepad2, LogOut, Globe, ChevronRight } from "lucide-react";
 import type { Game } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,23 +17,73 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const MOCK_FRIENDS = [
-  { name: "Mia", color: "from-pink-500 to-rose-600", online: true },
-  { name: "Leo", color: "from-orange-400 to-amber-500", online: true },
-  { name: "Zoe", color: "from-emerald-400 to-teal-600", online: true },
-  { name: "Kai", color: "from-blue-400 to-indigo-600", online: true },
-  { name: "Sam", color: "from-purple-400 to-violet-600", online: false },
+  { name: "Mia", online: true },
+  { name: "Leo", online: true },
+  { name: "Zoe", online: true },
+  { name: "Kai", online: true },
+  { name: "Sam", online: false },
+  { name: "Ava", online: true },
+];
+
+const MOCK_CONTINUE = [
+  { title: "Blade Arena", creator: "RedSkull Studios", gradient: "from-red-700 via-red-500 to-orange-500", accent: "#ef4444" },
+  { title: "Ocean Survivors", creator: "By DeepBlue", gradient: "from-cyan-600 via-blue-500 to-indigo-700", accent: "#06b6d4" },
+  { title: "Neon City Drift", creator: "By VoltX", gradient: "from-pink-500 via-purple-600 to-indigo-600", accent: "#a855f7" },
+  { title: "Zombie Rush", creator: "By DarkCode", gradient: "from-green-700 via-lime-600 to-yellow-500", accent: "#84cc16" },
 ];
 
 const MOCK_RECOMMENDED = [
-  { title: "Neon City Drift", creator: "VoltX", plays: "12.4K", gradient: "from-pink-500 via-purple-600 to-indigo-700" },
-  { title: "Blade Arena", creator: "RedSkull", plays: "8.9K", gradient: "from-red-600 via-orange-500 to-amber-400" },
-  { title: "Ocean Survivors", creator: "DeepBlue", plays: "6.2K", gradient: "from-cyan-500 via-blue-600 to-indigo-700" },
-  { title: "Zombie Rush", creator: "DarkCode", plays: "5.1K", gradient: "from-green-800 via-lime-700 to-yellow-600" },
+  { title: "Sky Tower", creator: "BlueSky Dev", gradient: "from-sky-400 via-blue-500 to-indigo-600" },
+  { title: "Dragon Quest", creator: "FantasyMaker", gradient: "from-orange-500 via-red-500 to-pink-600" },
+  { title: "Space Rush", creator: "CosmicLab", gradient: "from-violet-600 via-purple-600 to-pink-500" },
+  { title: "Farm Life", creator: "GreenThumb", gradient: "from-green-400 via-emerald-500 to-teal-600" },
 ];
 
-function formatDate(date: Date | string | null | undefined) {
-  if (!date) return "Never";
-  return new Date(date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+/** Large horizontal-scroll game card matching the screenshot style */
+function GameCard({ title, creator, gradient, thumbnail, gameId, onClick }: {
+  title: string;
+  creator: string;
+  gradient: string;
+  thumbnail?: string | null;
+  gameId?: string;
+  onClick?: () => void;
+}) {
+  const inner = (
+    <div className="shrink-0 w-[47vw] max-w-[210px]" onClick={onClick}>
+      <div className={`w-full aspect-square rounded-2xl overflow-hidden bg-gradient-to-br ${gradient} relative`}>
+        {thumbnail && (
+          <img src={thumbnail} alt={title} className="w-full h-full object-cover absolute inset-0" />
+        )}
+      </div>
+      <div className="mt-2 px-0.5">
+        <p className="font-bold text-[15px] leading-tight truncate">{title}</p>
+        <p className="text-[13px] text-gray-400 mt-0.5 truncate">{creator}</p>
+      </div>
+    </div>
+  );
+  if (gameId) return <Link href={`/editor/${gameId}`}>{inner}</Link>;
+  return inner;
+}
+
+function SectionHeader({ title, onSeeAll }: { title: string; onSeeAll?: () => void }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h2 className="text-[22px] font-bold">{title}</h2>
+      {onSeeAll && (
+        <button onClick={onSeeAll} className="flex items-center gap-0.5 text-sm text-gray-400">
+          See all <ChevronRight className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function HScrollSection({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex gap-4 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-none snap-x snap-mandatory">
+      {children}
+    </div>
+  );
 }
 
 export default function HomePage() {
@@ -41,6 +93,7 @@ export default function HomePage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const avatarCfg = getAvatarConfig();
 
   const { data: games = [], isLoading } = useQuery<Game[]>({
     queryKey: ["/api/games"],
@@ -66,14 +119,17 @@ export default function HomePage() {
   const displayName = user?.firstName || user?.email?.split("@")[0] || "Creator";
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
+    <div className="min-h-screen bg-[#0a0a0a] text-white pb-28">
       {/* Top bar */}
-      <header className="sticky top-0 z-10 bg-[#0a0a0a]/95 backdrop-blur border-b border-[#1a1a1a] px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center">
-            <span className="text-white font-bold text-xs">R</span>
+      <header className="flex items-center justify-between px-4 pt-5 pb-2">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shrink-0">
+            <span className="text-white font-bold text-sm">R</span>
           </div>
-          <span className="font-bold text-lg tracking-tight">Rebur</span>
+          <div>
+            <p className="font-bold text-[17px] leading-tight">Rebur</p>
+            <p className="text-xs text-gray-500 leading-tight">Home</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -85,136 +141,138 @@ export default function HomePage() {
           </button>
           <button
             onClick={() => logout()}
-            className="w-9 h-9 rounded-full bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center text-gray-400 hover:text-white transition-colors"
+            className="w-9 h-9 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] flex items-center justify-center"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-4 h-4 text-gray-400" />
           </button>
         </div>
       </header>
 
-      <div className="px-4 pt-5">
-        {/* Welcome */}
-        <div className="mb-6 flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-violet-600 to-indigo-700 flex items-center justify-center shrink-0">
-            <span className="text-2xl font-bold">{displayName[0].toUpperCase()}</span>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wider text-gray-500 font-medium">Welcome back</p>
-            <h1 className="text-2xl font-bold">{displayName}!</h1>
+      {/* Welcome section */}
+      <div className="px-4 mt-4 mb-6 flex items-center gap-4">
+        <div className="relative shrink-0">
+          <div className="w-[72px] h-[72px] rounded-full border-2 border-[#333] overflow-hidden">
+            <AvatarPortrait
+              skinColor={avatarCfg.skinColor}
+              shirtColor={avatarCfg.shirtColor}
+              size={72}
+            />
           </div>
         </div>
+        <div>
+          <p className="text-xs uppercase tracking-[0.12em] text-gray-400 font-semibold mb-0.5">Welcome back</p>
+          <h1 className="text-[28px] font-bold leading-tight">{displayName}!</h1>
+        </div>
+      </div>
 
-        {/* Friends online */}
-        <div className="mb-6">
-          <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-none">
-            {MOCK_FRIENDS.map(friend => (
-              <div key={friend.name} className="flex flex-col items-center gap-1.5 shrink-0">
-                <div className="relative">
-                  <div className={`w-14 h-14 rounded-full bg-gradient-to-br ${friend.color} flex items-center justify-center font-bold text-lg border-2 border-[#0a0a0a]`}>
-                    {friend.name[0]}
-                  </div>
-                  {friend.online && (
-                    <span className="absolute bottom-0.5 right-0.5 w-3 h-3 bg-green-400 rounded-full border-2 border-[#0a0a0a]" />
-                  )}
+      {/* Friends online row */}
+      <div className="px-4 mb-8">
+        <div className="flex gap-4 overflow-x-auto scrollbar-none pb-1">
+          {MOCK_FRIENDS.map(friend => (
+            <div key={friend.name} className="flex flex-col items-center gap-1.5 shrink-0">
+              <div className="relative">
+                <div className="w-[70px] h-[70px] rounded-full overflow-hidden border-[2.5px] border-[#333]">
+                  <FriendPortrait name={friend.name} size={70} />
                 </div>
-                <span className="text-xs text-gray-400">{friend.name}</span>
+                {friend.online && (
+                  <span className="absolute bottom-1 right-1 w-3.5 h-3.5 bg-green-400 rounded-full border-2 border-[#0a0a0a]" />
+                )}
+              </div>
+              <span className="text-[13px] text-gray-300 font-medium">{friend.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* My Experiences */}
+      <div className="px-4 mb-8">
+        <SectionHeader title="My Experiences" onSeeAll={() => {}} />
+        {isLoading ? (
+          <HScrollSection>
+            {[1, 2].map(i => (
+              <div key={i} className="shrink-0 w-[47vw] max-w-[210px]">
+                <div className="w-full aspect-square rounded-2xl bg-[#1a1a1a] animate-pulse" />
+                <div className="mt-2 space-y-1.5">
+                  <div className="h-4 bg-[#1a1a1a] rounded w-3/4 animate-pulse" />
+                  <div className="h-3 bg-[#1a1a1a] rounded w-1/2 animate-pulse" />
+                </div>
               </div>
             ))}
-          </div>
-        </div>
-
-        {/* My Experiences */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-base">My Experiences</h2>
-            <span className="text-xs text-gray-500">{games.length} total</span>
-          </div>
-
-          {isLoading ? (
-            <div className="flex gap-3 overflow-x-auto scrollbar-none pb-1 -mx-4 px-4">
-              {[1, 2].map(i => (
-                <div key={i} className="shrink-0 w-44 bg-[#141414] rounded-2xl overflow-hidden animate-pulse border border-[#222]">
-                  <div className="h-28 bg-[#222]" />
-                  <div className="p-3 space-y-2">
-                    <div className="h-3 bg-[#222] rounded w-3/4" />
-                    <div className="h-3 bg-[#222] rounded w-1/2" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : games.length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto scrollbar-none pb-2 -mx-4 px-4">
-              {games.map(game => (
-                <Link key={game.id} href={`/editor/${game.id}`} className="shrink-0 w-44 bg-[#141414] rounded-2xl overflow-hidden border border-[#222] hover:border-[#333] transition-colors active:scale-95">
-                  <div className="h-28 bg-gradient-to-br from-violet-900/30 to-indigo-900/30 flex items-center justify-center">
-                    {game.thumbnail ? (
-                      <img src={game.thumbnail} alt={game.title} className="w-full h-full object-cover" />
-                    ) : (
-                      <Gamepad2 className="w-10 h-10 text-violet-400/30" />
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <p className="font-semibold text-sm truncate">{game.title}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                        <Clock className="w-2.5 h-2.5" />
-                        {formatDate(game.updatedAt)}
-                      </div>
-                      <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                        {game.isPublished && <Globe className="w-2.5 h-2.5 text-green-400" />}
-                        <Pencil className="w-2.5 h-2.5" />
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              ))}
-              {/* Create new */}
-              <button
-                onClick={() => setCreateOpen(true)}
-                className="shrink-0 w-44 bg-[#141414] rounded-2xl overflow-hidden border border-dashed border-[#333] hover:border-violet-500/50 flex flex-col items-center justify-center gap-2 h-[148px] transition-colors"
-              >
-                <div className="w-10 h-10 rounded-full bg-[#222] flex items-center justify-center">
-                  <Plus className="w-5 h-5 text-gray-400" />
-                </div>
-                <span className="text-xs text-gray-500">New Experience</span>
-              </button>
-            </div>
-          ) : (
-            <div className="bg-[#141414] rounded-2xl p-6 text-center border border-dashed border-[#2a2a2a]">
-              <Gamepad2 className="w-10 h-10 text-gray-700 mx-auto mb-3" />
-              <p className="text-sm font-medium text-gray-300 mb-1">No experiences yet</p>
-              <p className="text-xs text-gray-500 mb-4">Tap Create to build your first world</p>
-              <button
-                onClick={() => setCreateOpen(true)}
-                className="bg-violet-600 hover:bg-violet-500 text-white text-sm px-4 py-2 rounded-full font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4 inline mr-1" />
-                Create
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Recommended */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-base">Recommended for you</h2>
-            <Link href="/explore" className="text-xs text-violet-400">See all &gt;</Link>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {MOCK_RECOMMENDED.map(item => (
-              <Link key={item.title} href="/explore" className="bg-[#141414] rounded-2xl overflow-hidden border border-[#222] active:scale-95 transition-transform">
-                <div className={`h-24 bg-gradient-to-br ${item.gradient} flex items-end p-2`}>
-                  <Play className="w-6 h-6 text-white/60" />
-                </div>
-                <div className="p-2.5">
-                  <p className="font-semibold text-xs truncate">{item.title}</p>
-                  <p className="text-[10px] text-gray-500">By {item.creator}</p>
-                </div>
-              </Link>
+          </HScrollSection>
+        ) : games.length > 0 ? (
+          <HScrollSection>
+            {games.map(game => (
+              <GameCard
+                key={game.id}
+                title={game.title}
+                creator={"By me"}
+                gradient="from-violet-900/60 to-indigo-900/60"
+                thumbnail={game.thumbnail}
+                gameId={game.id}
+              />
             ))}
+            {/* Create new card */}
+            <div
+              className="shrink-0 w-[47vw] max-w-[210px] cursor-pointer"
+              onClick={() => setCreateOpen(true)}
+            >
+              <div className="w-full aspect-square rounded-2xl border-2 border-dashed border-[#2a2a2a] hover:border-violet-500/50 flex flex-col items-center justify-center gap-2 transition-colors">
+                <div className="w-10 h-10 rounded-full bg-[#1a1a1a] flex items-center justify-center">
+                  <Plus className="w-5 h-5 text-gray-500" />
+                </div>
+                <span className="text-xs text-gray-500">New</span>
+              </div>
+              <div className="mt-2 px-0.5">
+                <p className="font-bold text-[15px]">Create New</p>
+                <p className="text-[13px] text-gray-400">Start building</p>
+              </div>
+            </div>
+          </HScrollSection>
+        ) : (
+          <div
+            className="flex flex-col items-center py-10 border-2 border-dashed border-[#1f1f1f] rounded-2xl cursor-pointer hover:border-violet-500/30 transition-colors"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Gamepad2 className="w-10 h-10 text-gray-700 mb-3" />
+            <p className="text-sm text-gray-400 font-medium">No experiences yet</p>
+            <p className="text-xs text-gray-600 mt-1 mb-4">Tap Create to build your first world</p>
+            <div className="bg-violet-600 text-white text-sm px-5 py-2 rounded-full font-medium">
+              <Plus className="w-4 h-4 inline mr-1" />Create
+            </div>
           </div>
-        </div>
+        )}
+      </div>
+
+      {/* Continue playing */}
+      <div className="px-4 mb-8">
+        <SectionHeader title="Continue playing" onSeeAll={() => setLocation("/explore")} />
+        <HScrollSection>
+          {MOCK_CONTINUE.map(item => (
+            <Link key={item.title} href="/explore">
+              <GameCard
+                title={item.title}
+                creator={item.creator}
+                gradient={item.gradient}
+              />
+            </Link>
+          ))}
+        </HScrollSection>
+      </div>
+
+      {/* Recommended for you */}
+      <div className="px-4 mb-4">
+        <SectionHeader title="Recommended for you" onSeeAll={() => setLocation("/explore")} />
+        <HScrollSection>
+          {MOCK_RECOMMENDED.map(item => (
+            <Link key={item.title} href="/explore">
+              <GameCard
+                title={item.title}
+                creator={item.creator}
+                gradient={item.gradient}
+              />
+            </Link>
+          ))}
+        </HScrollSection>
       </div>
 
       {/* Create dialog */}
@@ -255,7 +313,7 @@ export default function HomePage() {
             <button
               onClick={() => createMutation.mutate({ title, description })}
               disabled={!title.trim() || createMutation.isPending}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold disabled:opacity-50 transition-all"
+              className="px-5 py-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold disabled:opacity-50"
             >
               {createMutation.isPending ? "Creating..." : "Create & Open"}
             </button>

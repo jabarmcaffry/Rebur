@@ -13,6 +13,7 @@ import AvatarPage from "@/pages/AvatarPage";
 import MessagesPage from "@/pages/MessagesPage";
 import AlertsPage from "@/pages/AlertsPage";
 import EditorPage from "@/pages/Editor";
+import PlayPage from "@/pages/PlayPage";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -32,10 +33,13 @@ function Router() {
   return (
     <Switch>
       <Route path="/auth" component={AuthPage} />
+      {/* Public routes — no auth needed */}
+      <Route path="/explore" component={ExplorePage} />
+      <Route path="/play/:gameId" component={PlayPage} />
+      {/* Protected routes */}
       <Route path="/home">
         <ProtectedRoute component={HomePage} />
       </Route>
-      <Route path="/explore" component={ExplorePage} />
       <Route path="/avatar">
         <ProtectedRoute component={AvatarPage} />
       </Route>
