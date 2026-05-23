@@ -16,7 +16,7 @@ export default function AuthPage() {
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    window.location.href = "/";
+    window.location.href = "/home";
     return null;
   }
 
@@ -25,10 +25,7 @@ export default function AuthPage() {
     setIsLoading(true);
     try {
       await login({ username, password });
-      toast({
-        title: "Login successful",
-        description: "Welcome back!",
-      });
+      window.location.href = "/home";
     } catch (error: any) {
       toast({
         title: "Login failed",

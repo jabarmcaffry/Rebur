@@ -2,7 +2,7 @@ import { useState, Suspense, Component, type ReactNode, type DragEvent, useEffec
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } from "@react-three/drei";
+import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import MonacoEditor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,7 @@ import {
   MoreVertical,
   Upload,
   GripVertical,
+  Globe,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -185,6 +186,30 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
 ];
 
+// GLTF model loader — uses useGLTF (must be a separate component for hook rules)
+const GltfLoader = forwardRef<THREE.Object3D, {
+  url: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  selected: boolean;
+  onClick: () => void;
+}>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
+  const { scene } = useGLTF(url);
+  const cloned = useMemo(() => scene.clone(true), [scene]);
+  return (
+    <group ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <primitive object={cloned} />
+      {selected && (
+        <mesh>
+          <boxGeometry args={[1.05, 1.05, 1.05]} />
+          <meshBasicMaterial color="#a855f7" wireframe transparent opacity={0.6} />
+        </mesh>
+      )}
+    </group>
+  );
+});
+
 class ViewportErrorBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { hasError: boolean }> {
   constructor(props: { children: ReactNode; fallback: ReactNode }) {
     super(props);
@@ -221,7 +246,29 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
   const opacity = 1 - transparency;
   const isTransparent = transparency > 0;
 
-  if (obj.type === "folder" || obj.type === "model") return null;
+  if (obj.type === "folder") return null;
+  if (obj.type === "model") {
+    const modelProps = (obj.properties ?? {}) as Record<string, any>;
+    const modelUrl = modelProps.fileUrl as string | undefined;
+    if (!modelUrl) {
+      return (
+        <mesh ref={ref as any} position={position} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color={selected ? "#a855f7" : "#666666"} wireframe={!selected} />
+        </mesh>
+      );
+    }
+    return (
+      <Suspense fallback={
+        <mesh ref={ref as any} position={position} scale={scale}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#666666" wireframe />
+        </mesh>
+      }>
+        <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
+      </Suspense>
+    );
+  }
 
   if (obj.type === "light") {
     return (
@@ -466,7 +513,7 @@ export default function EditorPage() {
   };
 
   /** Handle importing 3D model files (.glb, .gltf, .obj) */
-  const handleImport3DModel = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport3DModel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
@@ -479,7 +526,29 @@ export default function EditorPage() {
         description: "Please select a .glb, .gltf, .obj, or .fbx file",
         variant: "destructive",
       });
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
+    }
+
+    toast({ title: "Uploading model...", description: "Please wait" });
+
+    let fileUrl: string | undefined;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("name", file.name);
+      formData.append("type", "model");
+      const res = await fetch("/api/assets/upload", {
+        method: "POST",
+        headers: { Authorization: "Bearer testtoken" },
+        body: formData,
+      });
+      if (res.ok) {
+        const asset = await res.json();
+        fileUrl = asset.fileUrl as string;
+      }
+    } catch {
+      // Fall through — we'll create without a URL (placeholder box)
     }
     
     // Create a new model object in the workspace
@@ -491,13 +560,14 @@ export default function EditorPage() {
       primitiveType: null,
       container: "Workspace",
       positionX: 0,
-      positionY: 0,
+      positionY: 1,
       positionZ: 0,
       scaleX: 1,
       scaleY: 1,
       scaleZ: 1,
       color: "#ffffff",
       properties: { 
+        fileUrl,
         modelFile: file.name,
         anchored: true,
         canCollide: true,
@@ -505,8 +575,8 @@ export default function EditorPage() {
     } as Partial<GameObject>);
     
     toast({
-      title: "Model imported",
-      description: `${file.name} added to Workspace`,
+      title: fileUrl ? "Model imported" : "Model added (no preview)",
+      description: fileUrl ? `${file.name} added to Workspace` : "Upload failed — showing placeholder",
     });
     
     // Reset file input
@@ -1266,7 +1336,7 @@ export default function EditorPage() {
                 <MoreVertical className="w-4 h-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-48 p-1">
+            <PopoverContent align="start" className="w-52 p-1">
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
                 Import
               </div>
@@ -1277,6 +1347,29 @@ export default function EditorPage() {
               >
                 <Upload className="w-3.5 h-3.5 text-muted-foreground" />
                 <span>Import 3D Model</span>
+              </button>
+              <div className="my-1 border-t border-border" />
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
+                Publish
+              </div>
+              <button
+                onClick={async () => {
+                  if (!game) return;
+                  const newState = !game.isPublished;
+                  await apiRequest("PATCH", `/api/games/${game.id}`, { isPublished: newState });
+                  queryClient.invalidateQueries({ queryKey: ["/api/games", gameId] });
+                  toast({
+                    title: newState ? "Experience published!" : "Experience unpublished",
+                    description: newState
+                      ? "Your experience is now visible in Explore"
+                      : "Your experience is now private",
+                  });
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
+                data-testid="button-publish-game"
+              >
+                <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>{game?.isPublished ? "Unpublish" : "Publish"}</span>
               </button>
             </PopoverContent>
           </Popover>

@@ -7,9 +7,11 @@ import { useAuth } from "@/hooks/useAuth";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/Landing";
 import AuthPage from "@/pages/AuthPage";
-import Dashboard from "@/pages/Dashboard";
-import Profile from "@/pages/Profile";
-import Games from "@/pages/Games";
+import HomePage from "@/pages/HomePage";
+import ExplorePage from "@/pages/ExplorePage";
+import AvatarPage from "@/pages/AvatarPage";
+import MessagesPage from "@/pages/MessagesPage";
+import AlertsPage from "@/pages/AlertsPage";
 import EditorPage from "@/pages/Editor";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -22,7 +24,7 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 function RootRoute() {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
-  if (isAuthenticated) return <Dashboard />;
+  if (isAuthenticated) return <Redirect to="/home" />;
   return <Landing />;
 }
 
@@ -30,13 +32,28 @@ function Router() {
   return (
     <Switch>
       <Route path="/auth" component={AuthPage} />
-      <Route path="/games" component={Games} />
-      <Route path="/profile/:userId" component={Profile} />
-      <Route path="/dashboard">
-        <ProtectedRoute component={Dashboard} />
+      <Route path="/home">
+        <ProtectedRoute component={HomePage} />
+      </Route>
+      <Route path="/explore" component={ExplorePage} />
+      <Route path="/avatar">
+        <ProtectedRoute component={AvatarPage} />
+      </Route>
+      <Route path="/messages">
+        <ProtectedRoute component={MessagesPage} />
+      </Route>
+      <Route path="/alerts">
+        <ProtectedRoute component={AlertsPage} />
       </Route>
       <Route path="/editor/:gameId">
         <ProtectedRoute component={EditorPage} />
+      </Route>
+      {/* Legacy redirects */}
+      <Route path="/dashboard">
+        <Redirect to="/home" />
+      </Route>
+      <Route path="/games">
+        <Redirect to="/explore" />
       </Route>
       <Route path="/">
         <RootRoute />

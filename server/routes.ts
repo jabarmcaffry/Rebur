@@ -1,5 +1,5 @@
 // Referenced from javascript_log_in_with_replit and javascript_websocket blueprints
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
@@ -38,11 +38,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   await setupAuth(app);
 
   // Serve uploaded files statically
-  app.use('/uploads', (req, res, next) => {
-    next();
-  }, multer().none(), (req, res, next) => {
-    next();
-  });
+  app.use('/uploads', express.static(uploadDir));
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {

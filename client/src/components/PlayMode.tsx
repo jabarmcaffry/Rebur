@@ -7,6 +7,7 @@ import {
   RotateCcw, LogOut, Gauge, Lock, Play, Users, BarChart3,
 } from "lucide-react";
 import { GameRuntime } from "@/lib/runtime";
+import { getAvatarConfig } from "@/lib/avatarConfig";
 import type { GameObject, Script } from "@shared/schema";
 import SVGScene from "@/components/SVGScene";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -38,11 +39,14 @@ export default function PlayMode({
   gameId: string;
   onExit: (logs: string[]) => void;
 }) {
-  const runtime = useMemo(
-    () => new GameRuntime(objects, scripts, username, "#ffffff"),
+  const runtime = useMemo(() => {
+    const cfg = getAvatarConfig();
+    const r = new GameRuntime(objects, scripts, username, cfg.shirtColor);
+    (r.player as any).skinColor = cfg.skinColor;
+    (r.player as any).pantsColor = cfg.pantsColor;
+    return r;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+  }, []);
 
   const renderableObjects = useMemo(
     () => objects.filter((o) => {
