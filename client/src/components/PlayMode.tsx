@@ -134,9 +134,15 @@ export default function PlayMode({
     const onDown = (e: KeyboardEvent) => {
       if (chatOpen && e.target instanceof HTMLInputElement) return;
 
+      const wasDown = runtime.input.keys[e.key.toLowerCase()];
       runtime.input.keys[e.key.toLowerCase()] = true;
       if (e.code === "Space") {
-        runtime.input.jump = true;
+        // Edge-triggered jump with a 250ms input buffer (handled in runtime)
+        // so a quick tap is never lost between frames. Roblox-style.
+        if (!wasDown) {
+          runtime.input.jump = true;
+          (runtime.input as any)._jumpAt = performance.now();
+        }
         e.preventDefault();
       }
       if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) {
@@ -158,6 +164,7 @@ export default function PlayMode({
     };
     const onUp = (e: KeyboardEvent) => {
       runtime.input.keys[e.key.toLowerCase()] = false;
+      if (e.code === "Space") runtime.input.jump = false;
       computeMove();
     };
     window.addEventListener("keydown", onDown);
