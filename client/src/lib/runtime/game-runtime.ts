@@ -1888,7 +1888,12 @@ export class GameRuntime {
 
     // Snapshot keys for next frame
     for (const k in this.input.keys) this._prevKeys[k] = this.input.keys[k];
-    this.input.jump = false;
+    // Jump buffer: keep jump=true for up to 250ms so a tap that lands between
+    // frames (or before onGround flips true) is still consumed by physics.
+    const jumpAt = (this.input as any)._jumpAt ?? 0;
+    if (!jumpAt || performance.now() - jumpAt > 250) {
+      this.input.jump = false;
+    }
     
     // End frame profiling
     this.profiler.endFrame();
