@@ -5,11 +5,10 @@ import type { User } from "@shared/schema";
 const TOKEN_KEY = "auth_token";
 
 export function useAuth() {
-  const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
-
   const { data, isLoading, error } = useQuery<User | null>({
     queryKey: ["/api/auth/user"],
     queryFn: async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;
       const res = await fetch("/api/auth/user", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         credentials: "include",
