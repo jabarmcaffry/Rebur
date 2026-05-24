@@ -13,11 +13,15 @@ export function useAuth() {
   const login = async (creds: { username: string; password: string }) => {
     const res = await apiRequest("POST", "/api/login", creds);
     const json = await res.json();
+    if (json.token) {
+      localStorage.setItem("auth_token", json.token);
+    }
     await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     return json;
   };
 
   const logout = async () => {
+    localStorage.removeItem("auth_token");
     await apiRequest("POST", "/api/logout", {});
     await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
   };
