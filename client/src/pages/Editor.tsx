@@ -66,6 +66,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Game, GameObject, Script, User } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
+import AnimationEditor from "@/components/AnimationEditor";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -341,7 +342,7 @@ export default function EditorPage() {
   const { user } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
-  const [activeTab, setActiveTab] = useState<"scene" | "script">("scene");
+  const [activeTab, setActiveTab] = useState<"scene" | "script" | "animate">("scene");
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [scriptDraft, setScriptDraft] = useState<string>("");
   const [hierarchyOpen, setHierarchyOpen] = useState(false);
@@ -1558,6 +1559,10 @@ export default function EditorPage() {
                   <FileCode className="w-3.5 h-3.5 mr-1.5" />
                   Scripts
                 </TabsTrigger>
+                <TabsTrigger value="animate" data-testid="tab-animate">
+                  <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                  Animate
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -1855,6 +1860,14 @@ export default function EditorPage() {
                   )}
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="animate" className="flex-1 m-0 min-h-0 overflow-hidden">
+              <AnimationEditor
+                selectedObject={selected}
+                allObjects={objects ?? []}
+                gameId={gameId}
+              />
             </TabsContent>
           </Tabs>
         </main>

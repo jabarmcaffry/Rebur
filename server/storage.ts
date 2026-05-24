@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { 
   type User, 
   type Game, 
@@ -14,6 +16,17 @@ import {
   type InsertSessionPlayer,
   type UpsertUser
 } from "@shared/schema";
+
+const PERSIST_FILE = path.join("/tmp", "rebur-storage.json");
+const DATE_KEYS = new Set(["createdAt", "updatedAt", "joinedAt", "leftAt", "endedAt"]);
+
+function dateReviver(_key: string, value: unknown): unknown {
+  if (DATE_KEYS.has(_key) && typeof value === "string" && value) {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? value : d;
+  }
+  return value;
+}
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -80,6 +93,33 @@ export class MemStorage implements IStorage {
       updatedAt: new Date()
     };
     this.users.set(testUser.id, testUser);
+
+    // Load persisted data (overwrites seed data for games/objects/scripts/assets)
+    this._load();
+  }
+
+  private _save(): void {
+    try {
+      const data = {
+        games: Object.fromEntries(this.games),
+        gameObjects: Object.fromEntries(this.gameObjects),
+        scripts: Object.fromEntries(this.scripts),
+        assets: Object.fromEntries(this.assets),
+      };
+      fs.writeFileSync(PERSIST_FILE, JSON.stringify(data), "utf-8");
+    } catch { /* ignore write failures */ }
+  }
+
+  private _load(): void {
+    try {
+      if (!fs.existsSync(PERSIST_FILE)) return;
+      const raw = fs.readFileSync(PERSIST_FILE, "utf-8");
+      const data = JSON.parse(raw, dateReviver as any);
+      if (data.games) for (const [k, v] of Object.entries(data.games)) this.games.set(k, v as Game);
+      if (data.gameObjects) for (const [k, v] of Object.entries(data.gameObjects)) this.gameObjects.set(k, v as GameObject);
+      if (data.scripts) for (const [k, v] of Object.entries(data.scripts)) this.scripts.set(k, v as Script);
+      if (data.assets) for (const [k, v] of Object.entries(data.assets)) this.assets.set(k, v as Asset);
+    } catch { /* ignore load failures */ }
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -118,6 +158,7 @@ export class MemStorage implements IStorage {
       updatedAt: new Date()
     };
     this.games.set(id, newGame);
+    this._save();
     return newGame;
   }
 
@@ -138,17 +179,20 @@ export class MemStorage implements IStorage {
     if (!game) return undefined;
     const updated = { ...game, ...updates, updatedAt: new Date() };
     this.games.set(id, updated);
+    this._save();
     return updated;
   }
 
   async deleteGame(id: string): Promise<void> {
     this.games.delete(id);
+    this._save();
   }
 
   async incrementGamePlays(id: string): Promise<void> {
     const game = this.games.get(id);
     if (game) {
       game.plays = (game.plays || 0) + 1;
+      this._save();
     }
   }
 
@@ -178,6 +222,7 @@ export class MemStorage implements IStorage {
       updatedAt: new Date()
     };
     this.gameObjects.set(id, newObj);
+    this._save();
     return newObj;
   }
 
@@ -194,11 +239,13 @@ export class MemStorage implements IStorage {
     if (!obj) return undefined;
     const updated = { ...obj, ...updates, updatedAt: new Date() };
     this.gameObjects.set(id, updated);
+    this._save();
     return updated;
   }
 
   async deleteGameObject(id: string): Promise<void> {
     this.gameObjects.delete(id);
+    this._save();
   }
 
   async createScript(script: InsertScript): Promise<Script> {
@@ -216,6 +263,7 @@ export class MemStorage implements IStorage {
       updatedAt: new Date()
     };
     this.scripts.set(id, newScript);
+    this._save();
     return newScript;
   }
 
@@ -232,11 +280,13 @@ export class MemStorage implements IStorage {
     if (!script) return undefined;
     const updated = { ...script, ...updates, updatedAt: new Date() };
     this.scripts.set(id, updated);
+    this._save();
     return updated;
   }
 
   async deleteScript(id: string): Promise<void> {
     this.scripts.delete(id);
+    this._save();
   }
 
   async createAsset(asset: InsertAsset): Promise<Asset> {
@@ -256,6 +306,7 @@ export class MemStorage implements IStorage {
       createdAt: new Date()
     };
     this.assets.set(id, newAsset);
+    this._save();
     return newAsset;
   }
 
@@ -274,6 +325,7 @@ export class MemStorage implements IStorage {
 
   async deleteAsset(id: string): Promise<void> {
     this.assets.delete(id);
+    this._save();
   }
 
   async createMultiplayerSession(session: InsertMultiplayerSession): Promise<MultiplayerSession> {
