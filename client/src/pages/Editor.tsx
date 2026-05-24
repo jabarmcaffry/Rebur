@@ -59,6 +59,7 @@ import {
   Eye,
   EyeOff,
   Share2,
+  X,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -197,6 +198,8 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
 // GLTF model loader — uses useGLTF (must be a separate component for hook rules).
 // Auto-normalises the model so its longest axis = 1 unit, then applies the user's
 // scale on top — this prevents giant imports while keeping scale=1 meaningful.
+// Selection uses a wireframe clone of the actual model geometry (not a bounding box).
+// An invisible hit-mesh guarantees reliable click detection on any model shape.
 const GltfLoader = forwardRef<THREE.Object3D, {
   url: string;
   position: [number, number, number];
@@ -206,30 +209,57 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   onClick: () => void;
 }>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
   const { scene } = useGLTF(url);
-  const { cloned, normScale } = useMemo(() => {
+  const { cloned, wireClone, hitSize, hitCenter } = useMemo(() => {
     const c = scene.clone(true);
     const box = new THREE.Box3().setFromObject(c);
     const size = new THREE.Vector3();
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-    // Normalise so the longest dimension = 1 unit
     const ns = 1 / maxDim;
     c.scale.setScalar(ns);
-    // Centre the model at local origin
     const centre = new THREE.Vector3();
     box.getCenter(centre);
     c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
-    return { cloned: c };
+
+    // Recalculate bounding box of the normalised model for the hit mesh
+    const normBox = new THREE.Box3().setFromObject(c);
+    const normSize = new THREE.Vector3();
+    const normCenter = new THREE.Vector3();
+    normBox.getSize(normSize);
+    normBox.getCenter(normCenter);
+
+    // Wireframe clone — follows the actual model shape for selection highlight
+    const wc = c.clone(true);
+    wc.traverse((child: any) => {
+      if (child.isMesh) {
+        child.material = new THREE.MeshBasicMaterial({
+          color: '#a855f7',
+          wireframe: true,
+          transparent: true,
+          opacity: 0.45,
+        });
+        child.renderOrder = 1;
+      }
+    });
+
+    return {
+      cloned: c,
+      wireClone: wc,
+      hitSize: [normSize.x * 1.08, normSize.y * 1.08, normSize.z * 1.08] as [number, number, number],
+      hitCenter: [normCenter.x, normCenter.y, normCenter.z] as [number, number, number],
+    };
   }, [scene]);
+
   return (
-    <group ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+    <group ref={ref as any} position={position} rotation={rotation} scale={scale}>
+      {/* Invisible bounding-box mesh — reliable click target regardless of model shape */}
+      <mesh position={hitCenter} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+        <boxGeometry args={hitSize} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
       <primitive object={cloned} />
-      {selected && (
-        <mesh>
-          <boxGeometry args={[1.05, 1.05, 1.05]} />
-          <meshBasicMaterial color="#a855f7" wireframe transparent opacity={0.6} />
-        </mesh>
-      )}
+      {/* Selection outline: wireframe of the model's actual geometry */}
+      {selected && <primitive object={wireClone} />}
     </group>
   );
 });
@@ -588,11 +618,11 @@ export default function EditorPage() {
       primitiveType: null,
       container: "Workspace",
       positionX: 0,
-      positionY: 1,
+      positionY: 2,
       positionZ: 0,
-      scaleX: 1,
-      scaleY: 1,
-      scaleZ: 1,
+      scaleX: 4,
+      scaleY: 4,
+      scaleZ: 4,
       color: "#ffffff",
       properties: { 
         fileUrl,

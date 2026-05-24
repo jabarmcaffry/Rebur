@@ -91,10 +91,21 @@ export default function PlayMode({
   const multiRef = useRef<MultiplayerManager | null>(null);
 
   useEffect(() => {
-    const mp = new MultiplayerManager(gameId, username);
+    const cfg = getAvatarConfig();
+    const mp = new MultiplayerManager(gameId, username, {
+      shirtColor: cfg.shirtColor,
+      skinColor: cfg.skinColor,
+      pantsColor: cfg.pantsColor,
+    });
     mp.onPlayersChanged = () => {
       setRemotePlayers(mp.getPlayerList());
       setMpConnected(mp.connected);
+    };
+    mp.onChat = (msg) => {
+      setMessages((prev) => [
+        ...prev,
+        { id: msgCounter.current++, username: msg.playerName, text: msg.text, ts: Date.now() },
+      ]);
     };
     mp.connect();
     multiRef.current = mp;
@@ -109,10 +120,13 @@ export default function PlayMode({
   const sendChat = () => {
     const text = chatInput.trim();
     if (!text) return;
+    // Show locally immediately
     setMessages((prev) => [
       ...prev,
       { id: msgCounter.current++, username, text, ts: Date.now() },
     ]);
+    // Broadcast to all other players via WebSocket
+    multiRef.current?.sendChat(text);
     setChatInput("");
   };
 
@@ -192,14 +206,20 @@ export default function PlayMode({
       runtime.step(dt);
       setTick((t) => (t + 1) % 1000000);
 
-      // Send position to multiplayer every ~6 frames (≈100 ms at 60 fps)
+      // Send position + inputs to multiplayer every ~3 frames (≈50 ms at 60 fps → 20 Hz)
       mpTick++;
-      if (mpTick >= 6) {
+      if (mpTick >= 3) {
         mpTick = 0;
-        multiRef.current?.updatePosition(
-          runtime.player.position,
-          runtime.player.rotation.y
-        );
+        const mp = multiRef.current;
+        if (mp) {
+          mp.updatePosition(runtime.player.position, runtime.player.rotation.y);
+          mp.updateInput(
+            runtime.input.moveX ?? 0,
+            runtime.input.moveZ ?? 0,
+            !!(runtime.input as any).jump,
+            runtime.player.rotation.y,
+          );
+        }
       }
 
       // FPS counter

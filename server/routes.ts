@@ -8,6 +8,7 @@ import { insertGameSchema, insertGameObjectSchema, insertScriptSchema } from "@s
 import multer from "multer";
 import path from "path";
 import { promises as fs } from "fs";
+import { GameRoom } from "./game-room";
 
 // Set up multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -474,17 +475,51 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  // Set up WebSocket server for multiplayer - Referenced from javascript_websocket blueprint
+  // ─── WebSocket multiplayer server ────────────────────────────────────────────
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   interface ConnectedClient {
     ws: WebSocket;
     sessionId: string;
     playerId: string;
+    gameId?: string;
     userId?: string;
   }
 
   const clients = new Map<string, ConnectedClient>();
+  // One GameRoom per session (keyed by sessionId)
+  const gameRooms = new Map<string, GameRoom>();
+
+  function broadcast(sessionId: string, message: object, excludeClientId?: string) {
+    const str = JSON.stringify(message);
+    clients.forEach((client, id) => {
+      if (client.sessionId === sessionId && id !== excludeClientId) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+          client.ws.send(str);
+        }
+      }
+    });
+  }
+
+  function broadcastAll(sessionId: string, message: object) {
+    broadcast(sessionId, message, undefined);
+  }
+
+  /** Ensure a GameRoom exists for the session and return it. */
+  async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<GameRoom> {
+    if (!gameRooms.has(sessionId)) {
+      const room = new GameRoom((msg) => broadcastAll(sessionId, msg));
+      // Load static world objects so the server can do collision
+      if (gameId) {
+        try {
+          const objects = await storage.getGameObjects(gameId);
+          room.setStaticObjects(objects as any[]);
+        } catch { /* non-fatal */ }
+      }
+      gameRooms.set(sessionId, room);
+    }
+    return gameRooms.get(sessionId)!;
+  }
 
   wss.on('connection', (ws: WebSocket) => {
     let clientId: string | null = null;
@@ -494,65 +529,108 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         const message = JSON.parse(data.toString());
 
         switch (message.type) {
-          case 'join':
-            {
-              const { sessionId, userId, playerName } = message;
-              
-              // Create session player
-              const player = await storage.addSessionPlayer({
-                sessionId,
-                userId: userId || null,
-                playerName: playerName || 'Guest',
-                positionX: 0,
-                positionY: 5,
-                positionZ: 0,
-                rotationY: 0,
-              });
 
-              clientId = player.id;
-              clients.set(clientId, { ws, sessionId, playerId: player.id, userId });
+          // ── JOIN ──────────────────────────────────────────────────────────
+          case 'join': {
+            const { sessionId, userId, playerName, gameId, colors } = message;
 
-              // Broadcast player joined to all clients in session
-              broadcast(sessionId, {
-                type: 'playerJoined',
-                player: player,
-              }, clientId);
-
-              // Send current players to the new client
-              const players = await storage.getSessionPlayers(sessionId);
-              ws.send(JSON.stringify({
-                type: 'init',
-                playerId: player.id,
-                players: players,
-              }));
+            // Ensure unique name within the session
+            const existing = await storage.getSessionPlayers(sessionId);
+            const existingNames = new Set(existing.map((p: any) => p.playerName));
+            let finalName: string = playerName || 'Guest';
+            if (existingNames.has(finalName)) {
+              const base = finalName;
+              let n = 2;
+              while (existingNames.has(`${base}_${n}`)) n++;
+              finalName = `${base}_${n}`;
             }
+
+            const player = await storage.addSessionPlayer({
+              sessionId,
+              userId: userId || null,
+              playerName: finalName,
+              positionX: 0,
+              positionY: 5,
+              positionZ: 0,
+              rotationY: 0,
+            });
+
+            clientId = player.id;
+            clients.set(clientId, { ws, sessionId, playerId: player.id, gameId, userId });
+
+            // Add to server-side game room (physics authority)
+            const room = await getOrCreateRoom(sessionId, gameId);
+            room.addPlayer(player.id, finalName, 0, 5, 0, colors || {});
+
+            // Tell existing clients about the new player
+            broadcast(sessionId, { type: 'playerJoined', player: { ...player, playerName: finalName } }, clientId);
+
+            // Tell the new client the current roster + their assigned id/name
+            const players = await storage.getSessionPlayers(sessionId);
+            ws.send(JSON.stringify({
+              type: 'init',
+              playerId: player.id,
+              playerName: finalName,
+              players,
+            }));
             break;
+          }
 
-          case 'move':
-            {
-              if (!clientId) break;
-              const client = clients.get(clientId);
-              if (!client) break;
-
-              const { position, rotation } = message;
-              
-              // Update player position
-              await storage.updateSessionPlayer(client.playerId, {
-                positionX: position.x,
-                positionY: position.y,
-                positionZ: position.z,
-                rotationY: rotation,
-              });
-
-              // Broadcast to other clients
-              broadcast(client.sessionId, {
-                type: 'playerMoved',
-                playerId: client.playerId,
-                position,
-                rotation,
-              }, clientId);
-            }
+          // ── INPUT (server-physics path) ───────────────────────────────────
+          case 'input': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            const { moveX, moveZ, jump, rotY, camY } = message;
+            room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0);
             break;
+          }
+
+          // ── MOVE (client-authority fallback — also syncs room state) ──────
+          case 'move': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const { position, rotation } = message;
+            // Sync position into the room so worldState stays accurate
+            const room = gameRooms.get(client.sessionId);
+            if (room) room.syncPosition(client.playerId, position.x, position.y, position.z, rotation);
+            // Also persist & relay immediately for low-latency feel
+            await storage.updateSessionPlayer(client.playerId, {
+              positionX: position.x,
+              positionY: position.y,
+              positionZ: position.z,
+              rotationY: rotation,
+            });
+            broadcast(client.sessionId, {
+              type: 'playerMoved',
+              playerId: client.playerId,
+              position,
+              rotation,
+            }, clientId);
+            break;
+          }
+
+          // ── CHAT ─────────────────────────────────────────────────────────
+          case 'chat': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const text = String(message.text ?? '').slice(0, 200).trim();
+            if (!text) break;
+            // Find the sender's name from storage
+            const allPlayers = await storage.getSessionPlayers(client.sessionId);
+            const sender = allPlayers.find((p: any) => p.id === client.playerId);
+            broadcastAll(client.sessionId, {
+              type: 'chat',
+              playerId: client.playerId,
+              playerName: sender?.playerName || 'Player',
+              text,
+            });
+            break;
+          }
         }
       } catch (error) {
         console.error('WebSocket message error:', error);
@@ -560,29 +638,22 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     });
 
     ws.on('close', async () => {
-      if (clientId) {
-        const client = clients.get(clientId);
-        if (client) {
-          await storage.removeSessionPlayer(client.playerId);
-          
-          broadcast(client.sessionId, {
-            type: 'playerLeft',
-            playerId: client.playerId,
-          }, clientId);
+      if (!clientId) return;
+      const client = clients.get(clientId);
+      if (client) {
+        // Remove from game room
+        const room = gameRooms.get(client.sessionId);
+        if (room) {
+          room.removePlayer(client.playerId);
+          if (room.playerCount === 0) {
+            room.stop();
+            gameRooms.delete(client.sessionId);
+          }
         }
-        clients.delete(clientId);
+        await storage.removeSessionPlayer(client.playerId);
+        broadcast(client.sessionId, { type: 'playerLeft', playerId: client.playerId });
       }
+      clients.delete(clientId);
     });
   });
-
-  function broadcast(sessionId: string, message: any, excludeClientId?: string) {
-    const messageStr = JSON.stringify(message);
-    clients.forEach((client, id) => {
-      if (client.sessionId === sessionId && id !== excludeClientId) {
-        if (client.ws.readyState === WebSocket.OPEN) {
-          client.ws.send(messageStr);
-        }
-      }
-    });
-  }
 }
