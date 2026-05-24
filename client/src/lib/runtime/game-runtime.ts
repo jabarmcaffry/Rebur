@@ -308,6 +308,7 @@ export class GameRuntime {
         scale: { x: o.scaleX ?? 1, y: o.scaleY ?? 1, z: o.scaleZ ?? 1 },
         color: o.color ?? "#888888",
         visible: true,
+        modelUrl: (o.properties as any)?.fileUrl ?? null,
         ...props,
         velocity: { x: 0, y: 0, z: 0 },
         on: () => () => {},

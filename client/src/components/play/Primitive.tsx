@@ -2,6 +2,8 @@ import { Suspense, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
 import { GameRuntime, type RuntimeObject } from "@/lib/runtime";
 
+import * as THREE from "three";
+
 function ModelMesh({
   url, position, rotation, scale, onClick,
 }: {
@@ -12,15 +14,24 @@ function ModelMesh({
   onClick?: (e: any) => void;
 }) {
   const { scene } = useGLTF(url);
-  const cloned = useMemo(() => scene.clone(true), [scene]);
+  const cloned = useMemo(() => {
+    const c = scene.clone(true);
+    // Normalise to 1-unit longest axis so scale=1 is a reasonable size
+    const box = new THREE.Box3().setFromObject(c);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+    const ns = 1 / maxDim;
+    c.scale.setScalar(ns);
+    const centre = new THREE.Vector3();
+    box.getCenter(centre);
+    c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
+    return c;
+  }, [scene]);
   return (
-    <primitive
-      object={cloned}
-      position={position}
-      rotation={rotation}
-      scale={scale}
-      onClick={onClick}
-    />
+    <group position={position} rotation={rotation} scale={scale} onClick={onClick}>
+      <primitive object={cloned} />
+    </group>
   );
 }
 
@@ -50,7 +61,7 @@ export default function Primitive({ obj, runtime }: { obj: RuntimeObject; runtim
 
   // GLTF model
   if (obj.type === "model") {
-    const modelUrl = (obj.properties as Record<string, any>)?.fileUrl as string | undefined;
+    const modelUrl = obj.modelUrl ?? (obj as any).properties?.fileUrl as string | undefined;
     const handleClick = (e: any) => {
       e?.stopPropagation?.();
       runtime.emitClick(obj.id);

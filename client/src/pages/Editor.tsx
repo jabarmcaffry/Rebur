@@ -194,7 +194,9 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
 ];
 
-// GLTF model loader — uses useGLTF (must be a separate component for hook rules)
+// GLTF model loader — uses useGLTF (must be a separate component for hook rules).
+// Auto-normalises the model so its longest axis = 1 unit, then applies the user's
+// scale on top — this prevents giant imports while keeping scale=1 meaningful.
 const GltfLoader = forwardRef<THREE.Object3D, {
   url: string;
   position: [number, number, number];
@@ -204,7 +206,21 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   onClick: () => void;
 }>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
   const { scene } = useGLTF(url);
-  const cloned = useMemo(() => scene.clone(true), [scene]);
+  const { cloned, normScale } = useMemo(() => {
+    const c = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(c);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+    // Normalise so the longest dimension = 1 unit
+    const ns = 1 / maxDim;
+    c.scale.setScalar(ns);
+    // Centre the model at local origin
+    const centre = new THREE.Vector3();
+    box.getCenter(centre);
+    c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
+    return { cloned: c };
+  }, [scene]);
   return (
     <group ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
       <primitive object={cloned} />
@@ -1555,10 +1571,25 @@ export default function EditorPage() {
                   <Layers className="w-3.5 h-3.5 mr-1.5" />
                   Scene
                 </TabsTrigger>
-                <TabsTrigger value="script" data-testid="tab-script">
-                  <FileCode className="w-3.5 h-3.5 mr-1.5" />
-                  Scripts
-                </TabsTrigger>
+                {/* Script tab only appears when a script is open */}
+                {selectedScriptId && (
+                  <TabsTrigger value="script" data-testid="tab-script" className="relative pr-6">
+                    <FileCode className="w-3.5 h-3.5 mr-1.5" />
+                    <span className="truncate max-w-[100px]">
+                      {scripts.find(s => s.id === selectedScriptId)?.name ?? "Script"}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedScriptId(null);
+                        setActiveTab("scene");
+                      }}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="animate" data-testid="tab-animate">
                   <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                   Animate

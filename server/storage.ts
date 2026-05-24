@@ -16,6 +16,7 @@ import {
   type InsertSessionPlayer,
   type UpsertUser
 } from "@shared/schema";
+import { DatabaseStorage } from "./db-storage";
 
 const PERSIST_FILE = path.join("/tmp", "rebur-storage.json");
 const DATE_KEYS = new Set(["createdAt", "updatedAt", "joinedAt", "leftAt", "endedAt"]);
@@ -418,4 +419,6 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage: IStorage = process.env.DATABASE_URL
+  ? new DatabaseStorage()
+  : new MemStorage();
