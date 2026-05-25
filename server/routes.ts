@@ -3,7 +3,7 @@ import express, { type Express } from "express";
 import { type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupAuth, isAuthenticated, getUserId } from "./replitAuth";
 import { insertGameSchema, insertGameObjectSchema, insertScriptSchema } from "@shared/schema";
 import multer from "multer";
 import path from "path";
@@ -44,7 +44,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const user = await storage.getUser("test");
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
       res.json(user);
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -53,21 +54,18 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   });
 
   // Public auth check — returns user object or null (no 401)
-  app.get('/api/auth/me', async (req, res) => {
-    const token = req.headers.authorization?.replace("Bearer ", "");
-    if (token === "testtoken") {
-      try {
-        const user = await storage.getUser("test");
-        return res.json(user ?? null);
-      } catch { return res.json(null); }
-    }
-    return res.json(null);
+  app.get('/api/auth/me', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      return res.json(user ?? null);
+    } catch { return res.json(null); }
   });
 
   // Game routes
   app.post("/api/games", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const gameData = insertGameSchema.parse({ ...req.body, userId });
       const game = await storage.createGame(gameData);
 
@@ -113,7 +111,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.get("/api/games", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const games = await storage.getGamesByUserId(userId);
       res.json(games);
     } catch (error) {
@@ -147,7 +145,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.patch("/api/games/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const game = await storage.getGame(req.params.id);
       
       if (!game) {
@@ -168,7 +166,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.delete("/api/games/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const game = await storage.getGame(req.params.id);
       
       if (!game) {
@@ -200,7 +198,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Game Object routes
   app.post("/api/games/:gameId/objects", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const game = await storage.getGame(req.params.gameId);
       
       if (!game) {
@@ -232,7 +230,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.patch("/api/objects/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const obj = await storage.getGameObject(req.params.id);
       
       if (!obj) {
@@ -254,7 +252,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.delete("/api/objects/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const obj = await storage.getGameObject(req.params.id);
       
       if (!obj) {
@@ -277,7 +275,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Script routes
   app.post("/api/games/:gameId/scripts", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const game = await storage.getGame(req.params.gameId);
       
       if (!game) {
@@ -300,7 +298,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Scripts are server-executed only — only the game owner may view them
   app.get("/api/games/:gameId/scripts", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const game = await storage.getGame(req.params.gameId);
       if (!game) return res.status(404).json({ message: "Game not found" });
       if (game.userId !== userId) {
@@ -316,7 +314,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.patch("/api/scripts/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const script = await storage.getScript(req.params.id);
       
       if (!script) {
@@ -338,7 +336,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.delete("/api/scripts/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const script = await storage.getScript(req.params.id);
       
       if (!script) {
@@ -365,7 +363,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const userId = "test";
+      const userId = getUserId(req);
       const fileUrl = `/uploads/${req.file.filename}`;
       
       const asset = await storage.createAsset({
@@ -409,7 +407,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.get("/api/assets/my", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const assets = await storage.getAssets(userId);
       res.json(assets);
     } catch (error) {
@@ -420,7 +418,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
   app.delete("/api/assets/:id", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const asset = await storage.getAsset(req.params.id);
       
       if (!asset) {
@@ -448,7 +446,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Multiplayer session routes
   app.post("/api/multiplayer/sessions", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = "test";
+      const userId = getUserId(req);
       const session = await storage.createMultiplayerSession({
         gameId: req.body.gameId,
         hostUserId: userId,
