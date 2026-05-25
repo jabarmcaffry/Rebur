@@ -657,7 +657,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             break;
           }
 
-          // ── CHAT ─────────────────────────────────────────────────────────
+          // ── CHAT ──────────────────────────────────────────────────────────
           case 'chat': {
             if (!clientId) break;
             const client = clients.get(clientId);
@@ -673,6 +673,20 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
               playerName: sender?.playerName || 'Player',
               text,
             });
+            break;
+          }
+
+          // ── GUI CLICK (server-side GUI interaction) ────────────────────────
+          case 'guiClick': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            const { elementId } = message;
+            if (typeof elementId === 'string') {
+              room.handleGuiClick(client.playerId, elementId);
+            }
             break;
           }
         }

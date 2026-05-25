@@ -38,6 +38,25 @@ export interface ScriptPlayerState {
   position: { x: number; y: number; z: number };
 }
 
+export interface GuiElement {
+  id: string;
+  kind: "text" | "button" | "image" | "bar";
+  text?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  anchor?: string;
+  color?: string;
+  fontSize?: number;
+  backgroundColor?: string;
+  imageUrl?: string;
+  value?: number;
+  maxValue?: number;
+  visible?: boolean;
+  clickable?: boolean;
+}
+
 type EventHandler = (...args: any[]) => void;
 
 // ── ScriptRunner ──────────────────────────────────────────────────────────────
@@ -47,7 +66,12 @@ export class ScriptRunner {
   private globalHandlers = new Map<string, EventHandler[]>();
   /** Per-object events keyed as "objName::eventName" */
   private objHandlers = new Map<string, EventHandler[]>();
+  /** GUI click handlers keyed by element id */
+  private guiClickHandlers = new Map<string, EventHandler>();
   private logs: string[] = [];
+  /** GUI elements created by scripts */
+  private guiElements = new Map<string, GuiElement>();
+  private guiIdCounter = 0;
 
   constructor(
     private readonly objects: Map<string, ScriptObjState>,   // keyed by name
@@ -79,6 +103,124 @@ export class ScriptRunner {
           const arr = this.globalHandlers.get(key) ?? [];
           arr.push(fn);
           this.globalHandlers.set(key, arr);
+        },
+      },
+      // GUI API for creating UI elements from scripts
+      gui: {
+        text: (text: string, x: number, y: number, opts?: Partial<GuiElement>) => {
+          const id = `gui_${this.guiIdCounter++}`;
+          const elem: GuiElement = {
+            id,
+            kind: "text",
+            text,
+            x,
+            y,
+            color: opts?.color ?? "#ffffff",
+            fontSize: opts?.fontSize ?? 14,
+            anchor: opts?.anchor ?? "topLeft",
+            visible: true,
+            ...opts,
+          };
+          this.guiElements.set(id, elem);
+          return {
+            id,
+            update: (changes: Partial<GuiElement>) => {
+              const e = this.guiElements.get(id);
+              if (e) Object.assign(e, changes);
+            },
+            remove: () => { this.guiElements.delete(id); },
+          };
+        },
+        button: (text: string, x: number, y: number, onClick: EventHandler, opts?: Partial<GuiElement>) => {
+          const id = `gui_${this.guiIdCounter++}`;
+          const elem: GuiElement = {
+            id,
+            kind: "button",
+            text,
+            x,
+            y,
+            width: opts?.width ?? 100,
+            height: opts?.height ?? 32,
+            color: opts?.color ?? "#ffffff",
+            backgroundColor: opts?.backgroundColor ?? "#3b82f6",
+            fontSize: opts?.fontSize ?? 14,
+            anchor: opts?.anchor ?? "topLeft",
+            visible: true,
+            clickable: true,
+            ...opts,
+          };
+          this.guiElements.set(id, elem);
+          this.guiClickHandlers.set(id, onClick);
+          return {
+            id,
+            update: (changes: Partial<GuiElement>) => {
+              const e = this.guiElements.get(id);
+              if (e) Object.assign(e, changes);
+            },
+            remove: () => {
+              this.guiElements.delete(id);
+              this.guiClickHandlers.delete(id);
+            },
+          };
+        },
+        bar: (x: number, y: number, value: number, maxValue: number, opts?: Partial<GuiElement>) => {
+          const id = `gui_${this.guiIdCounter++}`;
+          const elem: GuiElement = {
+            id,
+            kind: "bar",
+            x,
+            y,
+            width: opts?.width ?? 100,
+            height: opts?.height ?? 12,
+            value,
+            maxValue,
+            color: opts?.color ?? "#22c55e",
+            backgroundColor: opts?.backgroundColor ?? "#374151",
+            anchor: opts?.anchor ?? "topLeft",
+            visible: true,
+            ...opts,
+          };
+          this.guiElements.set(id, elem);
+          return {
+            id,
+            update: (changes: Partial<GuiElement>) => {
+              const e = this.guiElements.get(id);
+              if (e) Object.assign(e, changes);
+            },
+            setValue: (v: number) => {
+              const e = this.guiElements.get(id);
+              if (e) e.value = v;
+            },
+            remove: () => { this.guiElements.delete(id); },
+          };
+        },
+        image: (imageUrl: string, x: number, y: number, opts?: Partial<GuiElement>) => {
+          const id = `gui_${this.guiIdCounter++}`;
+          const elem: GuiElement = {
+            id,
+            kind: "image",
+            imageUrl,
+            x,
+            y,
+            width: opts?.width ?? 64,
+            height: opts?.height ?? 64,
+            anchor: opts?.anchor ?? "topLeft",
+            visible: true,
+            ...opts,
+          };
+          this.guiElements.set(id, elem);
+          return {
+            id,
+            update: (changes: Partial<GuiElement>) => {
+              const e = this.guiElements.get(id);
+              if (e) Object.assign(e, changes);
+            },
+            remove: () => { this.guiElements.delete(id); },
+          };
+        },
+        clear: () => {
+          this.guiElements.clear();
+          this.guiClickHandlers.clear();
         },
       },
       // convenience aliases matching the old client API
@@ -145,6 +287,23 @@ export class ScriptRunner {
     const l = [...this.logs];
     this.logs = [];
     return l;
+  }
+
+  /** Get all GUI elements for rendering on the client */
+  getGuiElements(): GuiElement[] {
+    return Array.from(this.guiElements.values());
+  }
+
+  /** Fire a GUI click event (called from server when client sends guiClick) */
+  fireGuiClick(elementId: string, player: ScriptPlayerState) {
+    const handler = this.guiClickHandlers.get(elementId);
+    if (handler) {
+      try {
+        handler(this._playerProxy(player));
+      } catch {
+        // Isolate script errors
+      }
+    }
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
