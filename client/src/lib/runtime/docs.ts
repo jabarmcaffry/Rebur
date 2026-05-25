@@ -214,8 +214,8 @@ Scripts in Rebur Engine run **exclusively on the server** inside a secure Node.j
 ### Execution order
 When a player joins a session:
 1. Script bodies run once (top-to-bottom) when the session starts
-2. `game.on("tick", fn)` handlers fire every physics step (~20 Hz)
-3. `game.on("playerAdded", fn)` fires for each new player
+2. \`game.on("tick", fn)\` handlers fire every physics step (~20 Hz)
+3. \`game.on("playerAdded", fn)\` fires for each new player
 
 ### API overview
 
@@ -313,7 +313,7 @@ network.server.on("takeDamage", ({ amount }) => {
 
 ## Scripting — Quick Start
 
-Scripts run **server-side**. The body executes once when the session starts. Use `game.on("tick", fn)` for ongoing logic, `workspace.Part.on("Touched", fn)` for collision events.
+Scripts run **server-side**. The body executes once when the session starts. Use \`game.on("tick", fn)\` for ongoing logic, \`workspace.Part.on("Touched", fn)\` for collision events.
 
 \`\`\`js
 // ── Oscillating platform ─────────────────────────────────────────────────────
@@ -347,7 +347,7 @@ game.on("tick", function(dt) {
 });
 \`\`\`
 
-> **Object names matter.** `workspace.MyPart` refers to an object in the scene whose **Name** field (set in the properties panel) is exactly `"MyPart"`. If the name doesn't match, the property is `undefined` and will throw.
+> **Object names matter.** \`workspace.MyPart\` refers to an object in the scene whose **Name** field (set in the properties panel) is exactly \`"MyPart"\`. If the name doesn't match, the property is \`undefined\` and will throw.
 
 ---
 
@@ -536,8 +536,8 @@ workspace.KillBrick.on("Touched", function(player) {
 
 | Event | Fired when | Argument |
 |-------|-----------|----------|
-| `"Touched"` | A player's collision box enters this object | `player` — the player who touched it |
-| `"Custom"` | You call `.emit("Custom", ...)` on this object | whatever you pass to emit |
+| \`"Touched"\` | A player's collision box enters this object | \`player\` — the player who touched it |
+| \`"Custom"\` | You call \`.emit("Custom", ...)\` on this object | whatever you pass to emit |
 
 ### Custom events (emit / on)
 
