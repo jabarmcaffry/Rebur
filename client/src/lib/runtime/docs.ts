@@ -521,7 +521,7 @@ obj.container       // ContainerName
 
 ## Object Events
 
-Object events are registered with `.on(event, fn)` and fire from the server whenever the condition occurs. All event handlers receive a **player** argument (the player that triggered it).
+Object events are registered with \`.on(event, fn)\` and fire from the server whenever the condition occurs. All event handlers receive a **player** argument (the player that triggered it).
 
 ### Syntax
 
