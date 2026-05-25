@@ -3,47 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { GameRuntime, type RuntimePlayer, type RuntimeObject } from "@/lib/runtime";
-
-// Helper component to render a held object at hand position
-function HeldObject({ obj }: { obj: RuntimeObject | null }) {
-  if (!obj || !obj.visible) return null;
-  const opacity = 1 - (obj.transparency ?? 0);
-  if (opacity <= 0.01) return null;
-  const isTransparent = (obj.transparency ?? 0) > 0;
-  
-  // Get the motor offset from the object's attached state
-  // The object scale is used directly, position is relative to hand
-  const scale: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
-  
-  let geometry: JSX.Element;
-  switch (obj.primitiveType) {
-    case "sphere":
-      geometry = <sphereGeometry args={[0.5, 32, 32]} />;
-      break;
-    case "cylinder":
-      geometry = <cylinderGeometry args={[0.5, 0.5, 1, 32]} />;
-      break;
-    case "plane":
-      geometry = <planeGeometry args={[1, 1]} />;
-      break;
-    case "cube":
-    default:
-      geometry = <boxGeometry args={[1, 1, 1]} />;
-  }
-
-  return (
-    <mesh 
-      position={[0, 0, 0]} 
-      scale={scale} 
-      castShadow 
-      receiveShadow
-    >
-      {geometry}
-      <meshStandardMaterial color={obj.color} transparent={isTransparent} opacity={opacity} />
-    </mesh>
-  );
-}
+import type { RenderPlayer } from "@shared/render-types";
 
 // ---------- geometry helpers (ported from example.html) ----------
 function createTaperedCylinder(
@@ -114,18 +74,16 @@ function createHandGeometry() {
   const geo = new THREE.SphereGeometry(0.18, 24, 24);
   const pos = geo.attributes.position.array as Float32Array;
   for (let i = 0; i < pos.length; i += 3) {
-    // Flatten slightly on sides (x-axis) and elongate on z-axis (palm direction)
-    pos[i] *= 0.75;       // narrower
-    pos[i + 1] *= 0.65;   // flatter
-    pos[i + 2] *= 1.15;   // longer palm
+    pos[i] *= 0.75;
+    pos[i + 1] *= 0.65;
+    pos[i + 2] *= 1.15;
   }
   geo.computeVertexNormals();
   return geo;
 }
 const handGeo = createHandGeometry();
 
-// Hand attachment point offsets (local to elbow group, after lower arm)
-const HAND_OFFSET_Y = -1.10 - 0.12; // below lower arm
+const HAND_OFFSET_Y = -1.10 - 0.12;
 const HAND_SCALE = 1.0;
 
 const HEX = (s: string | number | undefined, fallback: number) => {
@@ -139,20 +97,26 @@ const HEX = (s: string | number | undefined, fallback: number) => {
 // Layout constants (rig local space, before scaling).
 const TORSO_H = 2.38;
 const TORSO_CENTER_Y = 3.20;
-const TORSO_TOP_Y = TORSO_CENTER_Y + TORSO_H / 2; // 4.39
+const TORSO_TOP_Y = TORSO_CENTER_Y + TORSO_H / 2;
 const NECK_H = 0.52;
 const NECK_EMBED = 0.16;
-const NECK_TOP_Y = TORSO_TOP_Y + NECK_H - NECK_EMBED; // 4.75
+const NECK_TOP_Y = TORSO_TOP_Y + NECK_H - NECK_EMBED;
 const SHOULDER_Y = TORSO_TOP_Y - 0.08;
 const ARM_OFFSET_X = 0.95;
-const HIP_Y = (TORSO_CENTER_Y - TORSO_H / 2) + 0.18; // 2.19
+const HIP_Y = (TORSO_CENTER_Y - TORSO_H / 2) + 0.18;
 const LEG_OFFSET_X = 0.44;
 const THIGH_LEN = 1.42;
 const CALF_LEN = 1.22;
-const FEET_Y_LOCAL = HIP_Y - THIGH_LEN - CALF_LEN; // -0.45
+const FEET_Y_LOCAL = HIP_Y - THIGH_LEN - CALF_LEN;
 const SCALE = 0.35;
 
-export default function Avatar({ player, runtime }: { player: RuntimePlayer; runtime: GameRuntime }) {
+export default function Avatar({ 
+  player, 
+  isLocal = false,
+}: { 
+  player: RenderPlayer; 
+  isLocal?: boolean;
+}) {
   const groupRef = useRef<THREE.Group>(null);
   const bobRef = useRef<THREE.Group>(null);
   const torsoRef = useRef<THREE.Mesh>(null);
@@ -166,16 +130,14 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
   const rightLegRef = useRef<THREE.Group>(null);
   const leftKneeRef = useRef<THREE.Group>(null);
   const rightKneeRef = useRef<THREE.Group>(null);
-  const leftHandRef = useRef<THREE.Group>(null);
-  const rightHandRef = useRef<THREE.Group>(null);
 
   const animTime = useRef(0);
   const ragdollOffsets = useRef<Record<string, THREE.Euler>>({});
   const lastAnim = useRef<string>("idle");
 
-  // Materials — created per-instance so live recolor doesn't bleed across players.
+  // Materials
   const skinMat = useMemo(() => new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.42, metalness: 0.03 }), []);
-  const shirtMat = useMemo(() => new THREE.MeshStandardMaterial({ color: HEX(player.color, 0x2b7a6e), roughness: 0.48, metalness: 0.03 }), []);
+  const shirtMat = useMemo(() => new THREE.MeshStandardMaterial({ color: HEX(player.colors.shirt, 0x2b7a6e), roughness: 0.48, metalness: 0.03 }), []);
   const pantsMat = useMemo(() => new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5, metalness: 0.03 }), []);
 
   useEffect(() => () => { skinMat.dispose(); shirtMat.dispose(); pantsMat.dispose(); }, [skinMat, shirtMat, pantsMat]);
@@ -185,26 +147,25 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
     animTime.current += delta;
     const t = animTime.current;
 
-    // ---- live recolor ----
-    shirtMat.color.setHex(HEX(player.color, 0x2b7a6e));
-    skinMat.color.setHex(HEX((player as any).skinColor, 0xffdbac));
-    pantsMat.color.setHex(HEX((player as any).pantsColor, 0x2c3e50));
+    // Live recolor
+    shirtMat.color.setHex(HEX(player.colors.shirt, 0x2b7a6e));
+    skinMat.color.setHex(HEX(player.colors.skin, 0xffdbac));
+    pantsMat.color.setHex(HEX(player.colors.pants, 0x2c3e50));
 
-    // ---- pick animation ----
-    let anim = (player.motors?.animation as string) || "idle";
-    if (player.ragdoll) anim = "ragdoll";
+    // Pick animation from server state
+    let anim = player.animation || "idle";
     if (anim !== lastAnim.current) {
       ragdollOffsets.current = {};
       lastAnim.current = anim;
     }
 
-    // ---- reset joints (so "idle" doesn't inherit walk pose) ----
+    // Reset joints
     const joints = [leftArmRef, rightArmRef, leftElbowRef, rightElbowRef, leftLegRef, rightLegRef, leftKneeRef, rightKneeRef];
     joints.forEach((r) => r.current?.rotation.set(0, 0, 0));
     if (headRef.current) headRef.current.rotation.set(0, 0, 0);
     if (bobRef.current) bobRef.current.position.y = 0;
 
-    // ---- breathing ----
+    // Breathing
     const breath = Math.sin(t * 1.5) * 0.015;
     if (torsoRef.current) torsoRef.current.position.y = TORSO_CENTER_Y + breath;
     if (neckRef.current) neckRef.current.position.y = TORSO_TOP_Y + NECK_H / 2 - NECK_EMBED + breath * 0.6;
@@ -255,7 +216,7 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
       if (leftLegRef.current) leftLegRef.current.rotation.x = 0.3;
       if (rightLegRef.current) rightLegRef.current.rotation.x = 0.3;
     } else {
-      // idle (keeps animating — no freeze)
+      // Idle
       if (leftArmRef.current) {
         leftArmRef.current.rotation.z = Math.sin(t * 1.3) * 0.04;
         leftArmRef.current.rotation.x = Math.sin(t * 0.7) * 0.02;
@@ -266,40 +227,16 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
       }
       if (headRef.current) headRef.current.rotation.y = Math.sin(t * 0.6) * 0.05;
     }
-
-    // ---- Holding overlay: derived from motor slots, NOT from anim string. ----
-    // Whenever an object is pinned to a hand slot, that arm raises into a
-    // forward holding pose. This stacks on top of walk/run/idle so the legs
-    // keep their gait. Suppressed during ragdoll/jump/fall.
-    if (anim !== "ragdoll" && anim !== "jump" && anim !== "fall") {
-      const holdingRight = !!player.motors?.get?.("rightHand");
-      const holdingLeft = !!player.motors?.get?.("leftHand");
-      if (holdingRight && rightArmRef.current && rightElbowRef.current) {
-        rightArmRef.current.rotation.x = -1.3;
-        rightArmRef.current.rotation.z = 0;
-        rightElbowRef.current.rotation.x = -0.3;
-      }
-      if (holdingLeft && leftArmRef.current && leftElbowRef.current) {
-        leftArmRef.current.rotation.x = -1.3;
-        leftArmRef.current.rotation.z = 0;
-        leftElbowRef.current.rotation.x = -0.3;
-      }
-    }
   });
 
-  // Orient via player.up so planet-style worlds keep avatar upright.
-  const up = new THREE.Vector3(player.up.x, player.up.y, player.up.z).normalize();
-  const orientQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-  const s = (player.size || 1) * SCALE;
+  const s = SCALE;
 
   return (
     <group
       ref={groupRef}
       position={[player.position.x, player.position.y, player.position.z]}
-      quaternion={orientQuat}
     >
       <group rotation={[0, player.rotation.y, 0]} scale={[s, s, s]}>
-        {/* shift so feet (FEET_Y_LOCAL) sit at parent y=0 */}
         <group position={[0, -FEET_Y_LOCAL, 0]}>
           <group ref={bobRef}>
             <mesh ref={torsoRef} geometry={torsoGeo} position={[0, TORSO_CENTER_Y, 0]} castShadow receiveShadow material={shirtMat} />
@@ -310,12 +247,8 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
               <mesh geometry={upperArmGeo} position={[0, -1.22 / 2, 0]} castShadow receiveShadow material={skinMat} />
               <group ref={leftElbowRef} position={[0, -1.22, 0]}>
                 <mesh geometry={lowerArmGeo} position={[0, -1.10 / 2, 0]} castShadow receiveShadow material={skinMat} />
-                <group ref={leftHandRef} position={[0, HAND_OFFSET_Y, 0]}>
+                <group position={[0, HAND_OFFSET_Y, 0]}>
                   <mesh geometry={handGeo} scale={[HAND_SCALE, HAND_SCALE, HAND_SCALE]} castShadow receiveShadow material={skinMat} />
-                  {/* Held object renders at hand position, offset slightly forward */}
-                  <group position={[0, -0.3, 0.4]} scale={[1/s, 1/s, 1/s]}>
-                    <HeldObject obj={player.motors?.get?.("leftHand") ?? null} />
-                  </group>
                 </group>
               </group>
             </group>
@@ -324,12 +257,8 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
               <mesh geometry={upperArmGeo} position={[0, -1.22 / 2, 0]} castShadow receiveShadow material={skinMat} />
               <group ref={rightElbowRef} position={[0, -1.22, 0]}>
                 <mesh geometry={lowerArmGeo} position={[0, -1.10 / 2, 0]} castShadow receiveShadow material={skinMat} />
-                <group ref={rightHandRef} position={[0, HAND_OFFSET_Y, 0]}>
+                <group position={[0, HAND_OFFSET_Y, 0]}>
                   <mesh geometry={handGeo} scale={[HAND_SCALE, HAND_SCALE, HAND_SCALE]} castShadow receiveShadow material={skinMat} />
-                  {/* Held object renders at hand position, offset slightly forward */}
-                  <group position={[0, -0.3, 0.4]} scale={[1/s, 1/s, 1/s]}>
-                    <HeldObject obj={player.motors?.get?.("rightHand") ?? null} />
-                  </group>
                 </group>
               </group>
             </group>
@@ -350,10 +279,10 @@ export default function Avatar({ player, runtime }: { player: RuntimePlayer; run
           </group>
         </group>
 
-        {/* Username label hovers above the head. */}
+        {/* Username label */}
         <Html position={[0, (NECK_TOP_Y + 1.4) - FEET_Y_LOCAL, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
           <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none">
-            {player.username}
+            {player.name}
           </div>
         </Html>
       </group>

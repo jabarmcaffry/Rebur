@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid } from "@react-three/drei";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -6,7 +6,6 @@ import {
   X, Terminal, Heart, Settings, MessageSquare, Send,
   RotateCcw, LogOut, Gauge, Lock, Play, Users, BarChart3,
 } from "lucide-react";
-import { GameRuntime } from "@/lib/runtime";
 import { getAvatarConfig } from "@/lib/avatarConfig";
 import type { GameObject, Script } from "@shared/schema";
 import SVGScene from "@/components/SVGScene";
@@ -17,7 +16,8 @@ import VirtualJoystick from "@/components/play/VirtualJoystick";
 import Primitive from "@/components/play/Primitive";
 import Avatar from "@/components/play/Avatar";
 import ChaseCameraRig from "@/components/play/ChaseCameraRig";
-import { MultiplayerManager, type RemotePlayer } from "@/lib/multiplayer";
+import { RenderClient } from "@/lib/render-client";
+import type { RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
 
 interface ChatMessage {
   id: number;
@@ -39,26 +39,26 @@ export default function PlayMode({
   gameId: string;
   onExit: (logs: string[]) => void;
 }) {
-  const runtime = useMemo(() => {
-    const cfg = getAvatarConfig();
-    // Scripts run exclusively on the server — pass empty array so no script
-    // code is ever loaded into or executed in the browser.
-    const r = new GameRuntime(objects, [], username, cfg.shirtColor);
-    (r.player as any).skinColor = cfg.skinColor;
-    (r.player as any).pantsColor = cfg.pantsColor;
-    return r;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Get avatar colors
+  const avatarCfg = useMemo(() => getAvatarConfig(), []);
+  
+  // Create RenderClient for server communication
+  const renderClient = useMemo(() => {
+    return new RenderClient(gameId, username, {
+      shirtColor: avatarCfg.shirtColor,
+      skinColor: avatarCfg.skinColor,
+      pantsColor: avatarCfg.pantsColor,
+    });
+  }, [gameId, username, avatarCfg]);
 
-  const renderableObjects = useMemo(
-    () => objects.filter((o) => {
-      const c = o.container ?? "Workspace";
-      return c === "Workspace" || c === "Lighting";
-    }),
-    [objects]
-  );
-
+  // State for rendering
+  const [renderObjects, setRenderObjects] = useState<RenderObject[]>([]);
+  const [renderPlayers, setRenderPlayers] = useState<RenderPlayer[]>([]);
+  const [localPlayer, setLocalPlayer] = useState<RenderPlayer | null>(null);
+  const [guiElements, setGuiElements] = useState<RenderGuiElement[]>([]);
+  const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
+
   const [showConsole, setShowConsole] = useState(false);
   const [isMobile] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
@@ -87,92 +87,131 @@ export default function PlayMode({
   const chatInputRef = useRef<HTMLInputElement>(null);
   const msgCounter = useRef(1);
 
-  // Multiplayer
-  const [remotePlayers, setRemotePlayers] = useState<RemotePlayer[]>([]);
+  // Multiplayer connection state
   const [mpConnected, setMpConnected] = useState(false);
-  const multiRef = useRef<MultiplayerManager | null>(null);
 
+  // Input state
+  const inputRef = useRef({ moveX: 0, moveZ: 0, jump: false, camY: 0 });
+  const keysRef = useRef<Record<string, boolean>>({});
+
+  // Camera ref for yaw tracking
+  const cameraYawRef = useRef(0);
+
+  // Connect to server and set up callbacks
   useEffect(() => {
-    const cfg = getAvatarConfig();
-    const mp = new MultiplayerManager(gameId, username, {
-      shirtColor: cfg.shirtColor,
-      skinColor: cfg.skinColor,
-      pantsColor: cfg.pantsColor,
-    });
-    mp.onPlayersChanged = () => {
-      setRemotePlayers(mp.getPlayerList());
-      setMpConnected(mp.connected);
+    renderClient.onPlayersChanged = () => {
+      setRenderPlayers(Array.from(renderClient.players.values()));
+      setLocalPlayer(renderClient.getLocalPlayer());
+      setMpConnected(renderClient.connected);
     };
-    mp.onChat = (msg) => {
+
+    renderClient.onObjectsChanged = () => {
+      const interp = renderClient.getInterpolatedState();
+      setRenderObjects(interp.objects);
+    };
+
+    renderClient.onGuiChanged = () => {
+      setGuiElements([...renderClient.gui]);
+    };
+
+    renderClient.onChat = (msg) => {
       setMessages((prev) => [
         ...prev,
         { id: msgCounter.current++, username: msg.playerName, text: msg.text, ts: Date.now() },
       ]);
     };
-    // Forward server-side script logs to the in-game console
-    mp.onScriptLog = (lines) => {
+
+    renderClient.onScriptLog = (logs) => {
+      setScriptLogs((prev) => [...prev, ...logs]);
       setMessages((prev) => [
         ...prev,
-        ...lines.map((l) => ({ id: msgCounter.current++, username: "Script", text: l, ts: Date.now() })),
+        ...logs.map((l) => ({ id: msgCounter.current++, username: "Script", text: l, ts: Date.now() })),
       ]);
     };
-    mp.connect();
-    multiRef.current = mp;
-    return () => { mp.disconnect(); multiRef.current = null; };
-  }, [gameId, username]);
 
-  // Expose shiftLock to runtime input
+    renderClient.onConnected = () => {
+      setMpConnected(true);
+    };
+
+    renderClient.onDisconnected = () => {
+      setMpConnected(false);
+    };
+
+    renderClient.connect();
+
+    return () => {
+      renderClient.disconnect();
+    };
+  }, [renderClient]);
+
+  // Game loop - send inputs and update state
   useEffect(() => {
-    (runtime.input as any).shiftLock = shiftLock;
-  }, [shiftLock, runtime]);
+    let raf = 0;
+    let lastTime = performance.now();
 
-  const sendChat = () => {
-    const text = chatInput.trim();
-    if (!text) return;
-    // Show locally immediately
-    setMessages((prev) => [
-      ...prev,
-      { id: msgCounter.current++, username, text, ts: Date.now() },
-    ]);
-    // Broadcast to all other players via WebSocket
-    multiRef.current?.sendChat(text);
-    setChatInput("");
-  };
+    const loop = () => {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
 
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+      // Send inputs to server
+      renderClient.updateInput(
+        inputRef.current.moveX,
+        inputRef.current.moveZ,
+        inputRef.current.jump,
+        cameraYawRef.current,
+        false
+      );
+      inputRef.current.jump = false; // Reset jump after sending
 
-  // Focus chat input when opened
-  useEffect(() => {
-    if (chatOpen) setTimeout(() => chatInputRef.current?.focus(), 50);
-  }, [chatOpen]);
+      // Update interpolated state for rendering
+      const interp = renderClient.getInterpolatedState();
+      setRenderObjects(interp.objects);
+      setRenderPlayers(interp.players);
+      setLocalPlayer(renderClient.getLocalPlayer());
+      setTick((t) => (t + 1) % 1000000);
+
+      // FPS counter
+      const fpsd = fpsRef.current;
+      fpsd.frames++;
+      const elapsed = (now - fpsd.lastTime) / 1000;
+      if (elapsed >= 0.5) {
+        setFps(Math.round(fpsd.frames / elapsed));
+        fpsd.frames = 0;
+        fpsd.lastTime = now;
+      }
+
+      raf = requestAnimationFrame(loop);
+    };
+
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [renderClient]);
 
   // Keyboard input
   useEffect(() => {
     const computeMove = () => {
-      const k = runtime.input.keys;
+      const k = keysRef.current;
       const x = (k["d"] || k["arrowright"] ? 1 : 0) - (k["a"] || k["arrowleft"] ? 1 : 0);
       const z = (k["s"] || k["arrowdown"] ? 1 : 0) - (k["w"] || k["arrowup"] ? 1 : 0);
-      runtime.input.moveX = x;
-      runtime.input.moveZ = z;
+      inputRef.current.moveX = x;
+      inputRef.current.moveZ = z;
     };
+
     const onDown = (e: KeyboardEvent) => {
       if (chatOpen && e.target instanceof HTMLInputElement) return;
 
-      const wasDown = runtime.input.keys[e.key.toLowerCase()];
-      runtime.input.keys[e.key.toLowerCase()] = true;
+      const key = e.key.toLowerCase();
+      const wasDown = keysRef.current[key];
+      keysRef.current[key] = true;
+
       if (e.code === "Space") {
-        // Edge-triggered jump with a 250ms input buffer (handled in runtime)
-        // so a quick tap is never lost between frames. Roblox-style.
         if (!wasDown) {
-          runtime.input.jump = true;
-          (runtime.input as any)._jumpAt = performance.now();
+          inputRef.current.jump = true;
         }
         e.preventDefault();
       }
-      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) {
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) {
         e.preventDefault();
       }
       if (e.key === "Escape") {
@@ -189,70 +228,46 @@ export default function PlayMode({
       }
       computeMove();
     };
+
     const onUp = (e: KeyboardEvent) => {
-      runtime.input.keys[e.key.toLowerCase()] = false;
-      if (e.code === "Space") runtime.input.jump = false;
+      keysRef.current[e.key.toLowerCase()] = false;
       computeMove();
     };
+
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [runtime, chatOpen]);
+  }, [chatOpen]);
 
-  // Game loop
+  // Auto-scroll chat
   useEffect(() => {
-    runtime.start();
-    let raf = 0;
-    let last = performance.now();
-    let mpTick = 0;
-    const tickFn = () => {
-      const now = performance.now();
-      const dt = Math.min((now - last) / 1000, 0.1);
-      last = now;
-      runtime.step(dt);
-      setTick((t) => (t + 1) % 1000000);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
-      // Send position + inputs to multiplayer every ~3 frames (≈50 ms at 60 fps → 20 Hz)
-      mpTick++;
-      if (mpTick >= 3) {
-        mpTick = 0;
-        const mp = multiRef.current;
-        if (mp) {
-          mp.updatePosition(runtime.player.position, runtime.player.rotation.y);
-          mp.updateInput(
-            runtime.input.moveX ?? 0,
-            runtime.input.moveZ ?? 0,
-            !!(runtime.input as any).jump,
-            runtime.player.rotation.y,
-          );
-        }
-      }
+  // Focus chat input when opened
+  useEffect(() => {
+    if (chatOpen) setTimeout(() => chatInputRef.current?.focus(), 50);
+  }, [chatOpen]);
 
-      // FPS counter
-      const fpsd = fpsRef.current;
-      fpsd.frames++;
-      const elapsed = (now - fpsd.lastTime) / 1000;
-      if (elapsed >= 0.5) {
-        setFps(Math.round(fpsd.frames / elapsed));
-        fpsd.frames = 0;
-        fpsd.lastTime = now;
-      }
+  const sendChat = useCallback(() => {
+    const text = chatInput.trim();
+    if (!text) return;
+    // Show locally immediately
+    setMessages((prev) => [
+      ...prev,
+      { id: msgCounter.current++, username, text, ts: Date.now() },
+    ]);
+    // Broadcast to all other players via WebSocket
+    renderClient.sendChat(text);
+    setChatInput("");
+  }, [chatInput, username, renderClient]);
 
-      raf = requestAnimationFrame(tickFn);
-    };
-    raf = requestAnimationFrame(tickFn);
-    return () => {
-      cancelAnimationFrame(raf);
-      runtime.stop();
-    };
-  }, [runtime]);
-
-  const handleLeave = () => onExit(runtime.logs.slice());
+  const handleLeave = () => onExit(scriptLogs.slice());
   const handleResetAvatar = () => {
-    runtime.player.respawn();
+    // TODO: Implement server-side respawn
     setMenuOpen(false);
   };
   const handleResume = () => {
@@ -260,8 +275,52 @@ export default function PlayMode({
     setSettingsOpen(false);
   };
 
-  const p = runtime.player;
-  const totalPlayers = 1 + remotePlayers.length;
+  const handleGuiClick = useCallback((elementId: string) => {
+    renderClient.clickGuiElement(elementId);
+  }, [renderClient]);
+
+  // Use local player or create default for rendering
+  const player = localPlayer ?? {
+    id: "",
+    name: username,
+    position: { x: 0, y: 5, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
+    velocity: { x: 0, y: 0, z: 0 },
+    onGround: false,
+    animation: "idle",
+    health: 100,
+    maxHealth: 100,
+    colors: { shirt: avatarCfg.shirtColor, skin: avatarCfg.skinColor, pants: avatarCfg.pantsColor },
+    motors: {},
+  };
+
+  const totalPlayers = 1 + renderPlayers.length;
+
+  // Filter objects for rendering (Workspace and Lighting only)
+  const renderableObjects = useMemo(() => {
+    // Use server state if available, otherwise fall back to initial objects
+    if (renderObjects.length > 0) {
+      return renderObjects.filter((o) => o.visible !== false);
+    }
+    return objects
+      .filter((o) => {
+        const c = o.container ?? "Workspace";
+        return c === "Workspace" || c === "Lighting";
+      })
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        type: o.type,
+        primitiveType: o.primitiveType,
+        position: { x: o.positionX ?? 0, y: o.positionY ?? 0, z: o.positionZ ?? 0 },
+        rotation: { x: o.rotationX ?? 0, y: o.rotationY ?? 0, z: o.rotationZ ?? 0 },
+        scale: { x: o.scaleX ?? 1, y: o.scaleY ?? 1, z: o.scaleZ ?? 1 },
+        color: o.color ?? "#888888",
+        visible: true,
+        transparency: (o.properties as any)?.transparency ?? 0,
+        modelUrl: (o.properties as any)?.fileUrl,
+      })) as RenderObject[];
+  }, [objects, renderObjects]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0a0a0a]" data-testid="play-mode-root">
@@ -269,13 +328,12 @@ export default function PlayMode({
       {webglAvailable ? (
         <PlayCanvasErrorBoundary
           fallback={
-            <SVGScene objects={renderableObjects} runtime={runtime} cameraPosition={[0, 4, 8]} />
+            <SVGScene objects={objects.filter(o => (o.container ?? "Workspace") === "Workspace" || o.container === "Lighting")} runtime={null} cameraPosition={[0, 4, 8]} />
           }
         >
           <Canvas
             shadows
             camera={{ position: [0, 4, 8], fov: 60 }}
-            onPointerMissed={() => runtime.emitClick(null)}
           >
             <color attach="background" args={["#0a0a0a"]} />
             <ambientLight intensity={0.4} />
@@ -293,21 +351,23 @@ export default function PlayMode({
               fadeDistance={60}
               infiniteGrid
             />
-            {runtime.objectList.map((o) => (
-              <Primitive
-                key={o.id}
-                obj={o}
-                runtime={runtime}
-                posOverride={multiRef.current?.serverObjects.get(o.id) ?? null}
-              />
+            {renderableObjects.map((o) => (
+              <Primitive key={o.id} obj={o} />
             ))}
-            <Avatar player={runtime.player} runtime={runtime} />
-            <ChaseCameraRig runtime={runtime} shiftLock={shiftLock} />
+            <Avatar player={player} isLocal={true} />
+            {renderPlayers.map((rp) => (
+              <Avatar key={rp.id} player={rp} isLocal={false} />
+            ))}
+            <ChaseCameraRig 
+              player={player} 
+              shiftLock={shiftLock} 
+              onCameraYawChange={(yaw) => { cameraYawRef.current = yaw; }}
+            />
           </Canvas>
         </PlayCanvasErrorBoundary>
       ) : (
         <>
-          <SVGScene objects={renderableObjects} runtime={runtime} cameraPosition={[0, 4, 8]} />
+          <SVGScene objects={objects.filter(o => (o.container ?? "Workspace") === "Workspace" || o.container === "Lighting")} runtime={null} cameraPosition={[0, 4, 8]} />
           <div className="absolute top-12 left-3 px-2 py-1 rounded-md bg-black/60 text-white/80 text-[10px] uppercase tracking-wide pointer-events-none z-10">
             SVG fallback (no WebGL)
           </div>
@@ -486,7 +546,7 @@ export default function PlayMode({
             {fps} FPS
           </div>
         )}
-        {p.health < p.maxHealth && (
+        {player.health < player.maxHealth && (
           <div
             className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/55 backdrop-blur"
             data-testid="hud-health"
@@ -495,11 +555,11 @@ export default function PlayMode({
             <div className="w-32 h-2 rounded-full bg-white/10 overflow-hidden">
               <div
                 className="h-full bg-red-500 transition-[width] duration-150"
-                style={{ width: `${Math.max(0, (p.health / p.maxHealth) * 100)}%` }}
+                style={{ width: `${Math.max(0, (player.health / player.maxHealth) * 100)}%` }}
               />
             </div>
             <span className="text-[11px] text-white/80 tabular-nums">
-              {Math.round(p.health)}/{p.maxHealth}
+              {Math.round(player.health)}/{player.maxHealth}
             </span>
           </div>
         )}
@@ -509,20 +569,18 @@ export default function PlayMode({
       {showStats && (
         <div className="absolute top-14 left-2 z-40 px-3 py-2 rounded-lg bg-black/70 backdrop-blur border border-white/10 font-mono text-xs text-white/80 space-y-0.5 pointer-events-none">
           <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Stats</div>
-          <div>HP: <span className="text-neutral-100">{Math.round(p.health)}/{p.maxHealth}</span></div>
-          <div>X: <span className="text-neutral-200">{p.position.x.toFixed(2)}</span></div>
-          <div>Y: <span className="text-neutral-200">{p.position.y.toFixed(2)}</span></div>
-          <div>Z: <span className="text-neutral-200">{p.position.z.toFixed(2)}</span></div>
-          <div>Speed: <span className="text-neutral-300">{Math.hypot(p.velocity.x, p.velocity.z).toFixed(2)}</span></div>
-          <div>Walk: <span className="text-white/60">{p.walkSpeed}</span> Run: <span className="text-white/60">{p.runSpeed}</span></div>
-          <div>Jump: <span className="text-white/60">{p.jumpPower}</span></div>
-          <div>Ground: <span className={p.onGround ? "text-neutral-100" : "text-red-400"}>{p.onGround ? "yes" : "no"}</span></div>
+          <div>HP: <span className="text-neutral-100">{Math.round(player.health)}/{player.maxHealth}</span></div>
+          <div>X: <span className="text-neutral-200">{player.position.x.toFixed(2)}</span></div>
+          <div>Y: <span className="text-neutral-200">{player.position.y.toFixed(2)}</span></div>
+          <div>Z: <span className="text-neutral-200">{player.position.z.toFixed(2)}</span></div>
+          <div>Speed: <span className="text-neutral-300">{Math.hypot(player.velocity.x, player.velocity.z).toFixed(2)}</span></div>
+          <div>Ground: <span className={player.onGround ? "text-neutral-100" : "text-red-400"}>{player.onGround ? "yes" : "no"}</span></div>
         </div>
       )}
 
       {/* ── LEADERBOARD (right side) ── */}
       {showLeaderboard && (
-        <div className="absolute top-12 right-2 z-50 w-56" style={{ top: showFps || p.health < p.maxHealth ? "90px" : "12px" }}>
+        <div className="absolute top-12 right-2 z-50 w-56" style={{ top: showFps || player.health < player.maxHealth ? "90px" : "12px" }}>
           <div className="rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl">
             <div className="px-3 py-2 border-b border-white/10 bg-neutral-800/70 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -536,25 +594,25 @@ export default function PlayMode({
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/10 border border-white/15">
                 <div className="w-2 h-2 rounded-full bg-neutral-300 shrink-0" />
                 <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
-                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(p.health)}</span>
+                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(player.health)}</span>
                 <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
               </div>
               {/* Remote players */}
-              {remotePlayers.map((rp) => (
+              {renderPlayers.map((rp) => (
                 <div key={rp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
                   <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  <span className="text-white/80 text-xs flex-1 truncate">{rp.username}</span>
+                  <span className="text-white/80 text-xs flex-1 truncate">{rp.name}</span>
                 </div>
               ))}
               {/* Offline placeholder when no remote players */}
-              {remotePlayers.length === 0 && (
+              {renderPlayers.length === 0 && (
                 <div className="px-2 py-2 text-center text-white/25 text-[10px]">
-                  {mpConnected ? "Only you here" : "Connecting…"}
+                  {mpConnected ? "Only you here" : "Connecting..."}
                 </div>
               )}
             </div>
             <div className="px-3 py-1.5 border-t border-white/5 text-[10px] text-white/30 text-center">
-              Tab to hide · Press / to chat
+              Tab to hide / to chat
             </div>
           </div>
         </div>
@@ -590,7 +648,7 @@ export default function PlayMode({
             <input
               ref={chatInputRef}
               className="flex-1 bg-black/60 border border-white/15 rounded-md px-2 py-1 text-white text-xs placeholder-white/30 outline-none focus:border-white"
-              placeholder="Say something…"
+              placeholder="Say something..."
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => {
@@ -622,7 +680,7 @@ export default function PlayMode({
       )}
 
       {/* ── SCRIPT-DRIVEN GUI ── */}
-      <GuiOverlay runtime={runtime} version={runtime.guiVersion} />
+      <GuiOverlay gui={guiElements} onGuiClick={handleGuiClick} />
 
       {/* ── MOBILE CONTROLS ── */}
       {isMobile && (
@@ -630,12 +688,12 @@ export default function PlayMode({
           <VirtualJoystick
             side="left"
             onChange={(x, y) => {
-              runtime.input.moveX = x;
-              runtime.input.moveZ = y;
+              inputRef.current.moveX = x;
+              inputRef.current.moveZ = y;
             }}
           />
           <button
-            onPointerDown={() => { runtime.input.jump = true; }}
+            onPointerDown={() => { inputRef.current.jump = true; }}
             className="absolute bottom-12 right-12 w-16 h-16 rounded-full bg-primary/80 text-primary-foreground text-sm font-bold border border-primary-border z-20 active:scale-95"
             data-testid="button-jump"
           >
@@ -646,7 +704,7 @@ export default function PlayMode({
 
       {/* ── DESKTOP HINT ── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-md bg-black/40 backdrop-blur text-white/50 text-xs z-10 pointer-events-none hidden md:block">
-        WASD · Space to jump · Tab to see players · / to chat · Esc for menu
+        WASD to jump Tab to see players / to chat Esc for menu
       </div>
 
       {/* ── CONSOLE PANEL ── */}
@@ -655,18 +713,18 @@ export default function PlayMode({
           <div className="flex items-center justify-between px-3 h-7 border-b border-white/10">
             <div className="flex items-center gap-2">
               <Terminal className="w-3 h-3 text-neutral-300" />
-              <span className="text-xs text-white/70 uppercase tracking-wide">Output ({runtime.logs.length})</span>
+              <span className="text-xs text-white/70 uppercase tracking-wide">Output ({scriptLogs.length})</span>
             </div>
             <button onClick={() => setShowConsole(false)} className="text-white/40 hover:text-white">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
           <ScrollArea className="flex-1 p-2">
-            {runtime.logs.length === 0 ? (
-              <div className="text-xs text-white/30 italic px-1">No output yet. Use log("…") in scripts.</div>
+            {scriptLogs.length === 0 ? (
+              <div className="text-xs text-white/30 italic px-1">No output yet. Use log() in scripts.</div>
             ) : (
               <div className="font-mono text-xs space-y-0.5">
-                {runtime.logs.map((line, i) => {
+                {scriptLogs.map((line, i) => {
                   const isError = /\[.*\] .*error|Error:/i.test(line);
                   const isWarning = /warn|warning/i.test(line);
                   return (

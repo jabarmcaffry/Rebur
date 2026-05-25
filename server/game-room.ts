@@ -11,7 +11,8 @@
  *  7. Broadcast authoritative worldState (players + objects)
  */
 
-import { ScriptRunner, type ScriptObjState, type ScriptPlayerState } from "./script-runner";
+import { ScriptRunner, type ScriptObjState, type ScriptPlayerState, type GuiElement } from "./script-runner";
+import type { RenderState, RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TICK_MS       = 50;    // 20 Hz
@@ -31,6 +32,8 @@ interface PlayerState {
   rotY: number; onGround: boolean;
   moveX: number; moveZ: number; jumpQueued: boolean; camY: number;
   shirtColor?: string; skinColor?: string; pantsColor?: string;
+  health: number; maxHealth: number;
+  animation: string;
 }
 
 interface StaticBox {
@@ -48,7 +51,12 @@ interface DynamicObj {
   rotX: number; rotY: number; rotZ: number;
   sx: number; sy: number; sz: number;
   color: string; visible: boolean; anchored: boolean;
+  transparency: number;
   modelUrl?: string;
+  modelScale?: number;
+  animation?: string | null;
+  animationSpeed?: number;
+  animationLoop?: boolean;
 }
 
 // ── GameRoom ──────────────────────────────────────────────────────────────────
@@ -63,6 +71,8 @@ export class GameRoom {
   private lastTick   = Date.now();
   /** Tracks which (player,object) pairs are currently touching to avoid repeat fires */
   private touchedPairs = new Set<string>();
+  /** Current tick number for client interpolation */
+  private tickNumber = 0;
 
   constructor(private readonly broadcastFn: (msg: object) => void) {}
 
@@ -94,7 +104,12 @@ export class GameRoom {
         sx, sy, sz,
         color: o.color ?? "#888888",
         visible: true, anchored,
+        transparency: o.properties?.transparency ?? 0,
         modelUrl: o.properties?.fileUrl,
+        modelScale: o.properties?.modelScale,
+        animation: o.properties?.animation ?? null,
+        animationSpeed: o.properties?.animationSpeed ?? 1,
+        animationLoop: o.properties?.animationLoop !== false,
       };
       this.allObjs.set(o.id, dobj);
 
@@ -141,6 +156,8 @@ export class GameRoom {
       vx: 0, vy: 0, vz: 0,
       rotY: 0, onGround: false,
       moveX: 0, moveZ: 0, jumpQueued: false, camY: 0,
+      health: 100, maxHealth: 100,
+      animation: "idle",
       ...colors,
     });
     this.scriptRunner?.firePlayerAdded({ id, name, position: { x, y, z } });
@@ -320,14 +337,98 @@ export class GameRoom {
     }
 
     // ── Step 7: Broadcast worldState ──────────────────────────────────────────
+    // Update player animations based on movement
+    for (const p of this.players.values()) {
+      const moving = Math.abs(p.vx) > 0.5 || Math.abs(p.vz) > 0.5;
+      if (!p.onGround) {
+        p.animation = p.vy > 2 ? "jump" : "fall";
+      } else if (moving) {
+        p.animation = "run";
+      } else {
+        p.animation = "idle";
+      }
+    }
+
+    this.tickNumber++;
+
     if (this.players.size > 0) {
+      // Get GUI state from script runner
+      const guiElements = this.scriptRunner?.getGuiElements() ?? [];
+
+      // Build full RenderState for the new protocol
+      const renderPlayers: RenderPlayer[] = Array.from(this.players.values()).map((p) => ({
+        id: p.id,
+        name: p.name,
+        position: { x: p.x, y: p.y, z: p.z },
+        rotation: { x: 0, y: p.rotY, z: 0 },
+        velocity: { x: p.vx, y: p.vy, z: p.vz },
+        onGround: p.onGround,
+        animation: p.animation,
+        health: p.health,
+        maxHealth: p.maxHealth,
+        colors: {
+          shirt: p.shirtColor ?? "#3b82f6",
+          skin: p.skinColor ?? "#d4a574",
+          pants: p.pantsColor ?? "#374151",
+        },
+        motors: {},
+      }));
+
+      const renderObjects: RenderObject[] = Array.from(this.allObjs.values()).map((o) => ({
+        id: o.id,
+        name: o.name,
+        type: o.type,
+        primitiveType: o.primitiveType,
+        position: { x: o.x, y: o.y, z: o.z },
+        rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
+        scale: { x: o.sx, y: o.sy, z: o.sz },
+        color: o.color,
+        visible: o.visible,
+        transparency: o.transparency ?? 0,
+        modelUrl: o.modelUrl,
+        modelScale: o.modelScale,
+        animation: o.animation,
+        animationSpeed: o.animationSpeed,
+        animationLoop: o.animationLoop,
+      }));
+
+      const renderGui: RenderGuiElement[] = guiElements.map((g) => ({
+        id: g.id,
+        kind: g.kind,
+        text: g.text,
+        x: g.x,
+        y: g.y,
+        width: g.width,
+        height: g.height,
+        anchor: g.anchor ?? "topLeft",
+        color: g.color ?? "#ffffff",
+        fontSize: g.fontSize ?? 14,
+        backgroundColor: g.backgroundColor,
+        imageUrl: g.imageUrl,
+        value: g.value,
+        maxValue: g.maxValue,
+        visible: g.visible !== false,
+        clickable: g.clickable,
+      }));
+
+      const state: RenderState = {
+        tick: this.tickNumber,
+        serverTime: Date.now(),
+        objects: renderObjects,
+        players: renderPlayers,
+        gui: renderGui,
+        localPlayerId: null, // Set per-client when sending
+      };
+
       this.broadcastFn({
         type: "worldState",
-        players: Array.from(this.players.values()).map((p) => ({
+        state,
+        // Keep legacy format for backwards compatibility during transition
+        players: renderPlayers.map((p) => ({
           id: p.id, name: p.name,
-          position: { x: p.x, y: p.y, z: p.z },
-          rotY: p.rotY, onGround: p.onGround,
-          shirtColor: p.shirtColor, skinColor: p.skinColor, pantsColor: p.pantsColor,
+          position: p.position,
+          rotY: p.rotation.y, onGround: p.onGround,
+          shirtColor: p.colors.shirt, skinColor: p.colors.skin, pantsColor: p.colors.pants,
         })),
         objects: Array.from(this.allObjs.values()).map((o) => ({
           id: o.id,
@@ -383,6 +484,17 @@ export class GameRoom {
   }
 
   get playerCount() { return this.players.size; }
+
+  /** Handle a GUI click from a client */
+  handleGuiClick(playerId: string, elementId: string) {
+    const player = this.players.get(playerId);
+    if (!player || !this.scriptRunner) return;
+    this.scriptRunner.fireGuiClick(elementId, {
+      id: player.id,
+      name: player.name,
+      position: { x: player.x, y: player.y, z: player.z },
+    });
+  }
 
   stop() {
     if (this.interval) { clearInterval(this.interval); this.interval = null; }

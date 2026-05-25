@@ -1,17 +1,17 @@
 import { Suspense, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
-import { GameRuntime, type RuntimeObject } from "@/lib/runtime";
-import type { ServerObject } from "@/lib/multiplayer";
+import type { RenderObject } from "@shared/render-types";
 import * as THREE from "three";
 
 function ModelMesh({
-  url, position, rotation, scale, onClick,
+  url, position, rotation, scale, onClick, modelScale = 1,
 }: {
   url: string;
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
   onClick?: (e: any) => void;
+  modelScale?: number;
 }) {
   const { scene } = useGLTF(url);
   const cloned = useMemo(() => {
@@ -20,13 +20,13 @@ function ModelMesh({
     const size = new THREE.Vector3();
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-    const ns = 1 / maxDim;
+    const ns = (1 / maxDim) * modelScale;
     c.scale.setScalar(ns);
     const centre = new THREE.Vector3();
     box.getCenter(centre);
     c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
     return c;
-  }, [scene]);
+  }, [scene, modelScale]);
   return (
     <group position={position} rotation={rotation} scale={scale} onClick={onClick}>
       <primitive object={cloned} />
@@ -35,42 +35,21 @@ function ModelMesh({
 }
 
 /**
- * Renders a single runtime object as a Three.js mesh.
- *
- * posOverride — when supplied (from server worldState), the server's
- * authoritative position/rotation/color replaces the client runtime values.
- * This is how dynamic objects and script-driven objects stay in sync across
- * all clients without ever exposing script code to the browser.
+ * Renders a single object as a Three.js mesh.
+ * Uses RenderObject from server state (no GameRuntime dependency).
  */
-export default function Primitive({
-  obj,
-  runtime,
-  posOverride = null,
-}: {
-  obj: RuntimeObject;
-  runtime: GameRuntime;
-  posOverride?: ServerObject | null;
-}) {
-  if (!obj.visible && !posOverride) return null;
-  if (posOverride?.visible === false) return null;
+export default function Primitive({ obj }: { obj: RenderObject }) {
+  if (!obj.visible) return null;
   if (obj.type === "folder") return null;
-  if (runtime.isObjectHeld(obj.id)) return null;
 
   const opacity = 1 - (obj.transparency ?? 0);
   if (opacity <= 0.01) return null;
   const isTransparent = (obj.transparency ?? 0) > 0;
 
-  // Server-authoritative position wins over local runtime position
-  const position: [number, number, number] = posOverride
-    ? [posOverride.x, posOverride.y, posOverride.z]
-    : [obj.position.x, obj.position.y, obj.position.z];
-
-  const rotation: [number, number, number] = posOverride
-    ? [posOverride.rotX, posOverride.rotY, posOverride.rotZ]
-    : [obj.rotation.x, obj.rotation.y, obj.rotation.z];
-
+  const position: [number, number, number] = [obj.position.x, obj.position.y, obj.position.z];
+  const rotation: [number, number, number] = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
   const scale: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
-  const color = posOverride?.color ?? obj.color;
+  const color = obj.color;
 
   if (obj.type === "light") {
     return (
@@ -81,14 +60,10 @@ export default function Primitive({
   }
 
   if (obj.type === "model") {
-    const modelUrl = obj.modelUrl ?? (obj as any).properties?.fileUrl as string | undefined;
-    const handleClick = (e: any) => {
-      e?.stopPropagation?.();
-      runtime.emitClick(obj.id);
-    };
+    const modelUrl = obj.modelUrl;
     if (!modelUrl) {
       return (
-        <mesh position={position} rotation={rotation} scale={scale} onClick={handleClick}>
+        <mesh position={position} rotation={rotation} scale={scale}>
           <boxGeometry args={[1, 1, 1]} />
           <meshStandardMaterial color={color ?? "#888888"} wireframe />
         </mesh>
@@ -108,7 +83,7 @@ export default function Primitive({
           position={position}
           rotation={rotation}
           scale={scale}
-          onClick={handleClick}
+          modelScale={obj.modelScale}
         />
       </Suspense>
     );
@@ -130,13 +105,8 @@ export default function Primitive({
       geometry = <boxGeometry args={[1, 1, 1]} />;
   }
 
-  const handleClick = (e: any) => {
-    e.stopPropagation();
-    runtime.emitClick(obj.id);
-  };
-
   return (
-    <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow onClick={handleClick}>
+    <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow>
       {geometry}
       <meshStandardMaterial color={color} transparent={isTransparent} opacity={opacity} />
     </mesh>

@@ -2,14 +2,13 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { SVGRenderer } from "three/examples/jsm/renderers/SVGRenderer.js";
 import type { GameObject } from "@shared/schema";
-import type { GameRuntime } from "@/lib/runtime";
 
 interface Props {
   objects: GameObject[];
   selectedId?: string | null;
   onSelectObject?: (id: string | null) => void;
-  /** When provided, renders an avatar and reads positions from the runtime each frame. */
-  runtime?: GameRuntime;
+  /** Legacy runtime parameter - no longer used */
+  runtime?: any;
   /** Initial camera position. */
   cameraPosition?: [number, number, number];
 }
