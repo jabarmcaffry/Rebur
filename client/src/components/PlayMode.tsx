@@ -41,7 +41,9 @@ export default function PlayMode({
 }) {
   const runtime = useMemo(() => {
     const cfg = getAvatarConfig();
-    const r = new GameRuntime(objects, scripts, username, cfg.shirtColor);
+    // Scripts run exclusively on the server — pass empty array so no script
+    // code is ever loaded into or executed in the browser.
+    const r = new GameRuntime(objects, [], username, cfg.shirtColor);
     (r.player as any).skinColor = cfg.skinColor;
     (r.player as any).pantsColor = cfg.pantsColor;
     return r;
@@ -105,6 +107,13 @@ export default function PlayMode({
       setMessages((prev) => [
         ...prev,
         { id: msgCounter.current++, username: msg.playerName, text: msg.text, ts: Date.now() },
+      ]);
+    };
+    // Forward server-side script logs to the in-game console
+    mp.onScriptLog = (lines) => {
+      setMessages((prev) => [
+        ...prev,
+        ...lines.map((l) => ({ id: msgCounter.current++, username: "Script", text: l, ts: Date.now() })),
       ]);
     };
     mp.connect();
@@ -285,7 +294,12 @@ export default function PlayMode({
               infiniteGrid
             />
             {runtime.objectList.map((o) => (
-              <Primitive key={o.id} obj={o} runtime={runtime} />
+              <Primitive
+                key={o.id}
+                obj={o}
+                runtime={runtime}
+                posOverride={multiRef.current?.serverObjects.get(o.id) ?? null}
+              />
             ))}
             <Avatar player={runtime.player} runtime={runtime} />
             <ChaseCameraRig runtime={runtime} shiftLock={shiftLock} />

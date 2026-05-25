@@ -285,8 +285,15 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  app.get("/api/games/:gameId/scripts", async (req, res) => {
+  // Scripts are server-executed only — only the game owner may view them
+  app.get("/api/games/:gameId/scripts", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = "test";
+      const game = await storage.getGame(req.params.gameId);
+      if (!game) return res.status(404).json({ message: "Game not found" });
+      if (game.userId !== userId) {
+        return res.status(403).json({ message: "Not authorized to view scripts" });
+      }
       const scripts = await storage.getScripts(req.params.gameId);
       res.json(scripts);
     } catch (error) {
@@ -509,12 +516,20 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<GameRoom> {
     if (!gameRooms.has(sessionId)) {
       const room = new GameRoom((msg) => broadcastAll(sessionId, msg));
-      // Load static world objects so the server can do collision
       if (gameId) {
         try {
           const objects = await storage.getGameObjects(gameId);
-          room.setStaticObjects(objects as any[]);
-        } catch { /* non-fatal */ }
+          room.setObjects(objects as any[]);
+          // Load and execute scripts server-side — never sent to clients
+          const scripts = await storage.getScripts(gameId);
+          room.loadScripts(scripts.map((s: any) => ({
+            code: s.code ?? "",
+            name: s.name ?? "Script",
+            enabled: s.enabled !== false,
+          })));
+        } catch (err) {
+          console.error("[room] failed to load world:", err);
+        }
       }
       gameRooms.set(sessionId, room);
     }

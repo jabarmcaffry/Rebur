@@ -3,9 +3,10 @@
  *
  * Connects to the /ws endpoint, joins a session keyed by gameId,
  * sends player inputs and position to the server, and handles:
- *   - worldState  → authoritative positions for ALL players
+ *   - worldState  → authoritative positions for ALL players + world objects
  *   - playerJoined / playerLeft / playerMoved → roster updates
  *   - chat        → incoming chat messages from other players
+ *   - scriptLog   → server-side script console output
  *   - init        → initial player list on connect
  */
 
@@ -26,14 +27,25 @@ export type ChatMessage = {
   text: string;
 };
 
+export type ServerObject = {
+  x: number; y: number; z: number;
+  rotX: number; rotY: number; rotZ: number;
+  color?: string; visible?: boolean;
+};
+
 export class MultiplayerManager {
   readonly remotePlayers = new Map<string, RemotePlayer>();
+  /** Live server-authoritative object positions, keyed by object id. */
+  readonly serverObjects = new Map<string, ServerObject>();
+
   myPlayerId: string | null = null;
   myPlayerName: string | null = null;
   connected = false;
 
   onPlayersChanged?: () => void;
+  onObjectsChanged?: () => void;
   onChat?: (msg: ChatMessage) => void;
+  onScriptLog?: (lines: string[]) => void;
 
   private ws: WebSocket | null = null;
   private sessionId: string;
@@ -140,12 +152,11 @@ export class MultiplayerManager {
       }
 
       case "worldState": {
-        // Authoritative broadcast from the server's game room
+        // ── Players ──────────────────────────────────────────────────────────
         for (const sp of (msg.players ?? [])) {
-          if (sp.id === this.myPlayerId) continue; // skip self
+          if (sp.id === this.myPlayerId) continue;
           let rp = this.remotePlayers.get(sp.id);
           if (!rp) {
-            // New player we haven't seen yet (race condition on join)
             rp = {
               id: sp.id,
               username: sp.name || "Player",
@@ -159,17 +170,30 @@ export class MultiplayerManager {
             rp.rotationY = sp.rotY ?? rp.rotationY;
             rp.onGround = sp.onGround;
             if (sp.shirtColor) rp.shirtColor = sp.shirtColor;
-            if (sp.skinColor) rp.skinColor = sp.skinColor;
+            if (sp.skinColor)  rp.skinColor  = sp.skinColor;
             if (sp.pantsColor) rp.pantsColor = sp.pantsColor;
           }
         }
-        // Remove players present in remotePlayers but absent from worldState
+        // Remove players absent from worldState
         const activeIds = new Set((msg.players ?? []).map((p: any) => p.id));
         for (const id of this.remotePlayers.keys()) {
           if (!activeIds.has(id)) {
             this.remotePlayers.delete(id);
             this.onPlayersChanged?.();
           }
+        }
+
+        // ── World objects (dynamic + script-driven) ───────────────────────
+        if (Array.isArray(msg.objects) && msg.objects.length > 0) {
+          for (const so of msg.objects as any[]) {
+            this.serverObjects.set(so.id, {
+              x: so.x ?? 0, y: so.y ?? 0, z: so.z ?? 0,
+              rotX: so.rotX ?? 0, rotY: so.rotY ?? 0, rotZ: so.rotZ ?? 0,
+              color: so.color,
+              visible: so.visible,
+            });
+          }
+          this.onObjectsChanged?.();
         }
         break;
       }
@@ -186,6 +210,13 @@ export class MultiplayerManager {
           playerName: msg.playerName,
           text: msg.text,
         });
+        break;
+      }
+
+      case "scriptLog": {
+        if (Array.isArray(msg.logs)) {
+          this.onScriptLog?.(msg.logs as string[]);
+        }
         break;
       }
     }
@@ -211,7 +242,6 @@ export class MultiplayerManager {
   }
 
   private _flush() {
-    // Send both input (for server physics) and position (client-authority fallback)
     this._send({
       type: "input",
       moveX: this._moveX,
@@ -225,7 +255,7 @@ export class MultiplayerManager {
       position: this._pos,
       rotation: this._rot,
     });
-    this._jump = false; // reset latch after flush
+    this._jump = false;
   }
 
   getPlayerList(): RemotePlayer[] {
@@ -236,5 +266,6 @@ export class MultiplayerManager {
     this._cleanup();
     this.ws?.close();
     this.remotePlayers.clear();
+    this.serverObjects.clear();
   }
 }

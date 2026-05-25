@@ -2,7 +2,7 @@ import { useParams } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import PlayMode from "@/components/PlayMode";
-import type { Game, GameObject, Script } from "@shared/schema";
+import type { Game, GameObject } from "@shared/schema";
 
 function GuestSignInBanner({ gameId }: { gameId: string }) {
   const [dismissed, setDismissed] = useState(false);
@@ -50,16 +50,7 @@ export default function PlayPage() {
     },
   });
 
-  const { data: scripts = [], isLoading: scriptLoading } = useQuery<Script[]>({
-    queryKey: [`/api/games/${gameId}/scripts`],
-    queryFn: async () => {
-      const res = await fetch(`/api/games/${gameId}/scripts`);
-      if (!res.ok) return [];
-      return res.json();
-    },
-  });
-
-  if (gameLoading || objLoading || scriptLoading) {
+  if (gameLoading || objLoading) {
     return (
       <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
         <div className="text-white text-sm">Loading experience...</div>
@@ -83,7 +74,7 @@ export default function PlayPage() {
       <GuestSignInBanner gameId={gameId!} />
       <PlayMode
         objects={objects}
-        scripts={scripts}
+        scripts={[]}
         username="Guest"
         gameId={gameId!}
         onExit={() => { window.history.back(); }}

@@ -1,7 +1,7 @@
 import { Suspense, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
 import { GameRuntime, type RuntimeObject } from "@/lib/runtime";
-
+import type { ServerObject } from "@/lib/multiplayer";
 import * as THREE from "three";
 
 function ModelMesh({
@@ -16,7 +16,6 @@ function ModelMesh({
   const { scene } = useGLTF(url);
   const cloned = useMemo(() => {
     const c = scene.clone(true);
-    // Normalise to 1-unit longest axis so scale=1 is a reasonable size
     const box = new THREE.Box3().setFromObject(c);
     const size = new THREE.Vector3();
     box.getSize(size);
@@ -36,30 +35,51 @@ function ModelMesh({
 }
 
 /**
- * Renders a single runtime object as a Three.js mesh. One file per scene
- * concept keeps PlayMode.tsx a thin shell.
+ * Renders a single runtime object as a Three.js mesh.
+ *
+ * posOverride — when supplied (from server worldState), the server's
+ * authoritative position/rotation/color replaces the client runtime values.
+ * This is how dynamic objects and script-driven objects stay in sync across
+ * all clients without ever exposing script code to the browser.
  */
-export default function Primitive({ obj, runtime }: { obj: RuntimeObject; runtime: GameRuntime }) {
-  if (!obj.visible) return null;
+export default function Primitive({
+  obj,
+  runtime,
+  posOverride = null,
+}: {
+  obj: RuntimeObject;
+  runtime: GameRuntime;
+  posOverride?: ServerObject | null;
+}) {
+  if (!obj.visible && !posOverride) return null;
+  if (posOverride?.visible === false) return null;
   if (obj.type === "folder") return null;
-  // Skip objects that are being held in motor slots - they render inside the Avatar
   if (runtime.isObjectHeld(obj.id)) return null;
+
   const opacity = 1 - (obj.transparency ?? 0);
   if (opacity <= 0.01) return null;
   const isTransparent = (obj.transparency ?? 0) > 0;
-  const position: [number, number, number] = [obj.position.x, obj.position.y, obj.position.z];
-  const rotation: [number, number, number] = [obj.rotation.x, obj.rotation.y, obj.rotation.z];
+
+  // Server-authoritative position wins over local runtime position
+  const position: [number, number, number] = posOverride
+    ? [posOverride.x, posOverride.y, posOverride.z]
+    : [obj.position.x, obj.position.y, obj.position.z];
+
+  const rotation: [number, number, number] = posOverride
+    ? [posOverride.rotX, posOverride.rotY, posOverride.rotZ]
+    : [obj.rotation.x, obj.rotation.y, obj.rotation.z];
+
   const scale: [number, number, number] = [obj.scale.x, obj.scale.y, obj.scale.z];
+  const color = posOverride?.color ?? obj.color;
 
   if (obj.type === "light") {
     return (
       <group position={position}>
-        <pointLight color={obj.color} intensity={1.2} distance={20} />
+        <pointLight color={color} intensity={1.2} distance={20} />
       </group>
     );
   }
 
-  // GLTF model
   if (obj.type === "model") {
     const modelUrl = obj.modelUrl ?? (obj as any).properties?.fileUrl as string | undefined;
     const handleClick = (e: any) => {
@@ -70,7 +90,7 @@ export default function Primitive({ obj, runtime }: { obj: RuntimeObject; runtim
       return (
         <mesh position={position} rotation={rotation} scale={scale} onClick={handleClick}>
           <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color={obj.color ?? "#888888"} wireframe />
+          <meshStandardMaterial color={color ?? "#888888"} wireframe />
         </mesh>
       );
     }
@@ -118,7 +138,7 @@ export default function Primitive({ obj, runtime }: { obj: RuntimeObject; runtim
   return (
     <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow onClick={handleClick}>
       {geometry}
-      <meshStandardMaterial color={obj.color} transparent={isTransparent} opacity={opacity} />
+      <meshStandardMaterial color={color} transparent={isTransparent} opacity={opacity} />
     </mesh>
   );
 }
