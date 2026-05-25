@@ -20,6 +20,16 @@ export function useAuth() {
     return json;
   };
 
+  const register = async (creds: { email: string; password: string; firstName?: string; lastName?: string }) => {
+    const res = await apiRequest("POST", "/api/register", creds);
+    const json = await res.json();
+    if (json.token) {
+      localStorage.setItem("auth_token", json.token);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    return json;
+  };
+
   const logout = async () => {
     localStorage.removeItem("auth_token");
     await apiRequest("POST", "/api/logout", {});
@@ -32,6 +42,7 @@ export function useAuth() {
     isLoading,
     error,
     login,
+    register,
     logout,
   };
 }
