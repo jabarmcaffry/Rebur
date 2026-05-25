@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { db } from "./db";
 import { users, sessions } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -33,7 +33,7 @@ export async function setupAuth(app: Express) {
       console.log("[v0] Password hashed successfully");
 
       // Create user
-      const userId = uuidv4();
+      const userId = randomUUID();
       console.log("[v0] Creating user with ID:", userId);
       const [newUser] = await db.insert(users).values({
         id: userId,
@@ -59,7 +59,7 @@ export async function setupAuth(app: Express) {
       console.log("[v0] Password hash stored");
 
       // Create session token
-      const token = uuidv4();
+      const token = randomUUID();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       activeSessions.set(token, { userId, expiresAt });
       console.log("[v0] Session token created:", token.substring(0, 8) + "...");
@@ -122,7 +122,7 @@ export async function setupAuth(app: Express) {
       }
 
       // Create session token
-      const token = uuidv4();
+      const token = randomUUID();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
       activeSessions.set(token, { userId: user.id, expiresAt });
 
