@@ -52,6 +52,18 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
+  // Public auth check — returns user object or null (no 401)
+  app.get('/api/auth/me', async (req, res) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (token === "testtoken") {
+      try {
+        const user = await storage.getUser("test");
+        return res.json(user ?? null);
+      } catch { return res.json(null); }
+    }
+    return res.json(null);
+  });
+
   // Game routes
   app.post("/api/games", isAuthenticated, async (req: any, res) => {
     try {
@@ -548,6 +560,23 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           // ── JOIN ──────────────────────────────────────────────────────────
           case 'join': {
             const { sessionId, userId, playerName, gameId, colors } = message;
+
+            // Enforce maxPlayers limit for this game
+            if (gameId) {
+              const game = await storage.getGame(gameId);
+              const maxPlayers = (game as any)?.maxPlayers ?? 10;
+              const room = gameRooms.get(sessionId);
+              const currentCount = room ? room.playerCount : 0;
+              if (currentCount >= maxPlayers) {
+                ws.send(JSON.stringify({
+                  type: "error",
+                  code: "SERVER_FULL",
+                  message: `Server is full (${maxPlayers} players max)`,
+                }));
+                ws.close();
+                break;
+              }
+            }
 
             // Ensure unique name within the session
             const existing = await storage.getSessionPlayers(sessionId);

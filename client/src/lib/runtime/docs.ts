@@ -1,8 +1,21 @@
 // docs.ts — DEFAULT_SCRIPT + full SCRIPTING_DOCS
 
-export const DEFAULT_SCRIPT = `// Script runs once when Play starts.
-// Use events for ongoing logic.
+export const DEFAULT_SCRIPT = `// Scripts run SERVER-SIDE — safe and secure.
+// Use game.on("tick", fn) for per-frame logic.
 // Press Docs in the toolbar for the full API reference.
+
+// Example: spin a part every frame
+let angle = 0;
+game.on("tick", function(dt) {
+  angle += dt * 2;
+  workspace.Part.Rotation = { X: 0, Y: angle, Z: 0 };
+});
+
+// Example: react when a player touches a part
+workspace.Part.on("Touched", function(player) {
+  log("Touched by", player.Name);
+  workspace.Part.Color = "#ff0000";
+});
 `;
 
 export const SCRIPTING_DOCS = `# Rebur Engine — Complete Reference
@@ -183,44 +196,52 @@ Click the **Chat** button or press **/** to open the chat panel. Messages appear
 
 ## Execution Model — How Scripts Run
 
-Understanding *where* and *when* scripts run prevents a lot of bugs.
+Understanding *where* and *when* scripts run prevents bugs and keeps your game secure.
 
-### Single-machine model
-Rebur Engine runs entirely in the browser. **There is no separate server process.** All scripts — Script, LocalScript, ModuleScript — execute in the same JavaScript environment. The distinction between script types is organisational and signals intent, not an enforced runtime boundary.
+### Server-side execution
+Scripts in Rebur Engine run **exclusively on the server** inside a secure Node.js VM sandbox. This means:
 
-| Script type | Intended use | Globals available |
-|-------------|-------------|-------------------|
-| **Script** | Game logic, physics, world state | All globals |
-| **LocalScript** | UI, input handling, per-player effects | All globals |
-| **ModuleScript** | Shared library code, called via \`require()\` | All globals |
+- **Script code is never sent to the browser** — players cannot see or steal your logic
+- All scripts share a single authoritative world state per game session
+- The server broadcasts object positions and colors to all clients at 20 Hz
 
-> **Practical rule**: think of Script/LocalScript/ModuleScript as naming conventions that tell other developers what a script does, not as a security boundary.
+| Script type | Where it runs | Purpose |
+|-------------|--------------|---------|
+| **Script** | Server | Game logic, physics, world manipulation |
+| **LocalScript** | Server (mirrored to clients) | Per-player effects (future) |
+| **ModuleScript** | Server | Shared library code |
 
 ### Execution order
-When Play starts, scripts execute in this order:
+When a player joins a session:
+1. Script bodies run once (top-to-bottom) when the session starts
+2. `game.on("tick", fn)` handlers fire every physics step (~20 Hz)
+3. `game.on("playerAdded", fn)` fires for each new player
 
-1. **ServerScriptService** scripts — first, before objects appear
-2. **StarterPlayer** scripts — once per player join
-3. **Workspace / Lighting** scripts — as objects are loaded
-4. **Players** scripts — after the player avatar spawns
-
-Each script body runs **once** from top to bottom. Ongoing logic must use events or timers.
+### API overview
 
 \`\`\`js
-// ✅ Correct — react to events
-coin.on("touched", () => {
-  player.inventory.add("Coin");
-  destroy(coin);
+// ── Per-frame logic (runs ~20 times per second) ─────────────────────────────
+let t = 0;
+game.on("tick", function(dt) {
+  t += dt;
+  workspace.Platform.Position = { X: 0, Y: Math.sin(t) * 3, Z: 0 };
 });
 
-// ⚠️ Incorrect — loop runs once at start and immediately exits
-for (let i = 0; i < 10; i++) {
-  // This finishes in microseconds, not over time
-}
-\`\`\`
+// ── Player lifecycle ─────────────────────────────────────────────────────────
+game.on("playerAdded", function(player) {
+  log("Welcome,", player.Name);
+});
 
-### Are globals like \`state\`, \`tags\`, and \`player\` automatically synced?
-Currently **no automatic network replication** exists between different browser tabs or players. Within a single Play session everything shares one runtime, so \`state.set()\`, \`tags\`, and \`player\` are consistent everywhere in that session. For true multiplayer (multiple connected clients), use the \`network\` API to explicitly send and receive messages. See [Network & Replication](#network--replication).
+game.on("playerRemoving", function(player) {
+  log(player.Name, "left the game");
+});
+
+// ── Object events ────────────────────────────────────────────────────────────
+workspace.KillBrick.on("Touched", function(player) {
+  log(player.Name, "hit the kill brick");
+  workspace.KillBrick.Color = "#ff0000";
+});
+\`\`\`
 
 ### player.inventory — local or replicated?
 \`player.inventory.add()\` updates the **local runtime** only. If you need inventory to survive respawn or be visible to other scripts you must persist it yourself using \`state\`:
@@ -292,25 +313,41 @@ network.server.on("takeDamage", ({ amount }) => {
 
 ## Scripting — Quick Start
 
-Scripts run **once** when Play starts. Register event listeners for ongoing logic.
+Scripts run **server-side**. The body executes once when the session starts. Use `game.on("tick", fn)` for ongoing logic, `workspace.Part.on("Touched", fn)` for collision events.
 
 \`\`\`js
-// Spinning coin that you can collect
-const coin = create({
-  name: "Coin",
-  primitiveType: "sphere",
-  position: { x: 3, y: 2, z: 0 },
-  color: "#fbbf24",
-  scale: { x: 0.5, y: 0.5, z: 0.5 },
+// ── Oscillating platform ─────────────────────────────────────────────────────
+let t = 0;
+game.on("tick", function(dt) {
+  t += dt;
+  // workspace.MovingPlatform must exist in the scene
+  workspace.MovingPlatform.Position = {
+    X: Math.sin(t) * 5,
+    Y: 2,
+    Z: 0,
+  };
 });
-coin.autoRotateY = 3;
 
-coin.on("touched", () => {
-  player.inventory.add("Coin", { count: 1 });
-  destroy(coin);
-  log("Collected a coin! Total:", player.inventory.get("Coin")?.count);
+// ── Color-change on touch ────────────────────────────────────────────────────
+workspace.TouchPad.on("Touched", function(player) {
+  log(player.Name, "stepped on the pad!");
+  workspace.TouchPad.Color = "#22c55e";
+});
+
+// ── Welcome message when a player joins ──────────────────────────────────────
+game.on("playerAdded", function(player) {
+  log("Welcome to the game,", player.Name);
+});
+
+// ── Spin an object ───────────────────────────────────────────────────────────
+let spin = 0;
+game.on("tick", function(dt) {
+  spin += dt * 1.5;
+  workspace.SpinnerPart.Rotation = { X: 0, Y: spin, Z: 0 };
 });
 \`\`\`
+
+> **Object names matter.** `workspace.MyPart` refers to an object in the scene whose **Name** field (set in the properties panel) is exactly `"MyPart"`. If the name doesn't match, the property is `undefined` and will throw.
 
 ---
 
@@ -484,64 +521,65 @@ obj.container       // ContainerName
 
 ## Object Events
 
-Events let you react to things happening to objects.
+Object events are registered with `.on(event, fn)` and fire from the server whenever the condition occurs. All event handlers receive a **player** argument (the player that triggered it).
+
+### Syntax
 
 \`\`\`js
-// ─── Engine-internal events (fired by the engine automatically) ───────────
+// workspace.<ObjectName>.on("EventName", function(player) { ... })
+workspace.KillBrick.on("Touched", function(player) {
+  log(player.Name, "touched KillBrick at", player.Position.X, player.Position.Y, player.Position.Z);
+});
+\`\`\`
 
-// Player or object touches this object
-const unsub = obj.on("touched", (other) => {
-  log("touched by", other.username ?? other.name);
+### Supported events
+
+| Event | Fired when | Argument |
+|-------|-----------|----------|
+| `"Touched"` | A player's collision box enters this object | `player` — the player who touched it |
+| `"Custom"` | You call `.emit("Custom", ...)` on this object | whatever you pass to emit |
+
+### Custom events (emit / on)
+
+Objects support a lightweight pub/sub pattern for script-to-script communication:
+
+\`\`\`js
+// ── Fire a custom event on an object ────────────────────────────────────────
+workspace.Door.emit("Open", { requestedBy: "Admin" });
+
+// ── Listen for that event (can be in a different script) ────────────────────
+workspace.Door.on("Open", function(data) {
+  log("Door opened by", data.requestedBy);
+  workspace.Door.Position = { X: 0, Y: 5, Z: 0 }; // slide door up
+});
+\`\`\`
+
+### Common patterns
+
+\`\`\`js
+// Kill brick — respawn player by sending them back to spawn
+workspace.KillBrick.on("Touched", function(player) {
+  workspace.KillBrick.Color = "#ff0000";
+  // reset after 0.5 seconds using a tick counter
+  let resetTimer = 0;
+  const reset = function(dt) { /* handled by another listener */ };
+  log(player.Name, "fell into the kill zone");
 });
 
-// Always unsubscribe when the object is destroyed to avoid memory leaks:
-obj.on("destroyed", () => {
-  unsub();
+// Color-cycling touch pad
+let hue = 0;
+workspace.TouchPad.on("Touched", function(player) {
+  hue = (hue + 60) % 360;
+  workspace.TouchPad.Color = "hsl(" + hue + ",80%,55%)";
+  log(player.Name, "stepped on pad, hue now", hue);
 });
 
-// Touch ends
-obj.on("untouched", (other) => {
-  log("no longer touching");
+// Switch that toggles a platform's anchoring (makes it fall)
+workspace.Switch.on("Touched", function(player) {
+  workspace.FallingPlatform.Anchored = false;
+  log(player.Name, "activated the switch!");
 });
-
-// Precise touch-start with physics data
-obj.on("touchStarted", (other, penetration, normal) => {
-  log("contact started, penetration:", penetration);
-});
-
-// Touch ended (debounced)
-obj.on("touchEnded", (other) => {
-  log("contact ended");
-});
-
-// Player clicks on this object (3D viewport click)
-obj.on("clicked", (obj) => {
-  obj.color = "#ff4444";
-});
-
-// Object is about to be destroyed
-obj.on("destroyed", () => {
-  log("goodbye");
-});
-
-// Collision with another dynamic object
-obj.on("collisionStarted", (other, contact) => {
-  log("hit", other.name, "at", contact.point);
-});
-obj.on("collisionEnded", (other) => { });
-
-// Physics wake/sleep (optimization states)
-obj.on("woke", () => { });
-obj.on("slept", () => { });
-
-// Listen for ANY property change via the "changed" event
-obj.on("changed", (prop, newVal, oldVal) => {
-  log(prop, "changed:", oldVal, "→", newVal);
-});
-
-// All on() calls return an unsubscribe function:
-const stop = obj.on("touched", handler);
-stop();  // stop listening
+\`\`\`
 \`\`\`
 
 > **Memory note**: Listeners survive as long as the object lives. If you create many objects with \`on("touched")\` listeners and destroy them without calling \`unsub()\`, the listeners are cleaned up automatically via the \`"destroyed"\` event. For long-running scripts that subscribe many times, store and call the unsubscribe.

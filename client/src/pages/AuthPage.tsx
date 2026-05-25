@@ -7,6 +7,14 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Code2 } from "lucide-react";
 
+function getRedirectTarget(): string {
+  const params = new URLSearchParams(window.location.search);
+  const r = params.get("redirect");
+  // Only allow relative paths to prevent open-redirect attacks
+  if (r && r.startsWith("/") && !r.startsWith("//")) return r;
+  return "/home";
+}
+
 export default function AuthPage() {
   const { login, isAuthenticated } = useAuth();
   const { toast } = useToast();
@@ -14,9 +22,9 @@ export default function AuthPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Redirect if already authenticated
+  // Already logged in — send them where they came from
   if (isAuthenticated) {
-    window.location.href = "/home";
+    window.location.href = getRedirectTarget();
     return null;
   }
 
@@ -25,7 +33,7 @@ export default function AuthPage() {
     setIsLoading(true);
     try {
       await login({ username, password });
-      window.location.href = "/home";
+      window.location.href = getRedirectTarget();
     } catch (error: any) {
       toast({
         title: "Login failed",
@@ -47,7 +55,7 @@ export default function AuthPage() {
             </div>
           </div>
           <CardTitle className="text-2xl font-bold">Welcome to Rebur Engine</CardTitle>
-          <CardDescription>Login with test / pass123</CardDescription>
+          <CardDescription>Sign in to your Rebur account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -58,7 +66,7 @@ export default function AuthPage() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="test"
+                placeholder="Username"
                 required
                 data-testid="input-username"
               />
@@ -70,7 +78,7 @@ export default function AuthPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="pass123"
+                placeholder="Password"
                 required
                 data-testid="input-password"
               />
@@ -81,7 +89,7 @@ export default function AuthPage() {
               disabled={isLoading}
               data-testid="button-login-submit"
             >
-              {isLoading ? "Logging in..." : "Login"}
+              {isLoading ? "Signing in..." : "Sign in with Rebur"}
             </Button>
           </form>
         </CardContent>

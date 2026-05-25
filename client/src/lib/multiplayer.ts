@@ -46,6 +46,7 @@ export class MultiplayerManager {
   onObjectsChanged?: () => void;
   onChat?: (msg: ChatMessage) => void;
   onScriptLog?: (lines: string[]) => void;
+  onError?: (err: { code: string; message: string }) => void;
 
   private ws: WebSocket | null = null;
   private sessionId: string;
@@ -217,6 +218,11 @@ export class MultiplayerManager {
         if (Array.isArray(msg.logs)) {
           this.onScriptLog?.(msg.logs as string[]);
         }
+        break;
+      }
+
+      case "error": {
+        this.onError?.({ code: msg.code ?? "UNKNOWN", message: msg.message ?? "Server error" });
         break;
       }
     }

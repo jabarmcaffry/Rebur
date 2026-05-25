@@ -48,6 +48,7 @@ export const games = pgTable("games", {
   isPublished: boolean("is_published").default(false),
   isPublic: boolean("is_public").default(true),
   plays: integer("plays").default(0),
+  maxPlayers: integer("max_players").default(10),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -68,6 +69,7 @@ export const insertGameSchema = z.object({
   thumbnail: z.string().optional().nullable(),
   isPublished: z.boolean().optional(),
   isPublic: z.boolean().optional(),
+  maxPlayers: z.number().int().min(1).max(100).optional(),
 });
 
 export type InsertGame = z.infer<typeof insertGameSchema>;
