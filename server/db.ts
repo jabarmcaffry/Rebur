@@ -8,5 +8,25 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
+const connectionString = process.env.DATABASE_URL;
+
+// Render.com internal PostgreSQL URLs don't include sslmode but external ones do.
+// We detect SSL requirement by checking if the URL already specifies it, otherwise
+// default to requiring SSL only in production.
+const sslConfig = (() => {
+  if (connectionString.includes('sslmode=disable')) return false;
+  if (connectionString.includes('sslmode=require') || connectionString.includes('sslmode=prefer')) {
+    return { rejectUnauthorized: false };
+  }
+  if (process.env.NODE_ENV === 'production') {
+    return { rejectUnauthorized: false };
+  }
+  return false;
+})();
+
+export const pool = new Pool({
+  connectionString,
+  ssl: sslConfig,
+});
+
 export const db = drizzle({ client: pool, schema });

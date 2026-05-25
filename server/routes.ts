@@ -35,6 +35,11 @@ const upload = multer({
 });
 
 export async function registerRoutes(app: Express, httpServer: Server): Promise<void> {
+  // Health check for Render.com and load balancers
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   // Auth middleware
   await setupAuth(app);
 
