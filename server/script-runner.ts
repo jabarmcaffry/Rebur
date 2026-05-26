@@ -96,6 +96,9 @@ export class ScriptRunner {
     const ctx = createContext({
       workspace: workspaceProxy,
       Workspace: workspaceProxy,
+      // "Scene" is the user-facing alias for workspace in the editor UI
+      scene: workspaceProxy,
+      Scene: workspaceProxy,
       players:   playersProxy,
       game: {
         on: (event: string, fn: EventHandler) => {
@@ -321,12 +324,47 @@ export class ScriptRunner {
     }
   }
 
-  private _buildWorkspace(log: (...a: any[]) => void): Record<string, any> {
-    const proxy: Record<string, any> = {};
-    for (const [name, obj] of this.objects) {
-      proxy[name] = this._objProxy(obj, log);
-    }
-    return proxy;
+  private _buildWorkspace(log: (...a: any[]) => void): any {
+    const runner = this;
+    // Use a JS Proxy so workspace.Part dynamically resolves at access time.
+    // This means objects added after script load are visible, and accessing a
+    // non-existent name returns a safe no-op proxy instead of undefined (which
+    // would immediately throw "Cannot read properties of undefined").
+    return new Proxy({} as Record<string, any>, {
+      get(_target, name: string | symbol) {
+        if (typeof name !== "string") return undefined;
+        const obj = runner.objects.get(name);
+        if (!obj) return runner._nullObjProxy(name, log);
+        return runner._objProxy(obj, log);
+      },
+      has(_target, name: string | symbol) {
+        return typeof name === "string" && runner.objects.has(name);
+      },
+      ownKeys() {
+        return Array.from(runner.objects.keys());
+      },
+    });
+  }
+
+  /** Safe proxy returned when a script accesses a workspace object that doesn't exist yet. */
+  private _nullObjProxy(name: string, log: (...a: any[]) => void): any {
+    let warned = false;
+    const warn = () => {
+      if (!warned) {
+        warned = true;
+        log(`Warning: object "${name}" does not exist in the scene`);
+      }
+    };
+    const noop = (..._args: any[]) => {};
+    return new Proxy({} as Record<string, any>, {
+      get(_t, prop: string | symbol) {
+        warn();
+        const p = String(prop);
+        if (p === "on" || p === "emit") return noop;
+        return undefined;
+      },
+      set() { return true; },
+    });
   }
 
   private _buildPlayers(): Record<string, any> {

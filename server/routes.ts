@@ -65,12 +65,17 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  // Public auth check — returns user object or null (no 401)
+  // Public auth check — returns user object (with username) or null (no 401)
   app.get('/api/auth/me', isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      return res.json(user ?? null);
+      if (!user) return res.json(null);
+      // Derive a display username from firstName, or the local part of the email
+      const username =
+        (user as any).firstName ||
+        ((user as any).email?.split("@")[0] ?? "Player");
+      return res.json({ ...user, username });
     } catch { return res.json(null); }
   });
 

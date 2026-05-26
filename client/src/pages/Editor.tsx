@@ -93,13 +93,13 @@ const PRIMITIVES = [
 // `defaultScriptType` is what gets created when the user clicks "+ script" on
 // the container header.
 const CONTAINERS = [
-  { name: "Workspace",           icon: Box,      hint: "3D objects in the live world",                  defaultScriptType: "Script" },
-  { name: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                   defaultScriptType: "Script" },
-  { name: "Players",             icon: Box,      hint: "Player avatars + per-player data",              defaultScriptType: "LocalScript" },
-  { name: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",         defaultScriptType: "Script" },
-  { name: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",   defaultScriptType: "LocalScript" },
-  { name: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates + ModuleScripts",              defaultScriptType: "ModuleScript" },
-] as const;
+  { name: "Workspace",           displayName: "Scene",               icon: Box,      hint: "3D objects in the live world",                  defaultScriptType: "Script" },
+  { name: "Lighting",            displayName: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                   defaultScriptType: "Script" },
+  { name: "Players",             displayName: "Players",             icon: Box,      hint: "Player avatars + per-player data",              defaultScriptType: "LocalScript" },
+  { name: "ServerScriptService", displayName: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",         defaultScriptType: "Script" },
+  { name: "StarterPlayer",       displayName: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",   defaultScriptType: "LocalScript" },
+  { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates + ModuleScripts",              defaultScriptType: "ModuleScript" },
+];
 
 // All snippets use the bare-global, event-first style — matching the in-editor
 // Docs. Scripts run top-to-bottom once on Play;
@@ -697,6 +697,15 @@ export default function EditorPage() {
     return groups;
   }, [scripts]);
 
+  // If the Animate tab is active but no longer available (object changed / no animations),
+  // fall back to the Scene tab so the user doesn't see a blank panel.
+  const selectedAnimCount = ((selected?.properties as any)?.animations?.length ?? 0) as number;
+  useEffect(() => {
+    if (activeTab === "animate" && selectedAnimCount === 0) {
+      setActiveTab("scene");
+    }
+  }, [selectedAnimCount, activeTab]);
+
   /** Open a script in the editor tab. */
   const openScript = (s: Script) => {
     setSelectedScriptId(s.id);
@@ -1024,14 +1033,14 @@ export default function EditorPage() {
                 >
                   {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   <Icon className="w-3 h-3" />
-                  <span className="font-semibold truncate">{c.name}</span>
+                  <span className="font-semibold truncate">{(c as any).displayName ?? c.name}</span>
                   <span className="ml-auto text-[10px] opacity-60">{totalCount}</span>
                 </button>
                 <AddItemMenu
                   containerName={c.name}
                   parentId={null}
                   testId={`button-add-${c.name}`}
-                  title={`Add to ${c.name}`}
+                  title={`Add to ${(c as any).displayName ?? c.name}`}
                 />
               </div>
               {!collapsed && (
@@ -1620,10 +1629,13 @@ export default function EditorPage() {
                     </button>
                   </TabsTrigger>
                 )}
-                <TabsTrigger value="animate" data-testid="tab-animate">
-                  <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                  Animate
-                </TabsTrigger>
+                {/* Animate tab only appears when the selected object has animations saved */}
+                {((selected?.properties as any)?.animations?.length ?? 0) > 0 && (
+                  <TabsTrigger value="animate" data-testid="tab-animate">
+                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                    Animate
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
