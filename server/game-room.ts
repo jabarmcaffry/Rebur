@@ -75,8 +75,15 @@ export class GameRoom {
   private touchedPairs = new Set<string>();
   /** Current tick number for client interpolation */
   private tickNumber = 0;
+  /** Spawn position extracted from the SpawnLocation object in the scene */
+  private spawnPoint = { x: 0, y: 5, z: 0 };
 
   constructor(private readonly broadcastFn: (msg: object) => void) {}
+
+  /** Returns the current spawn position (above the SpawnLocation surface). */
+  getSpawnPoint(): { x: number; y: number; z: number } {
+    return { ...this.spawnPoint };
+  }
 
   // ── World setup ─────────────────────────────────────────────────────────────
 
@@ -86,6 +93,21 @@ export class GameRoom {
     this.allObjs.clear();
     this.scriptObjs.clear();
     this.touchedPairs.clear();
+
+    // Detect SpawnLocation so addPlayer can place new players correctly
+    const spawnObj = objects.find(
+      (o: any) => o.type === "spawn" || o.name === "SpawnLocation"
+    );
+    if (spawnObj) {
+      const sy = spawnObj.scaleY ?? 1;
+      this.spawnPoint = {
+        x: spawnObj.positionX ?? 0,
+        // Spawn 3 units above the top surface of the pad so the player
+        // always starts in free air and falls onto it naturally.
+        y: (spawnObj.positionY ?? 0) + sy / 2 + PLAYER_HALF_H + 3,
+        z: spawnObj.positionZ ?? 0,
+      };
+    }
 
     for (const o of objects) {
       const c = o.container ?? "Workspace";

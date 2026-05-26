@@ -95,7 +95,10 @@ export default function PlayMode({
   const keysRef = useRef<Record<string, boolean>>({});
 
   // Camera ref for yaw tracking
-  const cameraYawRef = useRef(0);
+  // Camera starts at [0, 4, 8] looking toward origin → forward dir is -Z →
+  // atan2(0, -1) = π.  Initialise to π so the very first input packet uses
+  // the correct camera-relative direction even before ChaseCameraRig fires.
+  const cameraYawRef = useRef(Math.PI);
 
   // Connect to server and set up callbacks
   useEffect(() => {

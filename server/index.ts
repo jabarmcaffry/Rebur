@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { ensureSchema } from "./ensure-schema";
 
 process.env.NODE_ENV = process.env.NODE_ENV || "development";
 // Server restart trigger
@@ -43,6 +44,9 @@ app.use((req, res, next) => {
 (async () => {
   const httpServer = createServer(app);
   log('using HTTP');
+
+  // Ensure DB schema exists before anything else touches the database
+  await ensureSchema();
 
   // Register routes and set up WebSocket
   await registerRoutes(app, httpServer);

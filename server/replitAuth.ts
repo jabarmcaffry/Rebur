@@ -221,19 +221,14 @@ async function getSessionFromToken(token: string): Promise<{ userId: string } | 
     activeSessions.delete(token);
   }
 
-  // Check database
-  try {
-    const [dbSession] = await db.select().from(sessions).where(eq(sessions.sid, token)).limit(1);
-    if (dbSession && dbSession.expire > new Date()) {
-      const sess = dbSession.sess as any;
-      if (sess?.userId && sess?.type === 'session') {
-        // Cache it
-        activeSessions.set(token, { userId: sess.userId, expiresAt: dbSession.expire });
-        return { userId: sess.userId };
-      }
+  // Check database — let DB errors propagate so callers get a real 500
+  const [dbSession] = await db.select().from(sessions).where(eq(sessions.sid, token)).limit(1);
+  if (dbSession && dbSession.expire > new Date()) {
+    const sess = dbSession.sess as any;
+    if (sess?.userId && sess?.type === 'session') {
+      activeSessions.set(token, { userId: sess.userId, expiresAt: dbSession.expire });
+      return { userId: sess.userId };
     }
-  } catch (error) {
-    console.error("Session lookup error:", error);
   }
 
   return null;
@@ -245,15 +240,26 @@ export async function isAuthenticated(req: Request, res: Response, next: NextFun
     return res.status(401).json({ message: "Not authenticated" });
   }
 
-  const session = await getSessionFromToken(token);
-  if (!session) {
-    return res.status(401).json({ message: "Not authenticated" });
-  }
+  try {
+    const session = await getSessionFromToken(token);
+    if (!session) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
 
-  // Attach user info to request
-  (req as any).user = { claims: { sub: session.userId } };
-  (req as any).userId = session.userId;
-  return next();
+    // Verify the user record actually exists — catches deleted accounts
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, session.userId)).limit(1);
+    if (!user) {
+      activeSessions.delete(token);
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    (req as any).user = { claims: { sub: session.userId } };
+    (req as any).userId = session.userId;
+    return next();
+  } catch (err) {
+    console.error("[auth] isAuthenticated error:", err);
+    return res.status(500).json({ message: "Authentication check failed" });
+  }
 }
 
 // Helper to get userId from authenticated request

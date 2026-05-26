@@ -599,22 +599,25 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
               finalName = `${base}_${n}`;
             }
 
+            // Add to server-side game room (physics authority) first so we
+            // can read the spawn point extracted from the game's objects.
+            const room = await getOrCreateRoom(sessionId, gameId);
+            const sp = room.getSpawnPoint();
+
             const player = await storage.addSessionPlayer({
               sessionId,
               userId: userId || null,
               playerName: finalName,
-              positionX: 0,
-              positionY: 5,
-              positionZ: 0,
+              positionX: sp.x,
+              positionY: sp.y,
+              positionZ: sp.z,
               rotationY: 0,
             });
 
             clientId = player.id;
             clients.set(clientId, { ws, sessionId, playerId: player.id, gameId, userId });
 
-            // Add to server-side game room (physics authority)
-            const room = await getOrCreateRoom(sessionId, gameId);
-            room.addPlayer(player.id, finalName, 0, 5, 0, colors || {});
+            room.addPlayer(player.id, finalName, sp.x, sp.y, sp.z, colors || {});
 
             // Tell existing clients about the new player
             broadcast(sessionId, { type: 'playerJoined', player: { ...player, playerName: finalName } }, clientId);
