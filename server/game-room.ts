@@ -232,9 +232,18 @@ export class GameRoom {
     for (const p of this.players.values()) {
       p.vy += GRAVITY * dt;
 
+      // camY = atan2(fwd.x, fwd.z) where fwd is the camera world direction.
+      // Camera forward XZ unit: (sin(camY), cos(camY)).
+      // Camera right XZ unit: (-cos(camY), sin(camY)).
+      // Player velocity: moveX along right, -moveZ along forward (W = moveZ=-1 = forward).
       const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
-      p.vx = (p.moveX * cos + p.moveZ * sin) * MOVE_SPEED;
-      p.vz = (-p.moveX * sin + p.moveZ * cos) * MOVE_SPEED;
+      p.vx = (-p.moveX * cos - p.moveZ * sin) * MOVE_SPEED;
+      p.vz = ( p.moveX * sin - p.moveZ * cos) * MOVE_SPEED;
+
+      // Rotate character to face movement direction.
+      if (Math.abs(p.vx) > 0.01 || Math.abs(p.vz) > 0.01) {
+        p.rotY = Math.atan2(p.vx, p.vz);
+      }
 
       if (p.jumpQueued && p.onGround) { p.vy = JUMP_VEL; p.onGround = false; }
       p.jumpQueued = false;
@@ -244,6 +253,8 @@ export class GameRoom {
       p.z += p.vz * dt;
 
       p.onGround = false;
+      // p.y is capsule centre; feet are at p.y - PLAYER_HALF_H.
+      // Hard floor at y = 0 (feet level).
       if (p.y <= PLAYER_HALF_H) { p.y = PLAYER_HALF_H; if (p.vy < 0) p.vy = 0; p.onGround = true; }
 
       this._pushPlayerOutOfStatics(p);
@@ -359,7 +370,9 @@ export class GameRoom {
       const renderPlayers: RenderPlayer[] = Array.from(this.players.values()).map((p) => ({
         id: p.id,
         name: p.name,
-        position: { x: p.x, y: p.y, z: p.z },
+        // p.y is capsule centre; subtract half-height so the client receives
+        // the feet/anchor position that Avatar.tsx expects.
+        position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
         rotation: { x: 0, y: p.rotY, z: 0 },
         velocity: { x: p.vx, y: p.vy, z: p.vz },
         onGround: p.onGround,
@@ -423,7 +436,6 @@ export class GameRoom {
       this.broadcastFn({
         type: "worldState",
         state,
-        // Keep legacy format for backwards compatibility during transition
         players: renderPlayers.map((p) => ({
           id: p.id, name: p.name,
           position: p.position,

@@ -341,7 +341,7 @@ export default function PlayMode({
             <hemisphereLight args={["#e5e5e5", "#262626", 0.4]} />
             <Grid
               args={[80, 80]}
-              position={[0, 0.51, 0]}
+              position={[0, 0, 0]}
               cellSize={1}
               cellThickness={0.5}
               cellColor="#262626"
