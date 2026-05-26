@@ -9,6 +9,7 @@ import multer from "multer";
 import path from "path";
 import { promises as fs } from "fs";
 import { GameRoom } from "./game-room";
+import { BUILD_ID } from "./build-id";
 
 // Set up multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -38,6 +39,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // Health check for Render.com and load balancers
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Version endpoint — clients poll this to detect new deployments
+  app.get('/api/version', (_req, res) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ buildId: BUILD_ID });
   });
 
   // Auth middleware

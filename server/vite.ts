@@ -6,6 +6,7 @@ import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
 import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
+import { BUILD_ID } from "./build-id";
 
 const viteLogger = createLogger();
 
@@ -106,34 +107,47 @@ export function serveStatic(app: Express) {
     );
   }
 
-  // Hashed assets (JS/CSS) get long-lived cache — filenames change on rebuild
+  // Read index.html once and inject the BUILD_ID meta tag so the client can
+  // detect version mismatches and self-update without waiting for a server push.
+  const rawHtml = fs.readFileSync(path.resolve(distPath, "index.html"), "utf-8");
+  const indexHtml = rawHtml.replace(
+    "<head>",
+    `<head>\n    <meta name="build-id" content="${BUILD_ID}">`,
+  );
+
+  // Hashed assets (JS/CSS/images) — content-addressed filenames never repeat,
+  // so a very long cache is safe and makes page loads blazing fast.
   app.use(
     "/assets",
     express.static(path.join(distPath, "assets"), {
       maxAge: "1y",
       immutable: true,
+      etag: false,
+      lastModified: false,
     }),
   );
 
-  // Everything else (including index.html) must never be cached so
-  // new deployments are picked up immediately by browsers and CDNs.
+  // All other static files (favicons, manifests, etc.) must never be cached
+  // so new deployments are picked up immediately.
+  const noCacheHeaders = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  };
+
   app.use(
     express.static(distPath, {
-      setHeaders(res, filePath) {
-        if (filePath.endsWith(".html")) {
-          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          res.setHeader("Pragma", "no-cache");
-          res.setHeader("Expires", "0");
-        }
+      index: false, // we serve index.html manually below with injected BUILD_ID
+      setHeaders(res) {
+        res.set(noCacheHeaders);
       },
     }),
   );
 
-  // SPA fallback — always send index.html with no-cache headers
+  // SPA fallback — always serve the BUILD_ID-stamped index.html with no-cache.
   app.use("*", (_req, res) => {
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.sendFile(path.resolve(distPath, "index.html"));
+    res.set(noCacheHeaders);
+    res.set("Content-Type", "text/html");
+    res.send(indexHtml);
   });
 }
