@@ -612,13 +612,13 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             // Tell existing clients about the new player
             broadcast(sessionId, { type: 'playerJoined', player: { ...player, playerName: finalName } }, clientId);
 
-            // Tell the new client the current roster + their assigned id/name
-            const players = await storage.getSessionPlayers(sessionId);
+            // Tell the new client their id/name + a full world snapshot
+            const snapshot = room.getSnapshot(player.id);
             ws.send(JSON.stringify({
               type: 'init',
               playerId: player.id,
               playerName: finalName,
-              players,
+              state: snapshot,
             }));
             break;
           }

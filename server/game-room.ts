@@ -23,6 +23,7 @@ const PLAYER_HALF_H = 0.9;
 const PLAYER_RADIUS = 0.4;
 const OBJ_BOUNCE    = 0.25;
 const OBJ_DRAG      = 0.88;  // per-second linear damping
+const KILL_Y        = -50;   // fall below this → respawn
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 interface PlayerState {
@@ -31,6 +32,7 @@ interface PlayerState {
   vx: number; vy: number; vz: number;
   rotY: number; onGround: boolean;
   moveX: number; moveZ: number; jumpQueued: boolean; camY: number;
+  spawnX: number; spawnY: number; spawnZ: number;
   shirtColor?: string; skinColor?: string; pantsColor?: string;
   health: number; maxHealth: number;
   animation: string;
@@ -156,6 +158,7 @@ export class GameRoom {
       vx: 0, vy: 0, vz: 0,
       rotY: 0, onGround: false,
       moveX: 0, moveZ: 0, jumpQueued: false, camY: 0,
+      spawnX: x, spawnY: y, spawnZ: z,
       health: 100, maxHealth: 100,
       animation: "idle",
       ...colors,
@@ -253,9 +256,12 @@ export class GameRoom {
       p.z += p.vz * dt;
 
       p.onGround = false;
-      // p.y is capsule centre; feet are at p.y - PLAYER_HALF_H.
-      // Hard floor at y = 0 (feet level).
-      if (p.y <= PLAYER_HALF_H) { p.y = PLAYER_HALF_H; if (p.vy < 0) p.vy = 0; p.onGround = true; }
+      // No hard floor — players only land on anchored objects.
+      // Fell past kill-Y → respawn at spawn point.
+      if (p.y - PLAYER_HALF_H < KILL_Y) {
+        p.x = p.spawnX; p.y = p.spawnY; p.z = p.spawnZ;
+        p.vx = 0; p.vy = 0; p.vz = 0;
+      }
 
       this._pushPlayerOutOfStatics(p);
     }
@@ -272,12 +278,11 @@ export class GameRoom {
       obj.y += obj.vy * dt;
       obj.z += obj.vz * dt;
 
-      // Ground collision
-      const halfH = obj.sy / 2;
-      if (obj.y - halfH <= 0) {
-        obj.y = halfH;
-        obj.vy = Math.abs(obj.vy) > 0.5 ? -obj.vy * OBJ_BOUNCE : 0;
-        obj.vx *= 0.7; obj.vz *= 0.7;
+      // No hard floor — objects only rest on anchored surfaces.
+      // Despawn objects that fall past kill-Y to keep the sim clean.
+      if (obj.y < KILL_Y) {
+        obj.x = 0; obj.y = 5; obj.z = 0;
+        obj.vx = 0; obj.vy = 0; obj.vz = 0;
       }
 
       this._pushObjOutOfStatics(obj);
@@ -510,5 +515,53 @@ export class GameRoom {
 
   stop() {
     if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  }
+
+  /** Return the current world state for a specific player (used in the init handshake). */
+  getSnapshot(localPlayerId: string): RenderState {
+    const renderPlayers: RenderPlayer[] = Array.from(this.players.values()).map((p) => ({
+      id: p.id,
+      name: p.name,
+      position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
+      rotation: { x: 0, y: p.rotY, z: 0 },
+      velocity: { x: p.vx, y: p.vy, z: p.vz },
+      onGround: p.onGround,
+      animation: p.animation,
+      health: p.health,
+      maxHealth: p.maxHealth,
+      colors: {
+        shirt: p.shirtColor ?? "#3b82f6",
+        skin: p.skinColor ?? "#d4a574",
+        pants: p.pantsColor ?? "#374151",
+      },
+      motors: {},
+    }));
+
+    const renderObjects: RenderObject[] = Array.from(this.allObjs.values()).map((o) => ({
+      id: o.id,
+      name: o.name,
+      type: o.type,
+      primitiveType: o.primitiveType,
+      position: { x: o.x, y: o.y, z: o.z },
+      rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
+      scale: { x: o.sx, y: o.sy, z: o.sz },
+      color: o.color,
+      visible: o.visible,
+      transparency: o.transparency ?? 0,
+      modelUrl: o.modelUrl,
+      modelScale: o.modelScale,
+      animation: o.animation,
+      animationSpeed: o.animationSpeed,
+      animationLoop: o.animationLoop,
+    }));
+
+    return {
+      tick: this.tickNumber,
+      serverTime: Date.now(),
+      objects: renderObjects,
+      players: renderPlayers,
+      gui: [],
+      localPlayerId,
+    };
   }
 }

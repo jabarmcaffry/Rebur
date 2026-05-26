@@ -667,18 +667,6 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* Ambient recent messages (bottom-left when chat closed) — user messages only */}
-      {!chatOpen && (
-        <div className="absolute bottom-20 left-2 z-40 pointer-events-none flex flex-col gap-1">
-          {messages.filter((m) => m.username !== "System").slice(-4).map((m) => (
-            <div key={m.id} className="text-xs text-white bg-black/60 backdrop-blur rounded px-2 py-0.5 max-w-[260px] truncate">
-              <span className="font-semibold">{m.username}: </span>
-              {m.text}
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* ── SCRIPT-DRIVEN GUI ── */}
       <GuiOverlay gui={guiElements} onGuiClick={handleGuiClick} />
 
