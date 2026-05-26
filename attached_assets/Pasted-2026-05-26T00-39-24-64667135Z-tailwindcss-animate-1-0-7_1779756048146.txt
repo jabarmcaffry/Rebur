@@ -1,0 +1,50 @@
+2026-05-26T00:39:24.64667135Z + tailwindcss-animate@1.0.7
+2026-05-26T00:39:24.64667336Z + three@0.160.0
+2026-05-26T00:39:24.64667533Z + tw-animate-css@1.2.5
+2026-05-26T00:39:24.64667729Z + uuid@14.0.0
+2026-05-26T00:39:24.64667928Z + vaul@1.1.2
+2026-05-26T00:39:24.64668126Z + wouter@3.3.5
+2026-05-26T00:39:24.64668322Z + ws@8.18.0
+2026-05-26T00:39:24.646685161Z + zod@3.24.2
+2026-05-26T00:39:24.646687121Z + zod-validation-error@3.4.0
+2026-05-26T00:39:24.646689071Z 
+2026-05-26T00:39:24.646691091Z 566 packages installed [3.22s]
+2026-05-26T00:39:31.937365089Z ==> Uploading build...
+2026-05-26T00:39:40.316501298Z ==> Uploaded in 4.3s. Compression took 4.0s
+2026-05-26T00:39:40.358620625Z ==> Build successful 🎉
+2026-05-26T00:39:42.960254956Z ==> Deploying...
+2026-05-26T00:39:43.075943493Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-05-26T00:39:54.903968392Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T00:39:54.903975452Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T00:40:00.605511072Z ==> Running 'bun run start'
+2026-05-26T00:40:00.700485238Z $ NODE_ENV=production node dist/index.js
+2026-05-26T00:40:08.299464913Z file:///opt/render/project/src/dist/index.js:317
+2026-05-26T00:40:08.299489963Z   throw new Error(
+2026-05-26T00:40:08.299494714Z         ^
+2026-05-26T00:40:08.299498874Z 
+2026-05-26T00:40:08.299503994Z Error: DATABASE_URL must be set. Add your Render.com PostgreSQL connection string.
+2026-05-26T00:40:08.299509004Z     at file:///opt/render/project/src/dist/index.js:317:9
+2026-05-26T00:40:08.299514134Z     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+2026-05-26T00:40:08.299518284Z     at async node:internal/modules/esm/loader:666:26
+2026-05-26T00:40:08.299522454Z     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+2026-05-26T00:40:08.299526464Z 
+2026-05-26T00:40:08.299530484Z Node.js v26.2.0
+2026-05-26T00:40:08.313327128Z error: script "start" exited with code 1
+2026-05-26T00:40:10.269737567Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T00:40:10.269744387Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T00:40:10.39977863Z ==> Exited with status 1
+2026-05-26T00:40:10.401276676Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+2026-05-26T00:40:15.960975721Z ==> Running 'bun run start'
+2026-05-26T00:40:15.969309426Z $ NODE_ENV=production node dist/index.js
+2026-05-26T00:40:23.568746066Z file:///opt/render/project/src/dist/index.js:317
+2026-05-26T00:40:23.568780796Z   throw new Error(
+2026-05-26T00:40:23.568787657Z         ^
+2026-05-26T00:40:23.568793487Z 
+2026-05-26T00:40:23.568800517Z Error: DATABASE_URL must be set. Add your Render.com PostgreSQL connection string.
+2026-05-26T00:40:23.568807627Z     at file:///opt/render/project/src/dist/index.js:317:9
+2026-05-26T00:40:23.568814767Z     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+2026-05-26T00:40:23.568820828Z     at async node:internal/modules/esm/loader:666:26
+2026-05-26T00:40:23.568826588Z     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+2026-05-26T00:40:23.568832498Z 
+2026-05-26T00:40:23.568837548Z Node.js v26.2.0
+2026-05-26T00:40:23.664763506Z error: script "start" exited with code 1
