@@ -1,0 +1,50 @@
+2026-05-26T03:33:48.748885925Z 
+2026-05-26T03:33:48.748890426Z     node_modules/vite/node_modules/esbuild/lib/main.js:1653:36:
+2026-05-26T03:33:48.748893396Z       1653 │   const libMainJS = require.resolve("esbuild");
+2026-05-26T03:33:48.748896336Z            ╵                                     ~~~~~~~~~
+2026-05-26T03:33:48.748899066Z 
+2026-05-26T03:33:49.325861979Z ▲ [WARNING] The glob pattern require("../lightningcss.*.node") did not match any files [empty-glob]
+2026-05-26T03:33:49.325882021Z 
+2026-05-26T03:33:49.325885881Z     node_modules/lightningcss/node/index.js:20:19:
+2026-05-26T03:33:49.325889511Z       20 │   native = require(`../lightningcss.${parts.join('-')}.node`);
+2026-05-26T03:33:49.325893261Z          ╵                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2026-05-26T03:33:49.325897472Z 
+2026-05-26T03:33:49.325901882Z 4 warnings
+2026-05-26T03:33:49.325914003Z 
+2026-05-26T03:33:49.325919093Z   dist/index.cjs  8.7mb ⚠️
+2026-05-26T03:33:49.325922113Z 
+2026-05-26T03:33:49.325925734Z ⚡ Done in 592ms
+2026-05-26T03:33:50.335473475Z ==> Uploading build...
+2026-05-26T03:34:01.411110844Z ==> Uploaded in 6.6s. Compression took 4.4s
+2026-05-26T03:34:01.457659007Z ==> Build successful 🎉
+2026-05-26T03:34:04.765087807Z ==> Deploying...
+2026-05-26T03:34:04.887562028Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-05-26T03:34:20.611428678Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T03:34:20.611441668Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T03:34:26.98275801Z ==> Running 'npm run start'
+2026-05-26T03:34:28.096369706Z 
+2026-05-26T03:34:28.096409148Z > rebur@1.0.0 start
+2026-05-26T03:34:28.096413948Z > NODE_ENV=production node dist/index.cjs
+2026-05-26T03:34:28.096418358Z 
+2026-05-26T03:34:30.387055104Z node:internal/url:840
+2026-05-26T03:34:30.387083385Z       href = bindingUrl.parse(input, base, true);
+2026-05-26T03:34:30.387086715Z                         ^
+2026-05-26T03:34:30.387088895Z 
+2026-05-26T03:34:30.387091106Z TypeError: Invalid URL
+2026-05-26T03:34:30.387093816Z     at new URL (node:internal/url:840:25)
+2026-05-26T03:34:30.387099816Z     at node_modules/vite/dist/node/constants.js (/opt/render/project/src/dist/index.cjs:45083:40)
+2026-05-26T03:34:30.387101926Z     at __init (/opt/render/project/src/dist/index.cjs:13:56)
+2026-05-26T03:34:30.387104006Z     at node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js (/opt/render/project/src/dist/index.cjs:123427:5)
+2026-05-26T03:34:30.387106116Z     at __init (/opt/render/project/src/dist/index.cjs:13:56)
+2026-05-26T03:34:30.387109276Z     at Object.<anonymous> (/opt/render/project/src/dist/index.cjs:232440:1)
+2026-05-26T03:34:30.387112616Z     at Module._compile (node:internal/modules/cjs/loader:1873:14)
+2026-05-26T03:34:30.387116097Z     at Object..js (node:internal/modules/cjs/loader:2013:10)
+2026-05-26T03:34:30.387119457Z     at Module.load (node:internal/modules/cjs/loader:1596:32)
+2026-05-26T03:34:30.387123057Z     at Module._load (node:internal/modules/cjs/loader:1398:12) {
+2026-05-26T03:34:30.387126237Z   code: 'ERR_INVALID_URL',
+2026-05-26T03:34:30.387129808Z   input: '../../package.json'
+2026-05-26T03:34:30.387132917Z }
+2026-05-26T03:34:30.387135778Z 
+2026-05-26T03:34:30.387138378Z Node.js v26.2.0
+2026-05-26T03:34:37.201060242Z ==> Exited with status 1
+2026-05-26T03:34:37.20338248Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
