@@ -1,0 +1,25 @@
+2026-05-26T00:46:44.984958782Z ==> Deploying...
+2026-05-26T00:46:45.048490283Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-05-26T00:46:58.336215034Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T00:46:58.336222354Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T00:47:04.423141879Z ==> Running 'bun run start'
+2026-05-26T00:47:04.639919064Z $ NODE_ENV=production node dist/index.js
+2026-05-26T00:47:13.051698542Z 12:47:12 AM [express] using HTTP
+2026-05-26T00:47:13.117885898Z 12:47:13 AM [express] serving on port 10000
+2026-05-26T00:47:15.813739092Z ==> Your service is live 🎉
+2026-05-26T00:47:15.930817414Z ==> 
+2026-05-26T00:47:15.935510687Z ==> ///////////////////////////////////////////////////////////
+2026-05-26T00:47:15.940004796Z ==> 
+2026-05-26T00:47:15.946493987Z ==> Available at your primary URL https://code-helper-68.onrender.com
+2026-05-26T00:47:15.951155078Z ==> 
+2026-05-26T00:47:15.959842375Z ==> ///////////////////////////////////////////////////////////
+2026-05-26T00:47:18.56220587Z (node:92) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+2026-05-26T00:47:18.562225261Z In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+2026-05-26T00:47:18.562228711Z 
+2026-05-26T00:47:18.562232131Z To prepare for this change:
+2026-05-26T00:47:18.562235501Z - If you want the current behavior, explicitly use 'sslmode=verify-full'
+2026-05-26T00:47:18.562238381Z - If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+2026-05-26T00:47:18.562240251Z 
+2026-05-26T00:47:18.562242711Z See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+2026-05-26T00:47:18.562245911Z (Use `node --trace-warnings ...` to show where the warning was created)
+2026-05-26T00:47:19.734949237Z 12:47:19 AM [express] GET /api/auth/user 401 in 1180ms :: {"message":"Not authenticated"}
