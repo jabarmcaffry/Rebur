@@ -27,11 +27,12 @@ export function log(message: string, source = "express") {
 
 export async function setupVite(app: Express, server: Server) {
   const port = parseInt(process.env.PORT || "5000", 10);
+  const isReplit = !!process.env.REPL_ID || !!process.env.REPLIT_DEV_DOMAIN;
   const isCodespacesPreview =
     process.env.CODESPACES === "true" &&
     process.env.CODESPACE_NAME &&
     process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN;
-  const isHttps = (server as any).key !== undefined; // Check if HTTPS
+  const isHttps = (server as any).key !== undefined;
   const hmrProtocol = isHttps ? 'wss' : 'ws';
   const previewHmrHost = isCodespacesPreview
     ? `${process.env.CODESPACE_NAME}-${port}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`
@@ -40,7 +41,10 @@ export async function setupVite(app: Express, server: Server) {
     middlewareMode: true,
     port,
     host: "0.0.0.0" as const,
-    hmr: isCodespacesPreview
+    // On Replit, the preview is served through a proxy — HMR WebSocket
+    // connections via the proxy do not work, so disable the overlay.
+    // The app still hot-reloads; only the error overlay is suppressed.
+    hmr: (isReplit || isCodespacesPreview)
       ? false
       : {
           server,

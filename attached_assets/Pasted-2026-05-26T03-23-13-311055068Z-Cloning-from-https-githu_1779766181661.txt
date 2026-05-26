@@ -1,0 +1,105 @@
+2026-05-26T03:23:13.311055068Z ==> Cloning from https://github.com/jabarmcaffry/code-helper-68
+2026-05-26T03:23:13.95317713Z ==> Checking out commit 494d613f2c00ac7a3809e3bb55c8c0e74573f9dc in branch main
+2026-05-26T03:23:15.254668665Z ==> Requesting Node.js version >=18.0.0
+2026-05-26T03:23:15.458107332Z ==> Using Node.js version 26.2.0 via /opt/render/project/src/package.json
+2026-05-26T03:23:15.458127052Z ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
+2026-05-26T03:23:15.458238585Z ==> Installing Node.js version 26.2.0...
+2026-05-26T03:23:16.675119695Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T03:23:16.675132216Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T03:23:16.710170044Z ==> Running build command 'npm install && npm run build'...
+2026-05-26T03:23:28.658660508Z 
+2026-05-26T03:23:28.658690488Z added 565 packages, and audited 566 packages in 12s
+2026-05-26T03:23:28.658768871Z 
+2026-05-26T03:23:28.658969216Z 67 packages are looking for funding
+2026-05-26T03:23:28.65913041Z   run `npm fund` for details
+2026-05-26T03:23:28.691585439Z 
+2026-05-26T03:23:28.69160783Z 7 moderate severity vulnerabilities
+2026-05-26T03:23:28.69161245Z 
+2026-05-26T03:23:28.69161715Z To address all issues (including breaking changes), run:
+2026-05-26T03:23:28.69162194Z   npm audit fix --force
+2026-05-26T03:23:28.69162585Z 
+2026-05-26T03:23:28.69163045Z Run `npm audit` for details.
+2026-05-26T03:23:28.880000694Z 
+2026-05-26T03:23:28.880023525Z > rebur@1.0.0 build
+2026-05-26T03:23:28.880028785Z > vite build && esbuild server/index.ts --platform=node --bundle --format=cjs --outfile=dist/index.js
+2026-05-26T03:23:28.880034465Z 
+2026-05-26T03:23:29.110529297Z vite v5.4.21 building for production...
+2026-05-26T03:23:29.157124854Z transforming...
+2026-05-26T03:23:36.434821421Z ✓ 2365 modules transformed.
+2026-05-26T03:23:37.015842228Z rendering chunks...
+2026-05-26T03:23:37.034294832Z computing gzip size...
+2026-05-26T03:23:37.073475261Z ../dist/public/index.html                                                              2.20 kB │ gzip:   0.88 kB
+2026-05-26T03:23:37.073491762Z ../dist/public/assets/Game_engine_editor_interface_23dc5ed5-BLofFlzR-BLofFlzR.png    991.13 kB
+2026-05-26T03:23:37.073512042Z ../dist/public/assets/index-DZZNSNGE.css                                              97.87 kB │ gzip:  15.66 kB
+2026-05-26T03:23:37.073567364Z ../dist/public/assets/index-BHAvKlH5.js                                            1,594.29 kB │ gzip: 453.72 kB
+2026-05-26T03:23:37.073636136Z 
+2026-05-26T03:23:37.073643516Z (!) Some chunks are larger than 500 kB after minification. Consider:
+2026-05-26T03:23:37.073647296Z - Using dynamic import() to code-split the application
+2026-05-26T03:23:37.073651066Z - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+2026-05-26T03:23:37.073670477Z - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+2026-05-26T03:23:37.073882692Z ✓ built in 7.94s
+2026-05-26T03:23:37.198078718Z ▲ [WARNING] "import.meta" is not available with the "cjs" output format and will be empty [empty-import-meta]
+2026-05-26T03:23:37.198098389Z 
+2026-05-26T03:23:37.198102819Z     server/vite.ts:14:33:
+2026-05-26T03:23:37.198106839Z       14 │ const __filename = fileURLToPath(import.meta.url);
+2026-05-26T03:23:37.198109999Z          ╵                                  ~~~~~~~~~~~
+2026-05-26T03:23:37.198112869Z 
+2026-05-26T03:23:37.198116629Z   You need to set the output format to "esm" for "import.meta" to work correctly.
+2026-05-26T03:23:37.198119659Z 
+2026-05-26T03:23:37.199979319Z ▲ [WARNING] "import.meta" is not available with the "cjs" output format and will be empty [empty-import-meta]
+2026-05-26T03:23:37.200000789Z 
+2026-05-26T03:23:37.20000625Z     vite.config.ts:6:45:
+2026-05-26T03:23:37.20001064Z       6 │ const __dirname = path.dirname(fileURLToPath(import.meta.url));
+2026-05-26T03:23:37.20001469Z         ╵                                              ~~~~~~~~~~~
+2026-05-26T03:23:37.20001836Z 
+2026-05-26T03:23:37.20002289Z   You need to set the output format to "esm" for "import.meta" to work correctly.
+2026-05-26T03:23:37.20002612Z 
+2026-05-26T03:23:37.231613376Z ▲ [WARNING] "esbuild" should be marked as external for use with "require.resolve" [require-resolve-not-external]
+2026-05-26T03:23:37.231633076Z 
+2026-05-26T03:23:37.231636976Z     node_modules/vite/node_modules/esbuild/lib/main.js:1653:36:
+2026-05-26T03:23:37.231640367Z       1653 │   const libMainJS = require.resolve("esbuild");
+2026-05-26T03:23:37.231643717Z            ╵                                     ~~~~~~~~~
+2026-05-26T03:23:37.231646947Z 
+2026-05-26T03:23:37.803337025Z ▲ [WARNING] The glob pattern require("../lightningcss.*.node") did not match any files [empty-glob]
+2026-05-26T03:23:37.803354265Z 
+2026-05-26T03:23:37.803358505Z     node_modules/lightningcss/node/index.js:20:19:
+2026-05-26T03:23:37.803362105Z       20 │   native = require(`../lightningcss.${parts.join('-')}.node`);
+2026-05-26T03:23:37.803364225Z          ╵                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2026-05-26T03:23:37.803366185Z 
+2026-05-26T03:23:37.803368185Z 4 warnings
+2026-05-26T03:23:37.803376876Z 
+2026-05-26T03:23:37.803381936Z   dist/index.js  8.7mb ⚠️
+2026-05-26T03:23:37.803385556Z 
+2026-05-26T03:23:37.803390056Z ⚡ Done in 608ms
+2026-05-26T03:23:39.448810845Z ==> Uploading build...
+2026-05-26T03:23:49.28377683Z ==> Uploaded in 5.0s. Compression took 4.8s
+2026-05-26T03:23:49.33198499Z ==> Build successful 🎉
+2026-05-26T03:23:52.056577511Z ==> Deploying...
+2026-05-26T03:23:52.112654448Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-05-26T03:24:14.783668206Z ==> Using Bun version 1.3.4 (default)
+2026-05-26T03:24:14.788296105Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-26T03:24:21.072382359Z ==> Running 'npm run start'
+2026-05-26T03:24:24.479740297Z 
+2026-05-26T03:24:24.479778298Z > rebur@1.0.0 start
+2026-05-26T03:24:24.479784298Z > NODE_ENV=production node dist/index.js
+2026-05-26T03:24:24.479789619Z 
+2026-05-26T03:24:25.763929284Z file:///opt/render/project/src/dist/index.js:42
+2026-05-26T03:24:25.763969165Z     var relative4 = require("path").relative;
+2026-05-26T03:24:25.763975614Z                     ^
+2026-05-26T03:24:25.763979815Z 
+2026-05-26T03:24:25.763988055Z ReferenceError: require is not defined in ES module scope, you can use import instead
+2026-05-26T03:24:25.763995175Z This file is being treated as an ES module because it has a '.js' file extension and '/opt/render/project/src/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-05-26T03:24:25.763999705Z     at node_modules/depd/index.js (file:///opt/render/project/src/dist/index.js:42:21)
+2026-05-26T03:24:25.764006995Z     at __require3 (file:///opt/render/project/src/dist/index.js:16:50)
+2026-05-26T03:24:25.764011635Z     at node_modules/body-parser/index.js (file:///opt/render/project/src/dist/index.js:17193:21)
+2026-05-26T03:24:25.764015915Z     at __require3 (file:///opt/render/project/src/dist/index.js:16:50)
+2026-05-26T03:24:25.764021006Z     at node_modules/express/lib/express.js (file:///opt/render/project/src/dist/index.js:23816:22)
+2026-05-26T03:24:25.764025346Z     at __require3 (file:///opt/render/project/src/dist/index.js:16:50)
+2026-05-26T03:24:25.764029606Z     at node_modules/express/index.js (file:///opt/render/project/src/dist/index.js:23885:23)
+2026-05-26T03:24:25.764034026Z     at __require3 (file:///opt/render/project/src/dist/index.js:16:50)
+2026-05-26T03:24:25.764039056Z     at file:///opt/render/project/src/dist/index.js:217036:31
+2026-05-26T03:24:25.764043256Z     at ModuleJob.run (node:internal/modules/esm/module_job:439:25)
+2026-05-26T03:24:25.764047356Z 
+2026-05-26T03:24:25.764051856Z Node.js v26.2.0
+2026-05-26T03:24:27.697130269Z ==> Exited with status 1
+2026-05-26T03:24:27.700078584Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys

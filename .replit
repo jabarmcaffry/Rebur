@@ -1,4 +1,4 @@
-modules = ["nodejs-18", "web"]
+modules = ["web", "nodejs-20"]
 [agent]
 expertMode = true
 stack = "GAMESTACK_JS"
@@ -22,13 +22,13 @@ args = "Start application"
 name = "Start application"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow]]
 name = "Install dep"
@@ -42,6 +42,10 @@ args = "npm audit fix —force"
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 24678
+externalPort = 3001
 
 [deployment]
 deploymentTarget = "autoscale"
