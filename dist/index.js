@@ -2584,8 +2584,28 @@ function serveStatic(app2) {
       `Could not find the build directory: ${distPath}, make sure to build the client first`
     );
   }
-  app2.use(express2.static(distPath));
+  app2.use(
+    "/assets",
+    express2.static(path4.join(distPath, "assets"), {
+      maxAge: "1y",
+      immutable: true
+    })
+  );
+  app2.use(
+    express2.static(distPath, {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Pragma", "no-cache");
+          res.setHeader("Expires", "0");
+        }
+      }
+    })
+  );
   app2.use("*", (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.sendFile(path4.resolve(distPath, "index.html"));
   });
 }
