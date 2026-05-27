@@ -5,6 +5,16 @@
 [build.environment]
   NODE_VERSION = "20"
 
+# Proxy every /api/* call to the Render backend.
+# The browser sees a same-origin request so there is NO CORS at all.
+# This rule must come BEFORE the SPA catch-all below.
+[[redirects]]
+  from = "/api/*"
+  to = "https://rebur.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# SPA fallback — all non-file, non-api paths serve index.html
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -1,12 +1,11 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-// When the frontend is deployed to Netlify and the API lives on Render,
-// set VITE_API_URL=https://your-api.onrender.com in Netlify env vars.
-// Leave unset (or empty) for local dev / same-origin deployments.
-export const API_BASE: string =
-  typeof import.meta !== "undefined"
-    ? (import.meta.env?.VITE_API_URL ?? "").replace(/\/$/, "")
-    : "";
+// All API calls use relative paths (/api/...).
+// In production on Netlify, these are proxied to the Render backend
+// by the [[redirects]] rule in netlify.toml — the browser never makes
+// a cross-origin request, so there are zero CORS issues.
+// In local dev the Vite dev server and Express run on the same port.
+export const API_BASE = "";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -25,9 +24,7 @@ export async function apiRequest(
   if (data) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`;
-
-  const res = await fetch(fullUrl, {
+  const res = await fetch(url, {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
@@ -44,12 +41,11 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const path = queryKey.join("/") as string;
-    const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
     const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const res = await fetch(url, { headers });
+    const res = await fetch(path, { headers });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
