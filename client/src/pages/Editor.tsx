@@ -115,7 +115,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Every frame (update event)",
-    code: `runService.update.on((dt) => {\n  const cube = scene.Cube;\n  if (cube) cube.rotation.y += dt;\n});\n`,
+    code: `runService.update.on((dt) => {\n  const cube = Scene.Cube;\n  if (cube) cube.rotation.y += dt;\n});\n`,
   },
   {
     label: "Repeat every N seconds",
@@ -131,11 +131,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "On object touched",
-    code: `const cube = scene.Cube;\ncube.on("touched", (other) => {\n  log("touched by", other.username || other.name);\n});\ncube.on("untouched", () => log("no longer touching"));\n`,
+    code: `const cube = Scene.Cube;\ncube.on("touched", (other) => {\n  log("touched by", other.username || other.name);\n});\ncube.on("untouched", () => log("no longer touching"));\n`,
   },
   {
     label: "On object clicked",
-    code: `const cube = scene.Cube;\ncube.on("clicked", () => {\n  log("you clicked the cube");\n  cube.color = "#ff4444";\n});\n`,
+    code: `const cube = Scene.Cube;\ncube.on("clicked", () => {\n  log("you clicked the cube");\n  cube.color = "#ff4444";\n});\n`,
   },
   {
     label: "On any 3D click (mouse)",
@@ -504,6 +504,13 @@ export default function EditorPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/games", gameId, "objects"] });
     },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to update object",
+        description: error?.message ?? "Unknown error",
+        variant: "destructive",
+      });
+    },
   });
 
   const deleteObjectMutation = useMutation({
@@ -598,15 +605,29 @@ export default function EditorPage() {
       formData.append("type", "model");
       const res = await fetch("/api/assets/upload", {
         method: "POST",
-        headers: { Authorization: "Bearer testtoken" },
         body: formData,
       });
       if (res.ok) {
         const asset = await res.json();
         fileUrl = asset.fileUrl as string;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast({
+          title: "Upload failed",
+          description: err.message ?? `Server returned ${res.status}`,
+          variant: "destructive",
+        });
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
       }
-    } catch {
-      // Fall through — we'll create without a URL (placeholder box)
+    } catch (err: any) {
+      toast({
+        title: "Upload error",
+        description: err?.message ?? "Network error",
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
     }
     
     // Create a new model object in the workspace
@@ -633,8 +654,8 @@ export default function EditorPage() {
     } as Partial<GameObject>);
     
     toast({
-      title: fileUrl ? "Model imported" : "Model added (no preview)",
-      description: fileUrl ? `${file.name} added to Workspace` : "Upload failed — showing placeholder",
+      title: "Model imported",
+      description: `${file.name} added to Scene`,
     });
     
     // Reset file input
@@ -645,7 +666,7 @@ export default function EditorPage() {
   const renderableObjects = useMemo(
     () => objects.filter((o) => {
       const c = o.container ?? "Workspace";
-      return c === "Workspace" || c === "Lighting";
+      return c === "Workspace" || c === "Scene" || c === "Lighting";
     }),
     [objects]
   );
@@ -1988,6 +2009,7 @@ export default function EditorPage() {
           scripts={scripts}
           username={username}
           gameId={gameId}
+          userId={(user as any)?.id ?? (user as any)?.claims?.sub}
           onExit={handlePlayExit}
         />
       )}

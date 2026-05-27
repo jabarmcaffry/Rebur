@@ -135,7 +135,8 @@ export class GameRoom {
 
     for (const o of objects) {
       const c = o.container ?? "Workspace";
-      if (c !== "Workspace" && c !== "") continue;
+      // "Scene" is the user-facing name; "Workspace" is the internal DB value
+      if (c !== "Workspace" && c !== "Scene" && c !== "") continue;
       if (o.type === "light" || o.type === "folder") continue;
 
       const anchored = o.properties?.anchored !== false;

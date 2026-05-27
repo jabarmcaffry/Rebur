@@ -85,11 +85,14 @@ export class RenderClient {
   private _camY = 0;
   private _sprint = false;
   
-  constructor(gameId: string, username: string, colors: Record<string, string> = {}) {
+  private userId: string | undefined;
+
+  constructor(gameId: string, username: string, colors: Record<string, string> = {}, userId?: string) {
     this.sessionId = `game-${gameId}`;
     this.gameId = gameId;
     this.username = username;
     this.colors = colors;
+    this.userId = userId;
   }
   
   // ── Connection ──────────────────────────────────────────────────────────────
@@ -107,6 +110,7 @@ export class RenderClient {
           gameId: this.gameId,
           playerName: this.username,
           colors: this.colors,
+          userId: this.userId,
         });
         // Send inputs at 20 Hz to match server tick rate
         this.inputTimer = setInterval(() => this._sendInput(), 50);

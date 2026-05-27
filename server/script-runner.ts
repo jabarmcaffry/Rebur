@@ -94,12 +94,8 @@ export class ScriptRunner {
     const playersProxy   = this._buildPlayers();
 
     const ctx = createContext({
-      // "scene" / "Scene" are the canonical names. Workspace kept only for
-      // backwards compat with games saved before the rename — remove after
-      // a deprecation window.
-      scene: workspaceProxy,
       Scene: workspaceProxy,
-      players:   playersProxy,
+      Players: playersProxy,
       game: {
         on: (event: string, fn: EventHandler) => {
           const key = event.toLowerCase();

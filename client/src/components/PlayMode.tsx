@@ -31,12 +31,14 @@ export default function PlayMode({
   scripts,
   username,
   gameId,
+  userId,
   onExit,
 }: {
   objects: GameObject[];
   scripts: Script[];
   username: string;
   gameId: string;
+  userId?: string;
   onExit: (logs: string[]) => void;
 }) {
   // Get avatar colors
@@ -48,8 +50,8 @@ export default function PlayMode({
       shirtColor: avatarCfg.shirtColor,
       skinColor: avatarCfg.skinColor,
       pantsColor: avatarCfg.pantsColor,
-    });
-  }, [gameId, username, avatarCfg]);
+    }, userId);
+  }, [gameId, username, avatarCfg, userId]);
 
   // State for rendering
   const [renderObjects, setRenderObjects] = useState<RenderObject[]>([]);
@@ -614,7 +616,14 @@ export default function PlayMode({
             <div className="p-1.5 space-y-0.5 max-h-60 overflow-y-auto">
               {/* Local player — always at top */}
               <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/10 border border-white/15">
-                <div className="w-2 h-2 rounded-full bg-neutral-300 shrink-0" />
+                <svg width="22" height="22" viewBox="0 0 40 40" className="shrink-0" style={{ borderRadius: 4 }}>
+                  <rect x="6" y="24" width="28" height="16" rx="4" fill={avatarCfg.shirtColor} />
+                  <rect x="17" y="20" width="6" height="6" fill={avatarCfg.skinColor} />
+                  <circle cx="20" cy="13" r="9" fill={avatarCfg.skinColor} />
+                  <circle cx="16.5" cy="12" r="1.5" fill="#2d1a0f" />
+                  <circle cx="23.5" cy="12" r="1.5" fill="#2d1a0f" />
+                  <path d="M15.5 17 Q20 21 24.5 17" stroke="#2d1a0f" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+                </svg>
                 <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
                 <span className="text-white/40 text-[10px] tabular-nums">{Math.round(player.health)}</span>
                 <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
@@ -622,7 +631,14 @@ export default function PlayMode({
               {/* Remote players */}
               {renderPlayers.map((rp) => (
                 <div key={rp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
-                  <div className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                  <svg width="22" height="22" viewBox="0 0 40 40" className="shrink-0" style={{ borderRadius: 4 }}>
+                    <rect x="6" y="24" width="28" height="16" rx="4" fill={rp.colors?.shirt ?? "#3b82f6"} />
+                    <rect x="17" y="20" width="6" height="6" fill={rp.colors?.skin ?? "#d4a574"} />
+                    <circle cx="20" cy="13" r="9" fill={rp.colors?.skin ?? "#d4a574"} />
+                    <circle cx="16.5" cy="12" r="1.5" fill="#2d1a0f" />
+                    <circle cx="23.5" cy="12" r="1.5" fill="#2d1a0f" />
+                    <path d="M15.5 17 Q20 21 24.5 17" stroke="#2d1a0f" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+                  </svg>
                   <span className="text-white/80 text-xs flex-1 truncate">{rp.name}</span>
                 </div>
               ))}

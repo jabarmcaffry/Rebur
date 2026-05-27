@@ -147,12 +147,12 @@ const COMPLETIONS: CompletionDef[] = [
   },
 
   // ─── Containers ─────────────────────────────────────────────────────────
-  { label: "scene", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Live 3D world objects (the Scene container). Rendered and simulated.", insert: "scene" },
-  { label: "lighting", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Lights and atmosphere. Rendered but not simulated.", insert: "lighting" },
-  { label: "players", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Player avatars and per-player data. Contains active players at runtime.", insert: "players" },
-  { label: "replicatedStorage", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Templates and ModuleScripts. Not rendered — use spawn() to clone into Workspace.", insert: "replicatedStorage" },
-  { label: "serverScriptService", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Server-authoritative scripts. Not rendered.", insert: "serverScriptService" },
-  { label: "starterPlayer", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Scripts and objects cloned to each player on join.", insert: "starterPlayer" },
+  { label: "Scene", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Live 3D world objects (the Scene container). Rendered and simulated.", insert: "Scene" },
+  { label: "Players", kind: K.Variable, detail: "Record<string, RuntimePlayerObject>", doc: "Active player data — position, health, colors, etc.", insert: "Players" },
+  { label: "Lighting", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Lights and atmosphere. Rendered but not simulated.", insert: "Lighting" },
+  { label: "ReplicatedStorage", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Templates and ModuleScripts. Not rendered — use spawn() to clone into Workspace.", insert: "ReplicatedStorage" },
+  { label: "ServerScriptService", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Server-authoritative scripts. Not rendered.", insert: "ServerScriptService" },
+  { label: "StarterPlayer", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Scripts and objects cloned to each player on join.", insert: "StarterPlayer" },
 
   // ─── Player ─────────────────────────────────────────────────────────────
   { label: "player", kind: K.Variable, detail: "RuntimePlayer", doc: "The local player object.", insert: "player" },

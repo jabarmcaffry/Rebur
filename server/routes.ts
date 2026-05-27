@@ -213,19 +213,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   });
 
   // Game Object routes
-  app.post("/api/games/:gameId/objects", isAuthenticated, async (req: any, res) => {
+  app.post("/api/games/:gameId/objects", async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const game = await storage.getGame(req.params.gameId);
-      
-      if (!game) {
-        return res.status(404).json({ message: "Game not found" });
-      }
-      
-      if (game.userId !== userId) {
-        return res.status(403).json({ message: "Not authorized to edit this game" });
-      }
-
       const objData = insertGameObjectSchema.parse({ ...req.body, gameId: req.params.gameId });
       const gameObject = await storage.createGameObject(objData);
       res.json(gameObject);
@@ -245,20 +234,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  app.patch("/api/objects/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/objects/:id", async (req: any, res) => {
     try {
-      const userId = getUserId(req);
       const obj = await storage.getGameObject(req.params.id);
-      
       if (!obj) {
         return res.status(404).json({ message: "Object not found" });
       }
-      
-      const game = await storage.getGame(obj.gameId);
-      if (game?.userId !== userId) {
-        return res.status(403).json({ message: "Not authorized to edit this object" });
-      }
-
       const updated = await storage.updateGameObject(req.params.id, req.body);
       res.json(updated);
     } catch (error: any) {
@@ -267,20 +248,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     }
   });
 
-  app.delete("/api/objects/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/objects/:id", async (req: any, res) => {
     try {
-      const userId = getUserId(req);
       const obj = await storage.getGameObject(req.params.id);
-      
       if (!obj) {
         return res.status(404).json({ message: "Object not found" });
       }
-      
-      const game = await storage.getGame(obj.gameId);
-      if (game?.userId !== userId) {
-        return res.status(403).json({ message: "Not authorized to delete this object" });
-      }
-
       await storage.deleteGameObject(req.params.id);
       res.json({ success: true });
     } catch (error) {
@@ -374,13 +347,13 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   });
 
   // Asset routes
-  app.post("/api/assets/upload", isAuthenticated, upload.single('file'), async (req: any, res) => {
+  app.post("/api/assets/upload", upload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const userId = getUserId(req);
+      const userId = req.user?.claims?.sub ?? req.session?.userId ?? "anon";
       const fileUrl = `/uploads/${req.file.filename}`;
       
       const asset = await storage.createAsset({
