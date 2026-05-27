@@ -169,6 +169,8 @@ export class GameRoom {
         scaleX: sx, scaleY: sy, scaleZ: sz,
         color: dobj.color, visible: true, anchored,
         velX: 0, velY: 0, velZ: 0,
+        transparency: o.properties?.transparency ?? 0,
+        canCollide: o.properties?.canCollide !== false,
       });
 
       if (anchored) {
@@ -269,6 +271,7 @@ export class GameRoom {
           obj.x     = so.positionX; obj.y     = so.positionY; obj.z     = so.positionZ;
           obj.rotX  = so.rotationX; obj.rotY  = so.rotationY; obj.rotZ  = so.rotationZ;
           obj.color = so.color;     obj.visible = so.visible;
+          obj.transparency = so.transparency ?? obj.transparency;
           // Allow scripts to directly set velocity on dynamic objects
           if (!obj.anchored) {
             obj.vx = so.velX; obj.vy = so.velY; obj.vz = so.velZ;
@@ -356,6 +359,7 @@ export class GameRoom {
       so.positionX = obj.x; so.positionY = obj.y; so.positionZ = obj.z;
       so.rotationX = obj.rotX; so.rotationY = obj.rotY; so.rotationZ = obj.rotZ;
       so.color = obj.color;   so.visible = obj.visible;
+      so.transparency = obj.transparency ?? 0;
       if (!obj.anchored) { so.velX = obj.vx; so.velY = obj.vy; so.velZ = obj.vz; }
     }
 

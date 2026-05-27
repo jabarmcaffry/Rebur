@@ -14,6 +14,7 @@ import MessagesPage from "@/pages/MessagesPage";
 import AlertsPage from "@/pages/AlertsPage";
 import EditorPage from "@/pages/Editor";
 import PlayPage from "@/pages/PlayPage";
+import ProfilePage from "@/pages/Profile";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -51,6 +52,12 @@ function Router() {
       </Route>
       <Route path="/editor/:gameId">
         <ProtectedRoute component={EditorPage} />
+      </Route>
+      <Route path="/profile/:userId">
+        <ProtectedRoute component={ProfilePage} />
+      </Route>
+      <Route path="/profile">
+        <ProtectedRoute component={ProfilePage} />
       </Route>
       {/* Legacy redirects */}
       <Route path="/dashboard">

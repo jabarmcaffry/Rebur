@@ -151,13 +151,14 @@ export default function HomePage() {
       {/* Welcome section */}
       <div className="px-4 mt-4 mb-6 flex items-center gap-4">
         <div className="relative shrink-0">
-          <div className="w-[72px] h-[72px] rounded-full border-2 border-[#333] overflow-hidden">
+          <a href="/profile" className="block w-[72px] h-[72px] rounded-full border-2 border-[#333] overflow-hidden hover:border-blue-500 transition-colors">
             <AvatarPortrait
               skinColor={avatarCfg.skinColor}
               shirtColor={avatarCfg.shirtColor}
+              pantsColor={avatarCfg.pantsColor}
               size={72}
             />
-          </div>
+          </a>
         </div>
         <div>
           <p className="text-xs uppercase tracking-[0.12em] text-gray-400 font-semibold mb-0.5">Welcome back</p>

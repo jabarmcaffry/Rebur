@@ -353,7 +353,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const userId = req.user?.claims?.sub ?? req.session?.userId ?? "anon";
+      const userId = req.user?.claims?.sub ?? req.session?.userId ?? null;
       const fileUrl = `/uploads/${req.file.filename}`;
       
       const asset = await storage.createAsset({
