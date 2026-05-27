@@ -4,7 +4,7 @@ import * as schema from "@shared/schema";
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
-    "DATABASE_URL must be set. Add your Render.com PostgreSQL connection string.",
+    "DATABASE_URL must be set. Add your Neon (or other PostgreSQL) connection string in the Render dashboard under Environment Variables.",
   );
 }
 
