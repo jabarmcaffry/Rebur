@@ -16,7 +16,9 @@ export function useAuth() {
     if (json.token) {
       localStorage.setItem("auth_token", json.token);
     }
-    await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    // Fire-and-forget — don't await so a background refetch failure
+    // never causes the login itself to appear as "failed".
+    queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     return json;
   };
 
@@ -26,7 +28,8 @@ export function useAuth() {
     if (json.token) {
       localStorage.setItem("auth_token", json.token);
     }
-    await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    // Fire-and-forget — same reason as login above.
+    queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
     return json;
   };
 

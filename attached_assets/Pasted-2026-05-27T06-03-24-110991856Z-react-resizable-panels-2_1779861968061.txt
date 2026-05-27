@@ -1,0 +1,50 @@
+2026-05-27T06:03:24.110991856Z + react-resizable-panels@2.1.7
+2026-05-27T06:03:24.110994326Z + recharts@2.15.2
+2026-05-27T06:03:24.110996786Z + tailwind-merge@2.6.0
+2026-05-27T06:03:24.110999286Z + tailwindcss-animate@1.0.7
+2026-05-27T06:03:24.111001787Z + three@0.160.0
+2026-05-27T06:03:24.111004267Z + tw-animate-css@1.2.5
+2026-05-27T06:03:24.111006727Z + uuid@14.0.0
+2026-05-27T06:03:24.111009196Z + vaul@1.1.2
+2026-05-27T06:03:24.111011736Z + wouter@3.3.5
+2026-05-27T06:03:24.111014197Z + ws@8.18.0
+2026-05-27T06:03:24.111016647Z + zod@3.24.2
+2026-05-27T06:03:24.111019097Z + zod-validation-error@3.4.0
+2026-05-27T06:03:24.111021517Z 
+2026-05-27T06:03:24.111024027Z 596 packages installed [4.85s]
+2026-05-27T06:03:30.715225869Z ==> Uploading build...
+2026-05-27T06:03:45.512769149Z ==> Uploaded in 9.0s. Compression took 5.8s
+2026-05-27T06:03:45.561210181Z ==> Build successful 🎉
+2026-05-27T06:03:48.488340062Z ==> Deploying...
+2026-05-27T06:03:48.556676731Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-05-27T06:04:04.081492117Z ==> Using Bun version 1.3.4 (default)
+2026-05-27T06:04:04.081506888Z ==> Docs on specifying a Bun version: https://render.com/docs/bun-version
+2026-05-27T06:04:10.662124923Z ==> Running 'bun run start'
+2026-05-27T06:04:10.793854907Z $ NODE_ENV=production node dist/index.cjs
+2026-05-27T06:04:12.466295925Z 6:04:12 AM [express] using HTTP
+2026-05-27T06:04:12.472630734Z 6:04:12 AM [express] serving on port 10000
+2026-05-27T06:04:19.79581704Z ==> Your service is live 🎉
+2026-05-27T06:04:19.978425518Z ==> 
+2026-05-27T06:04:19.988366071Z ==> ///////////////////////////////////////////////////////////
+2026-05-27T06:04:19.993668708Z ==> 
+2026-05-27T06:04:19.999237257Z ==> Available at your primary URL https://rebur.onrender.com
+2026-05-27T06:04:20.00192511Z ==> 
+2026-05-27T06:04:20.004743565Z ==> ///////////////////////////////////////////////////////////
+2026-05-27T06:04:20.930557529Z (node:93) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+2026-05-27T06:04:20.93057846Z In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+2026-05-27T06:04:20.9305832Z 
+2026-05-27T06:04:20.930587831Z To prepare for this change:
+2026-05-27T06:04:20.930592391Z - If you want the current behavior, explicitly use 'sslmode=verify-full'
+2026-05-27T06:04:20.930596511Z - If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+2026-05-27T06:04:20.930600151Z 
+2026-05-27T06:04:20.930604591Z See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+2026-05-27T06:04:20.930608432Z (Use `node --trace-warnings ...` to show where the warning was created)
+2026-05-27T06:04:22.109783122Z 6:04:22 AM [express] GET /api/auth/user 304 in 1186ms :: {"id":"180b7412-e369-4b62-8ca2-6b477578e5e3…
+2026-05-27T06:04:22.470870968Z 6:04:22 AM [express] GET /api/games 304 in 81ms :: [{"id":"54gttle3mplx7mz5","userId":"180b7412-e369…
+2026-05-27T06:04:32.842351489Z 6:04:32 AM [express] GET /api/auth/user 401 in 0ms :: {"message":"Not authenticated"}
+2026-05-27T06:04:43.083021821Z [v0] Login attempt for: jabarmcaffry@gmail.com
+2026-05-27T06:04:43.08352229Z [v0] Looking up user...
+2026-05-27T06:04:43.637880089Z [v0] User lookup result: 180b7412-e369-4b62-8ca2-6b477578e5e3
+2026-05-27T06:04:43.656028389Z [v0] Looking up password hash for user: 180b7412-e369-4b62-8ca2-6b477578e5e3
+2026-05-27T06:04:43.705500475Z [v0] Password record found: true has hash: true
+2026-05-27T06:04:44.363348075Z 6:04:44 AM [express] POST /api/login 200 in 1280ms :: {"success":true,"user":{"id":"180b7412-e369-4b…

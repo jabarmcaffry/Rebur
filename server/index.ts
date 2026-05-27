@@ -9,12 +9,15 @@ process.env.NODE_ENV = process.env.NODE_ENV || "development";
 
 const app = express();
 
-// CORS — open to all origins because auth is Bearer-token based (no cookies).
-// This lets the Netlify frontend call this Render API without any origin
-// mismatch errors, regardless of custom domains or www/non-www variants.
+// CORS — reflects the requesting origin so it works with every domain
+// (www or non-www, netlify.app subdomains, custom domains) and with both
+// credentialed and non-credentialed fetches.
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  const origin = req.headers.origin;
+  res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
