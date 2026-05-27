@@ -102,11 +102,12 @@ app.use((req, res, next) => {
     httpServer.on("error", reject);
   });
 
-  // importantly only setup vite in development after the server has been bound
-  // so HMR can infer the correct address and port for the websocket URL.
+  // In API-only mode (Render deployment with Netlify serving the frontend)
+  // skip static file serving entirely — just run as a pure API server.
+  // Set API_ONLY=true in Render env vars to enable this mode.
   if (app.get("env") === "development") {
     await setupVite(app, httpServer);
-  } else {
+  } else if (!process.env.API_ONLY) {
     serveStatic(app);
   }
 })();
