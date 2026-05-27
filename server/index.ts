@@ -1,5 +1,4 @@
 import express, { type Request, Response, NextFunction } from "express";
-import cors from "cors";
 import { createServer } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -10,18 +9,19 @@ process.env.NODE_ENV = process.env.NODE_ENV || "development";
 
 const app = express();
 
-// CORS — allows the Netlify frontend to reach this API on Render.
-// Set CLIENT_ORIGIN=https://your-app.netlify.app in Render env vars.
-// In development (same origin) this is a no-op.
-const clientOrigin = process.env.CLIENT_ORIGIN;
-app.use(
-  cors({
-    origin: clientOrigin
-      ? clientOrigin.split(",").map((o) => o.trim())
-      : true,
-    credentials: true,
-  })
-);
+// CORS — open to all origins because auth is Bearer-token based (no cookies).
+// This lets the Netlify frontend call this Render API without any origin
+// mismatch errors, regardless of custom domains or www/non-www variants.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
