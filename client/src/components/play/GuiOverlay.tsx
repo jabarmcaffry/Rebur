@@ -14,7 +14,9 @@ export default function GuiOverlay({
   if (gui.length === 0) return null;
 
   return (
-    <div className="absolute inset-0 z-10 pointer-events-none" data-testid="gui-overlay">
+    // Start below the engine top-bar (≈48 px) so game-created UI elements
+    // don't overlap the menu, chat and leaderboard buttons (z-50).
+    <div className="absolute inset-x-0 bottom-0 z-10 pointer-events-none" style={{ top: "48px" }} data-testid="gui-overlay">
       {gui.map((el) => {
         if (!el.visible) return null;
 

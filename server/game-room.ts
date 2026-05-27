@@ -85,6 +85,30 @@ export class GameRoom {
     return { ...this.spawnPoint };
   }
 
+  /** Returns a full RenderPlayer record for a player already added via addPlayer().
+   *  Used by the routes layer to broadcast proper data in `playerJoined` messages. */
+  getPlayerRender(id: string): object | null {
+    const p = this.players.get(id);
+    if (!p) return null;
+    return {
+      id: p.id,
+      name: p.name,
+      position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
+      rotation: { x: 0, y: p.rotY, z: 0 },
+      velocity: { x: p.vx, y: p.vy, z: p.vz },
+      onGround: p.onGround,
+      animation: p.animation,
+      health: p.health,
+      maxHealth: p.maxHealth,
+      colors: {
+        shirt: p.shirtColor ?? "#3b82f6",
+        skin: p.skinColor ?? "#d4a574",
+        pants: p.pantsColor ?? "#374151",
+      },
+      motors: {},
+    };
+  }
+
   // ── World setup ─────────────────────────────────────────────────────────────
 
   setObjects(objects: any[]) {

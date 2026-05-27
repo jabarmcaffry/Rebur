@@ -115,7 +115,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Every frame (update event)",
-    code: `runService.update.on((dt) => {\n  const cube = workspace.Cube;\n  if (cube) cube.rotation.y += dt;\n});\n`,
+    code: `runService.update.on((dt) => {\n  const cube = scene.Cube;\n  if (cube) cube.rotation.y += dt;\n});\n`,
   },
   {
     label: "Repeat every N seconds",
@@ -131,11 +131,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "On object touched",
-    code: `const cube = workspace.Cube;\ncube.on("touched", (other) => {\n  log("touched by", other.username || other.name);\n});\ncube.on("untouched", () => log("no longer touching"));\n`,
+    code: `const cube = scene.Cube;\ncube.on("touched", (other) => {\n  log("touched by", other.username || other.name);\n});\ncube.on("untouched", () => log("no longer touching"));\n`,
   },
   {
     label: "On object clicked",
-    code: `const cube = workspace.Cube;\ncube.on("clicked", () => {\n  log("you clicked the cube");\n  cube.color = "#ff4444";\n});\n`,
+    code: `const cube = scene.Cube;\ncube.on("clicked", () => {\n  log("you clicked the cube");\n  cube.color = "#ff4444";\n});\n`,
   },
   {
     label: "On any 3D click (mouse)",
@@ -151,11 +151,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Create an object",
-    code: `const enemy = create({\n  name: "Goblin",\n  container: "Workspace",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\n`,
+    code: `const enemy = create({\n  name: "Goblin",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\n`,
   },
   {
     label: "Make a planet (per-object gravity)",
-    code: `const planet = create({\n  name: "Planet",\n  container: "Workspace",\n  primitiveType: "sphere",\n  position: { x: 0, y: 5, z: -10 },\n  scale: { x: 6, y: 6, z: 6 },\n  color: "#4ade80",\n  gravity: { strength: 9.81, radius: 30 },\n});\n`,
+    code: `const planet = create({\n  name: "Planet",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 0, y: 5, z: -10 },\n  scale: { x: 6, y: 6, z: 6 },\n  color: "#4ade80",\n  gravity: { strength: 9.81, radius: 30 },\n});\n`,
   },
   {
     label: "Global state (multiplayer-ready)",
@@ -179,7 +179,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Inventory: pickup item",
-    code: `// Touch it to add it to your inventory.\nconst coin = create({\n  name: "Coin",\n  container: "Workspace",\n  primitiveType: "sphere",\n  position: { x: 2, y: 1, z: 0 },\n  color: "#fbbf24",\n  scale: { x: 0.4, y: 0.4, z: 0.4 },\n});\ncoin.isPickup = true;\ncoin.pickupName = "Coin";\ncoin.pickupData = { value: 10 };\n`,
+    code: `// Touch it to add it to your inventory.\nconst coin = create({\n  name: "Coin",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 2, y: 1, z: 0 },\n  color: "#fbbf24",\n  scale: { x: 0.4, y: 0.4, z: 0.4 },\n});\ncoin.isPickup = true;\ncoin.pickupName = "Coin";\ncoin.pickupData = { value: 10 };\n`,
   },
   {
     label: "Inventory: equip / drop",
@@ -187,7 +187,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Hold item in hand",
-    code: `const tool = create({\n  name: "Tool",\n  container: "Workspace",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\n// Choose the arm by choosing the hand slot. That arm raises automatically.\nplayer.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n\nkeyboard.onPress("f", () => {\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
+    code: `const tool = create({\n  name: "Tool",\n  container: "Scene",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\n// Choose the arm by choosing the hand slot. That arm raises automatically.\nplayer.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n\nkeyboard.onPress("f", () => {\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
   },
   {
     label: "Raycast forward",

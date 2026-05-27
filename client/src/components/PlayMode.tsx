@@ -89,6 +89,7 @@ export default function PlayMode({
 
   // Multiplayer connection state
   const [mpConnected, setMpConnected] = useState(false);
+  const [mpError, setMpError] = useState<{ code: string; message: string } | null>(null);
 
   // Input state
   const inputRef = useRef({ moveX: 0, moveZ: 0, jump: false, camY: 0 });
@@ -138,6 +139,10 @@ export default function PlayMode({
 
     renderClient.onDisconnected = () => {
       setMpConnected(false);
+    };
+
+    renderClient.onError = (err) => {
+      setMpError(err);
     };
 
     renderClient.connect();
@@ -327,6 +332,20 @@ export default function PlayMode({
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0a0a0a]" data-testid="play-mode-root">
+      {/* ── Already-in-game / connection error overlay ── */}
+      {mpError && (
+        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/80">
+          <div className="bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-8 max-w-sm w-full mx-4 flex flex-col items-center gap-4">
+            <div className="text-red-400 font-semibold text-lg text-center">{mpError.message}</div>
+            <button
+              className="mt-2 w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold transition-colors"
+              onClick={handleLeave}
+            >
+              Leave Game
+            </button>
+          </div>
+        </div>
+      )}
       {/* 3D or SVG canvas */}
       {webglAvailable ? (
         <PlayCanvasErrorBoundary
@@ -581,9 +600,9 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* ── LEADERBOARD (right side) ── */}
+      {/* ── LEADERBOARD (right side) — anchored just below the top bar ── */}
       {showLeaderboard && (
-        <div className="absolute top-12 right-2 z-50 w-56" style={{ top: showFps || player.health < player.maxHealth ? "90px" : "12px" }}>
+        <div className="absolute right-2 z-50 w-56" style={{ top: "48px" }}>
           <div className="rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl">
             <div className="px-3 py-2 border-b border-white/10 bg-neutral-800/70 flex items-center justify-between">
               <div className="flex items-center gap-2">

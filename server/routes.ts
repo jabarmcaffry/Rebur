@@ -523,6 +523,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   const clients = new Map<string, ConnectedClient>();
   // One GameRoom per session (keyed by sessionId)
   const gameRooms = new Map<string, GameRoom>();
+  // Single-session enforcement: maps authenticated userId → active clientId
+  // so the same account can only be in one game at a time.
+  const activeUserSessions = new Map<string, string>(); // userId → clientId
 
   function broadcast(sessionId: string, message: object, excludeClientId?: string) {
     const str = JSON.stringify(message);
@@ -576,6 +579,21 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           case 'join': {
             const { sessionId, userId, playerName, gameId, colors } = message;
 
+            // ── Single-session enforcement ─────────────────────────────────
+            // Authenticated users can only be in one game session at a time.
+            if (userId) {
+              const existingClientId = activeUserSessions.get(userId);
+              if (existingClientId && clients.has(existingClientId)) {
+                ws.send(JSON.stringify({
+                  type: "error",
+                  code: "ALREADY_IN_GAME",
+                  message: "You are already playing in another session. Leave that game first.",
+                }));
+                // Don't close — keep the WebSocket open so the client can show the error UI.
+                break;
+              }
+            }
+
             // Enforce maxPlayers limit for this game
             if (gameId) {
               const game = await storage.getGame(gameId);
@@ -621,11 +639,14 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
 
             clientId = player.id;
             clients.set(clientId, { ws, sessionId, playerId: player.id, gameId, userId });
+            if (userId) activeUserSessions.set(userId, clientId);
 
             room.addPlayer(player.id, finalName, sp.x, sp.y, sp.z, colors || {});
 
-            // Tell existing clients about the new player
-            broadcast(sessionId, { type: 'playerJoined', player: { ...player, playerName: finalName } }, clientId);
+            // Broadcast a complete RenderPlayer to existing clients so they can
+            // render the newcomer's avatar immediately without waiting for worldState.
+            const newPlayerRender = room.getPlayerRender(player.id);
+            broadcast(sessionId, { type: 'playerJoined', player: newPlayerRender ?? { id: player.id, name: finalName, position: { x: sp.x, y: sp.y, z: sp.z }, rotation: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, onGround: false, animation: "idle", health: 100, maxHealth: 100, colors: { shirt: colors?.shirtColor ?? "#3b82f6", skin: colors?.skinColor ?? "#d4a574", pants: colors?.pantsColor ?? "#374151" }, motors: {} } }, clientId);
 
             // Tell the new client their id/name + a full world snapshot
             const snapshot = room.getSnapshot(player.id);
@@ -728,6 +749,10 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         }
         await storage.removeSessionPlayer(client.playerId);
         broadcast(client.sessionId, { type: 'playerLeft', playerId: client.playerId });
+        // Release the single-session slot for this user
+        if (client.userId && activeUserSessions.get(client.userId) === clientId) {
+          activeUserSessions.delete(client.userId);
+        }
       }
       clients.delete(clientId);
     });

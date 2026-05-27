@@ -4,12 +4,12 @@
  * Scripts run exclusively on the server. The runner provides a Roblox-flavored
  * API that is fully sandboxed via Node.js `vm`:
  *
- *   workspace.PartName.Position = {X, Y, Z}
- *   workspace.PartName.Color    = "#ff0000"
- *   workspace.PartName.Velocity = {X, Y, Z}
- *   workspace.PartName.on("Touched", fn)   // player walked into this object
- *   workspace.PartName.on("Custom", fn)    // custom emitted events
- *   workspace.PartName.emit("Custom", ...) // fire a custom event
+ *   scene.PartName.Position = {X, Y, Z}
+ *   scene.PartName.Color    = "#ff0000"
+ *   scene.PartName.Velocity = {X, Y, Z}
+ *   scene.PartName.on("Touched", fn)   // player walked into this object
+ *   scene.PartName.on("Custom", fn)    // custom emitted events
+ *   scene.PartName.emit("Custom", ...) // fire a custom event
  *   game.on("tick",          fn)           // called every physics tick with dt
  *   game.on("playerAdded",   fn)           // fired when a player joins
  *   game.on("playerRemoving",fn)           // fired when a player leaves
@@ -94,9 +94,9 @@ export class ScriptRunner {
     const playersProxy   = this._buildPlayers();
 
     const ctx = createContext({
-      workspace: workspaceProxy,
-      Workspace: workspaceProxy,
-      // "Scene" is the user-facing alias for workspace in the editor UI
+      // "scene" / "Scene" are the canonical names. Workspace kept only for
+      // backwards compat with games saved before the rename — remove after
+      // a deprecation window.
       scene: workspaceProxy,
       Scene: workspaceProxy,
       players:   playersProxy,
@@ -326,7 +326,7 @@ export class ScriptRunner {
 
   private _buildWorkspace(log: (...a: any[]) => void): any {
     const runner = this;
-    // Use a JS Proxy so workspace.Part dynamically resolves at access time.
+    // Use a JS Proxy so scene.Part dynamically resolves at access time.
     // This means objects added after script load are visible, and accessing a
     // non-existent name returns a safe no-op proxy instead of undefined (which
     // would immediately throw "Cannot read properties of undefined").
@@ -346,7 +346,7 @@ export class ScriptRunner {
     });
   }
 
-  /** Safe proxy returned when a script accesses a workspace object that doesn't exist yet. */
+  /** Safe proxy returned when a script accesses a scene object that doesn't exist yet. */
   private _nullObjProxy(name: string, log: (...a: any[]) => void): any {
     let warned = false;
     const warn = () => {

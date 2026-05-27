@@ -8,13 +8,13 @@ export const DEFAULT_SCRIPT = `// Scripts run SERVER-SIDE — safe and secure.
 let angle = 0;
 game.on("tick", function(dt) {
   angle += dt * 2;
-  workspace.Part.Rotation = { X: 0, Y: angle, Z: 0 };
+  scene.Part.Rotation = { X: 0, Y: angle, Z: 0 };
 });
 
 // Example: react when a player touches a part
-workspace.Part.on("Touched", function(player) {
+scene.Part.on("Touched", function(player) {
   log("Touched by", player.Name);
-  workspace.Part.Color = "#ff0000";
+  scene.Part.Color = "#ff0000";
 });
 `;
 
@@ -69,7 +69,7 @@ This guide covers **everything** in the Rebur Engine: the editor interface, hier
 The editor is split into four main zones:
 
 ### Toolbar (top)
-- **Add Primitive**: Cube, Sphere, Cylinder, Plane — adds to Workspace
+- **Add Primitive**: Cube, Sphere, Cylinder, Plane — adds to Scene
 - **Add Light**: Adds a point light to Lighting
 - **Transform modes** (desktop): Translate / Rotate / Scale gizmo
 - **Play ▶**: Saves pending script edits, then launches Play Mode
@@ -108,7 +108,7 @@ The Hierarchy mirrors **Roblox Studio's Explorer** — every service container i
 ### Script types per container
 | Container | Default script type |
 |-----------|---------------------|
-| Workspace | Script |
+| Scene | Script |
 | Lighting | Script |
 | Players | LocalScript |
 | ServerScriptService | Script |
@@ -123,14 +123,14 @@ Every object **must** belong to exactly one container. Objects cannot exist outs
 
 | Container | Purpose | Rendered at runtime? |
 |-----------|---------|----------------------|
-| **Workspace** | Live 3D world — rendered, simulated, collidable | ✅ Yes |
+| **Scene** | Live 3D world — rendered, simulated, collidable | ✅ Yes |
 | **Lighting** | Lights and atmosphere — rendered but not physics-simulated | ✅ Yes |
 | **Players** | Player avatars. At runtime, the active player is listed here | ❌ No (virtual) |
 | **ServerScriptService** | Server-only scripts. Not rendered | ❌ No |
 | **StarterPlayer** | Scripts/objects cloned to each player on join | ❌ No |
 | **ReplicatedStorage** | Templates for \`spawn()\` + ModuleScripts | ❌ No |
 
-> **Runtime note**: When Play starts, the active player appears in both **Players** (as a virtual entry) and **Workspace** (as a physical avatar). This mirrors how Roblox works.
+> **Runtime note**: When Play starts, the active player appears in both **Players** (as a virtual entry) and **Scene** (as a physical avatar). This mirrors how Roblox works.
 
 ---
 
@@ -224,7 +224,7 @@ When a player joins a session:
 let t = 0;
 game.on("tick", function(dt) {
   t += dt;
-  workspace.Platform.Position = { X: 0, Y: Math.sin(t) * 3, Z: 0 };
+  scene.Platform.Position = { X: 0, Y: Math.sin(t) * 3, Z: 0 };
 });
 
 // ── Player lifecycle ─────────────────────────────────────────────────────────
@@ -237,9 +237,9 @@ game.on("playerRemoving", function(player) {
 });
 
 // ── Object events ────────────────────────────────────────────────────────────
-workspace.KillBrick.on("Touched", function(player) {
+scene.KillBrick.on("Touched", function(player) {
   log(player.Name, "hit the kill brick");
-  workspace.KillBrick.Color = "#ff0000";
+  scene.KillBrick.Color = "#ff0000";
 });
 \`\`\`
 
@@ -313,15 +313,15 @@ network.server.on("takeDamage", ({ amount }) => {
 
 ## Scripting — Quick Start
 
-Scripts run **server-side**. The body executes once when the session starts. Use \`game.on("tick", fn)\` for ongoing logic, \`workspace.Part.on("Touched", fn)\` for collision events.
+Scripts run **server-side**. The body executes once when the session starts. Use \`game.on("tick", fn)\` for ongoing logic, \`scene.Part.on("Touched", fn)\` for collision events.
 
 \`\`\`js
 // ── Oscillating platform ─────────────────────────────────────────────────────
 let t = 0;
 game.on("tick", function(dt) {
   t += dt;
-  // workspace.MovingPlatform must exist in the scene
-  workspace.MovingPlatform.Position = {
+  // scene.MovingPlatform must exist in the scene
+  scene.MovingPlatform.Position = {
     X: Math.sin(t) * 5,
     Y: 2,
     Z: 0,
@@ -329,9 +329,9 @@ game.on("tick", function(dt) {
 });
 
 // ── Color-change on touch ────────────────────────────────────────────────────
-workspace.TouchPad.on("Touched", function(player) {
+scene.TouchPad.on("Touched", function(player) {
   log(player.Name, "stepped on the pad!");
-  workspace.TouchPad.Color = "#22c55e";
+  scene.TouchPad.Color = "#22c55e";
 });
 
 // ── Welcome message when a player joins ──────────────────────────────────────
@@ -343,11 +343,11 @@ game.on("playerAdded", function(player) {
 let spin = 0;
 game.on("tick", function(dt) {
   spin += dt * 1.5;
-  workspace.SpinnerPart.Rotation = { X: 0, Y: spin, Z: 0 };
+  scene.SpinnerPart.Rotation = { X: 0, Y: spin, Z: 0 };
 });
 \`\`\`
 
-> **Object names matter.** \`workspace.MyPart\` refers to an object in the scene whose **Name** field (set in the properties panel) is exactly \`"MyPart"\`. If the name doesn't match, the property is \`undefined\` and will throw.
+> **Object names matter.** \`scene.MyPart\` refers to an object in the scene whose **Name** field (set in the properties panel) is exactly \`"MyPart"\`. If the name doesn't match, the property is \`undefined\` and will throw.
 
 ---
 
@@ -357,7 +357,7 @@ All of these are available directly — **no imports needed**. They are injected
 
 | Category | Globals |
 |----------|---------|
-| **Containers** | \`workspace\`, \`lighting\`, \`players\`, \`serverScriptService\`, \`starterPlayer\`, \`replicatedStorage\` |
+| **Containers** | \`scene\`, \`lighting\`, \`players\`, \`serverScriptService\`, \`starterPlayer\`, \`replicatedStorage\` |
 | **Objects** | \`create\`, \`destroy\`, \`spawn\`, \`find\` |
 | **Player** | \`player\` |
 | **Input** | \`keyboard\`, \`mouse\`, \`onKey\` |
@@ -413,18 +413,18 @@ exports.checkProximity = (obj, radius) => {
 
 \`\`\`js
 // Access by name — O(1) lookup, fastest
-const baseplate = workspace.Baseplate;
+const baseplate = scene.Baseplate;
 const sun = lighting.Sun;
 
 // Search all containers — O(n) across ALL objects, use sparingly
 const coin = find("Coin");
 
 // Prefer the container-specific access when you know where it lives:
-const coin2 = workspace.Coin;       // much faster than find("Coin")
+const coin2 = scene.Coin;       // much faster than find("Coin")
 
-// Iterate all Workspace objects
-for (const name in workspace) {
-  const obj = workspace[name];
+// Iterate all Scene objects
+for (const name in scene) {
+  const obj = scene[name];
   log(obj.name, obj.position.y);
 }
 \`\`\`
@@ -449,7 +449,7 @@ const box = create({
   color: "#ff8844",
   anchored: false,
   canCollide: true,
-  container: "Workspace",          // required — objects must be in a container
+  container: "Scene",          // required — objects must be in a container
   parent: null,                    // optional parent object
 });
 
@@ -460,7 +460,7 @@ const enemy = spawn("EnemyTemplate", {
 });
 
 // Find an existing object
-const obj = workspace.BasePlate;   // O(1) — preferred
+const obj = scene.BasePlate;   // O(1) — preferred
 const obj2 = find("BasePlate");    // O(n) — searches all containers
 
 // Destroy
@@ -468,7 +468,7 @@ destroy(box);        // by reference
 destroy("Box");      // by name — searches all containers
 \`\`\`
 
-> **Duplicate names**: If two objects share the same name in the same container, \`workspace.MyName\` returns the first match. Duplicate names won't cause an error but make lookups unpredictable. Keep names unique within each container.
+> **Duplicate names**: If two objects share the same name in the same container, \`scene.MyName\` returns the first match. Duplicate names won't cause an error but make lookups unpredictable. Keep names unique within each container.
 
 ---
 
@@ -526,8 +526,8 @@ Object events are registered with \`.on(event, fn)\` and fire from the server wh
 ### Syntax
 
 \`\`\`js
-// workspace.<ObjectName>.on("EventName", function(player) { ... })
-workspace.KillBrick.on("Touched", function(player) {
+// scene.<ObjectName>.on("EventName", function(player) { ... })
+scene.KillBrick.on("Touched", function(player) {
   log(player.Name, "touched KillBrick at", player.Position.X, player.Position.Y, player.Position.Z);
 });
 \`\`\`
@@ -545,12 +545,12 @@ Objects support a lightweight pub/sub pattern for script-to-script communication
 
 \`\`\`js
 // ── Fire a custom event on an object ────────────────────────────────────────
-workspace.Door.emit("Open", { requestedBy: "Admin" });
+scene.Door.emit("Open", { requestedBy: "Admin" });
 
 // ── Listen for that event (can be in a different script) ────────────────────
-workspace.Door.on("Open", function(data) {
+scene.Door.on("Open", function(data) {
   log("Door opened by", data.requestedBy);
-  workspace.Door.Position = { X: 0, Y: 5, Z: 0 }; // slide door up
+  scene.Door.Position = { X: 0, Y: 5, Z: 0 }; // slide door up
 });
 \`\`\`
 
@@ -558,8 +558,8 @@ workspace.Door.on("Open", function(data) {
 
 \`\`\`js
 // Kill brick — respawn player by sending them back to spawn
-workspace.KillBrick.on("Touched", function(player) {
-  workspace.KillBrick.Color = "#ff0000";
+scene.KillBrick.on("Touched", function(player) {
+  scene.KillBrick.Color = "#ff0000";
   // reset after 0.5 seconds using a tick counter
   let resetTimer = 0;
   const reset = function(dt) { /* handled by another listener */ };
@@ -568,15 +568,15 @@ workspace.KillBrick.on("Touched", function(player) {
 
 // Color-cycling touch pad
 let hue = 0;
-workspace.TouchPad.on("Touched", function(player) {
+scene.TouchPad.on("Touched", function(player) {
   hue = (hue + 60) % 360;
-  workspace.TouchPad.Color = "hsl(" + hue + ",80%,55%)";
+  scene.TouchPad.Color = "hsl(" + hue + ",80%,55%)";
   log(player.Name, "stepped on pad, hue now", hue);
 });
 
 // Switch that toggles a platform's anchoring (makes it fall)
-workspace.Switch.on("Touched", function(player) {
-  workspace.FallingPlatform.Anchored = false;
+scene.Switch.on("Touched", function(player) {
+  scene.FallingPlatform.Anchored = false;
   log(player.Name, "activated the switch!");
 });
 \`\`\`
@@ -1253,11 +1253,11 @@ const info = meta.get(enemy);  // undefined if enemy was garbage-collected
 ### Object lookup
 | Method | Speed | When to use |
 |--------|-------|-------------|
-| \`workspace.MyObject\` | O(1) — fastest | You know the container |
+| \`scene.MyObject\` | O(1) — fastest | You know the container |
 | \`find("MyObject")\` | O(n) — scans all containers | You don't know the container, or it might move |
 | \`tags.get("enemy")\` | O(1) snapshot | Querying groups of objects |
 
-> Prefer \`workspace.MyName\` over \`find("MyName")\` inside hot update loops.
+> Prefer \`scene.MyName\` over \`find("MyName")\` inside hot update loops.
 
 ### Unsubscribing listeners
 Every \`on()\` call adds an entry to an internal list. Objects that are destroyed clean up their own listeners automatically. However, for long-running scripts that attach and detach many listeners dynamically, store the unsubscribe function and call it when done:
@@ -1306,14 +1306,14 @@ All script errors appear in the in-game console (open via ☰ → Show Console):
 
 \`\`\`
 [ScriptName] Runtime error on line 12: Cannot read properties of null (reading 'color')
-Hint: 'workspace.Box' returned null — check the object name and container.
+Hint: 'scene.Box' returned null — check the object name and container.
 \`\`\`
 
 The hint tries to identify the likely cause. Common ones:
 
 | Error message | Likely cause | Fix |
 |--------------|-------------|-----|
-| \`Cannot read properties of null\` | \`workspace.X\` returned null — object doesn't exist or is in a different container | Check spelling, container, and that the object was created before the script ran |
+| \`Cannot read properties of null\` | \`scene.X\` returned null — object doesn't exist or is in a different container | Check spelling, container, and that the object was created before the script ran |
 | \`obj.emit("touched") blocked\` | Tried to emit a reserved event name | Use a different event name for custom events |
 | \`require("X") returned undefined\` | ModuleScript named "X" not found in ReplicatedStorage | Check the module name and container |
 | \`ReferenceError: X is not defined\` | Used a variable before declaring it, or shadowed a global | Declare variables with \`let\`/\`const\`, avoid naming them the same as engine globals |
@@ -1336,7 +1336,7 @@ if (hit) {
 
 ### touched never fires
 - Check that \`obj.canCollide\` is \`true\` on the object.
-- Objects in containers other than \`Workspace\` or \`Lighting\` are not physics-simulated.
+- Objects in containers other than \`Scene\` or \`Lighting\` are not physics-simulated.
 
 ### Shadowing engine globals
 \`\`\`js
@@ -1356,18 +1356,18 @@ obj.position.x = 10;  // force to target if needed
 \`\`\`
 
 ### Duplicate object names
-Creating two objects with the same name in the same container won't throw an error, but \`workspace.MyName\` will return only the first match. Use distinct names or use \`tags\` to group similar objects.
+Creating two objects with the same name in the same container won't throw an error, but \`scene.MyName\` will return only the first match. Use distinct names or use \`tags\` to group similar objects.
 
 \`\`\`js
-// ❌ Two coins with the same name — workspace.Coin only finds the first one
+// ❌ Two coins with the same name — scene.Coin only finds the first one
 create({ name: "Coin", ... });
 create({ name: "Coin", ... });
 
 // ✅ Unique names + tags
 create({ name: "Coin_1", ... });
 create({ name: "Coin_2", ... });
-tags.add(workspace.Coin_1, "coin");
-tags.add(workspace.Coin_2, "coin");
+tags.add(scene.Coin_1, "coin");
+tags.add(scene.Coin_2, "coin");
 // Then collect with: for (const c of tags.get("coin")) { ... }
 \`\`\`
 `;

@@ -147,7 +147,7 @@ const COMPLETIONS: CompletionDef[] = [
   },
 
   // ─── Containers ─────────────────────────────────────────────────────────
-  { label: "workspace", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Live 3D world objects. Rendered and simulated.", insert: "workspace" },
+  { label: "scene", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Live 3D world objects (the Scene container). Rendered and simulated.", insert: "scene" },
   { label: "lighting", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Lights and atmosphere. Rendered but not simulated.", insert: "lighting" },
   { label: "players", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Player avatars and per-player data. Contains active players at runtime.", insert: "players" },
   { label: "replicatedStorage", kind: K.Variable, detail: "Record<string, RuntimeObject>", doc: "Templates and ModuleScripts. Not rendered — use spawn() to clone into Workspace.", insert: "replicatedStorage" },
