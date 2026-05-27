@@ -31,7 +31,6 @@ export async function apiRequest(
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
   });
 
   await throwIfResNotOk(res);
@@ -50,7 +49,7 @@ export const getQueryFn: <T>(options: {
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const res = await fetch(url, { headers, credentials: "include" });
+    const res = await fetch(url, { headers });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
