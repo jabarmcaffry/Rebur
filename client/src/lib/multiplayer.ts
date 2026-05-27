@@ -71,8 +71,18 @@ export class MultiplayerManager {
 
   connect() {
     try {
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      this.ws = new WebSocket(`${proto}//${location.host}/ws`);
+      let wsUrl: string;
+      const apiBase: string =
+        typeof import.meta !== "undefined"
+          ? (import.meta.env?.VITE_API_URL ?? "").replace(/\/$/, "")
+          : "";
+      if (apiBase) {
+        wsUrl = apiBase.replace(/^http/, "ws") + "/ws";
+      } else {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        wsUrl = `${proto}//${location.host}/ws`;
+      }
+      this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
         this.connected = true;

@@ -18,7 +18,8 @@ import "./index.css";
 
   async function checkVersion() {
     try {
-      const res = await fetch("/api/version", { cache: "no-store" });
+      const apiBase = (import.meta.env?.VITE_API_URL ?? "").replace(/\/$/, "");
+      const res = await fetch(`${apiBase}/api/version`, { cache: "no-store" });
       if (!res.ok) return;
       const { buildId } = await res.json();
       if (buildId && buildId !== startingBuildId) {

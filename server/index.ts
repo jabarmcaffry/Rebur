@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { createServer } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -8,6 +9,20 @@ process.env.NODE_ENV = process.env.NODE_ENV || "development";
 // Server restart trigger
 
 const app = express();
+
+// CORS — allows the Netlify frontend to reach this API on Render.
+// Set CLIENT_ORIGIN=https://your-app.netlify.app in Render env vars.
+// In development (same origin) this is a no-op.
+const clientOrigin = process.env.CLIENT_ORIGIN;
+app.use(
+  cors({
+    origin: clientOrigin
+      ? clientOrigin.split(",").map((o) => o.trim())
+      : true,
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 

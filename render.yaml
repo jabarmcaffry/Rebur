@@ -4,7 +4,7 @@ services:
     runtime: node
     region: oregon
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: npm install && npm run build:server
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -16,6 +16,8 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         generateValue: true
+      - key: CLIENT_ORIGIN
+        value: https://your-app.netlify.app
 
 databases:
   - name: rebur-engine-db
