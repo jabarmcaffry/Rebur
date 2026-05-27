@@ -30,22 +30,13 @@ task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
 
-[[workflows.workflow]]
-name = "Install dep"
-mode = "sequential"
-author = 59858721
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npm audit fix —force"
-
 [[ports]]
 localPort = 5000
 externalPort = 80
 
 [[ports]]
 localPort = 24678
-externalPort = 3001
+externalPort = 3000
 
 [deployment]
 deploymentTarget = "autoscale"
