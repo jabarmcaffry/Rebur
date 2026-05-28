@@ -157,6 +157,9 @@ export class ScriptRunner {
   private logs: string[]   = [];
   private guiElements      = new Map<string, GuiElement>();
   private guiIdCounter     = 0;
+  // Per-player GUI: keyed by playerId
+  private playerGuiElements      = new Map<string, Map<string, GuiElement>>();
+  private playerGuiClickHandlers = new Map<string, Map<string, EventHandler>>();
 
   private timerQueue       = new Map<number, TimerEntry>();
   timerIdCounter           = 0;
@@ -444,9 +447,22 @@ export class ScriptRunner {
 
   drainLogs(): string[] { const l = [...this.logs]; this.logs = []; return l; }
   getGuiElements(): GuiElement[] { return Array.from(this.guiElements.values()); }
+  getGuiElementsForPlayer(playerId: string): GuiElement[] {
+    const global = Array.from(this.guiElements.values());
+    const perPlayer = Array.from(this.playerGuiElements.get(playerId)?.values() ?? []);
+    return [...global, ...perPlayer];
+  }
   fireGuiClick(elementId: string, player: ScriptPlayerState) {
+    // Check per-player handlers first, then global
+    const perPlayerHandlers = this.playerGuiClickHandlers.get(player.id);
+    const ph = perPlayerHandlers?.get(elementId);
+    if (ph) { try { ph(this._playerProxy(player)); } catch { /* isolate */ } return; }
     const h = this.guiClickHandlers.get(elementId);
     if (h) try { h(this._playerProxy(player)); } catch { /* isolate */ }
+  }
+  clearPlayerGui(playerId: string) {
+    this.playerGuiElements.delete(playerId);
+    this.playerGuiClickHandlers.delete(playerId);
   }
 
   // ── Drain queues (called by GameRoom each tick) ─────────────────────────────
@@ -614,6 +630,62 @@ export class ScriptRunner {
       respawn()           { mut().respawn=true; },
       Teleport(x:number,y:number,z:number){ mut().teleport={x,y,z}; },
       teleport(x:number,y:number,z:number){ mut().teleport={x,y,z}; },
+
+      // Per-player GUI — only this player sees these elements
+      gui: {
+        text(text: string, x: number, y: number, opts?: Partial<GuiElement>) {
+          const map = runner.playerGuiElements.get(p.id) ?? new Map<string, GuiElement>();
+          runner.playerGuiElements.set(p.id, map);
+          const id = `pg_${p.id}_${runner.guiIdCounter++}`;
+          map.set(id, { id, kind:"text", text, x, y, color:"#ffffff", fontSize:14, anchor:"topLeft", visible:true, ...opts });
+          return {
+            id,
+            update(c: Partial<GuiElement>) { const e = map.get(id); if (e) Object.assign(e, c); },
+            remove() { map.delete(id); },
+          };
+        },
+        button(text: string, x: number, y: number, onClick: EventHandler, opts?: Partial<GuiElement>) {
+          const map = runner.playerGuiElements.get(p.id) ?? new Map<string, GuiElement>();
+          runner.playerGuiElements.set(p.id, map);
+          const handlers = runner.playerGuiClickHandlers.get(p.id) ?? new Map<string, EventHandler>();
+          runner.playerGuiClickHandlers.set(p.id, handlers);
+          const id = `pg_${p.id}_${runner.guiIdCounter++}`;
+          map.set(id, { id, kind:"button", text, x, y, width:120, height:36, color:"#ffffff", backgroundColor:"#3b82f6", fontSize:14, anchor:"topLeft", visible:true, clickable:true, ...opts });
+          handlers.set(id, onClick);
+          return {
+            id,
+            update(c: Partial<GuiElement>) { const e = map.get(id); if (e) Object.assign(e, c); },
+            remove() { map.delete(id); handlers.delete(id); },
+          };
+        },
+        bar(x: number, y: number, value: number, maxValue: number, opts?: Partial<GuiElement>) {
+          const map = runner.playerGuiElements.get(p.id) ?? new Map<string, GuiElement>();
+          runner.playerGuiElements.set(p.id, map);
+          const id = `pg_${p.id}_${runner.guiIdCounter++}`;
+          map.set(id, { id, kind:"bar", x, y, width:200, height:14, value, maxValue, color:"#22c55e", backgroundColor:"#374151", anchor:"topLeft", visible:true, ...opts });
+          return {
+            id,
+            update(c: Partial<GuiElement>) { const e = map.get(id); if (e) Object.assign(e, c); },
+            setValue(v: number) { const e = map.get(id); if (e) e.value = v; },
+            remove() { map.delete(id); },
+          };
+        },
+        image(imageUrl: string, x: number, y: number, opts?: Partial<GuiElement>) {
+          const map = runner.playerGuiElements.get(p.id) ?? new Map<string, GuiElement>();
+          runner.playerGuiElements.set(p.id, map);
+          const id = `pg_${p.id}_${runner.guiIdCounter++}`;
+          map.set(id, { id, kind:"image", imageUrl, x, y, width:64, height:64, anchor:"topLeft", visible:true, ...opts });
+          return {
+            id,
+            update(c: Partial<GuiElement>) { const e = map.get(id); if (e) Object.assign(e, c); },
+            remove() { map.delete(id); },
+          };
+        },
+        clear() {
+          runner.playerGuiElements.get(p.id)?.clear();
+          runner.playerGuiClickHandlers.get(p.id)?.clear();
+        },
+      },
     };
   }
 }

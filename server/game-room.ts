@@ -90,7 +90,10 @@ export class GameRoom {
   private spawnPoint = { x: 0, y: 1.5, z: 0 };
   private objIdCounter = 0;
 
-  constructor(private readonly broadcastFn: (msg: object) => void) {}
+  constructor(
+    private readonly broadcastFn: (msg: object) => void,
+    private readonly sendToPlayerFn?: (playerId: string, msg: object) => void,
+  ) {}
 
   getSpawnPoint() { return { ...this.spawnPoint }; }
 
@@ -233,6 +236,7 @@ export class GameRoom {
     if (p) {
       this.scriptRunner?.firePlayerRemoving(this._makeScriptPlayer(p));
       (this.scriptRunner as any)?.players?.delete(id);
+      this.scriptRunner?.clearPlayerGui(id);
     }
     this.players.delete(id);
     for (const key of this.touchedPairs) {
@@ -517,25 +521,46 @@ export class GameRoom {
     this.tickNumber++;
     if (this.players.size === 0) return;
 
-    // ── Step 11: Broadcast worldState ─────────────────────────────────────────
-    const guiElements = this.scriptRunner?.getGuiElements() ?? [];
+    // ── Step 11: Broadcast worldState (per-player for GUI, shared for world) ──
+    const renderObjects  = Array.from(this.allObjs.values()).map(this._toRenderObj);
+    const renderPlayers  = Array.from(this.players.values()).map(this._toRenderPlayer);
+    const broadcastTime  = Date.now();
+    const tick           = this.tickNumber;
 
-    const state: RenderState = {
-      tick: this.tickNumber, serverTime: Date.now(),
-      objects: Array.from(this.allObjs.values()).map(this._toRenderObj),
-      players: Array.from(this.players.values()).map(this._toRenderPlayer),
-      gui: guiElements.map((g) => ({
-        id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
-        width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",
-        color: g.color ?? "#ffffff", fontSize: g.fontSize ?? 14,
-        backgroundColor: g.backgroundColor, imageUrl: g.imageUrl,
-        value: g.value, maxValue: g.maxValue,
-        visible: g.visible !== false, clickable: g.clickable,
-      })),
-      localPlayerId: null,
-    };
+    const toRenderGui = (g: any) => ({
+      id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
+      width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",
+      color: g.color ?? "#ffffff", fontSize: g.fontSize ?? 14,
+      backgroundColor: g.backgroundColor, imageUrl: g.imageUrl,
+      value: g.value, maxValue: g.maxValue,
+      visible: g.visible !== false, clickable: g.clickable,
+    });
 
-    this.broadcastFn({ type: "worldState", state });
+    if (this.sendToPlayerFn) {
+      // Per-player worldState: each player gets global gui + their own gui
+      for (const p of this.players.values()) {
+        const playerGui = this.scriptRunner?.getGuiElementsForPlayer(p.id) ?? this.scriptRunner?.getGuiElements() ?? [];
+        const state: RenderState = {
+          tick, serverTime: broadcastTime,
+          objects: renderObjects,
+          players: renderPlayers,
+          gui: playerGui.map(toRenderGui),
+          localPlayerId: p.id,
+        };
+        this.sendToPlayerFn(p.id, { type: "worldState", state });
+      }
+    } else {
+      // Fallback: broadcast same state to all (no per-player GUI)
+      const guiElements = this.scriptRunner?.getGuiElements() ?? [];
+      const state: RenderState = {
+        tick, serverTime: broadcastTime,
+        objects: renderObjects,
+        players: renderPlayers,
+        gui: guiElements.map(toRenderGui),
+        localPlayerId: null,
+      };
+      this.broadcastFn({ type: "worldState", state });
+    }
   }
 
   // ── Player death/respawn ──────────────────────────────────────────────────────
@@ -635,7 +660,7 @@ export class GameRoom {
   }
 
   getSnapshot(localPlayerId: string): RenderState {
-    const guiElements = this.scriptRunner?.getGuiElements() ?? [];
+    const guiElements = this.scriptRunner?.getGuiElementsForPlayer(localPlayerId) ?? this.scriptRunner?.getGuiElements() ?? [];
     return {
       tick: this.tickNumber, serverTime: Date.now(),
       objects: Array.from(this.allObjs.values()).map(this._toRenderObj),

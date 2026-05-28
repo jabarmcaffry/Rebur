@@ -515,10 +515,23 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     broadcast(sessionId, message, undefined);
   }
 
+  /** Send a message to a specific player by their playerId */
+  function sendToPlayer(playerId: string, msg: object) {
+    const str = JSON.stringify(msg);
+    clients.forEach((client) => {
+      if (client.playerId === playerId && client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(str);
+      }
+    });
+  }
+
   /** Ensure a GameRoom exists for the session and return it. */
   async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<GameRoom> {
     if (!gameRooms.has(sessionId)) {
-      const room = new GameRoom((msg) => broadcastAll(sessionId, msg));
+      const room = new GameRoom(
+        (msg) => broadcastAll(sessionId, msg),
+        (playerId, msg) => sendToPlayer(playerId, msg),
+      );
       if (gameId) {
         try {
           const objects = await storage.getGameObjects(gameId);

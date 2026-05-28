@@ -195,6 +195,31 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
 ];
 
+// Configure DRACO decoder so compressed GLBs load correctly
+useGLTF.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
+
+/** Per-model error boundary — catches bad GLBs and shows a wireframe placeholder */
+class ModelLoadError extends Component<
+  { children: ReactNode; position: [number,number,number]; scale: [number,number,number]; onClick: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) { console.warn("[Editor] model load failed:", err.message); }
+  render() {
+    if (this.state.hasError) {
+      const { position, scale, onClick } = this.props;
+      return (
+        <mesh position={position} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#ef4444" wireframe />
+        </mesh>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // GLTF model loader — uses useGLTF (must be a separate component for hook rules).
 // Auto-normalises the model so its longest axis = 1 unit, then applies the user's
 // scale on top — this prevents giant imports while keeping scale=1 meaningful.
@@ -313,14 +338,16 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
       );
     }
     return (
-      <Suspense fallback={
-        <mesh ref={ref as any} position={position} scale={scale}>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#666666" wireframe />
-        </mesh>
-      }>
-        <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
-      </Suspense>
+      <ModelLoadError position={position} scale={scale} onClick={onClick}>
+        <Suspense fallback={
+          <mesh ref={ref as any} position={position} scale={scale}>
+            <boxGeometry args={[1, 1, 1]} />
+            <meshStandardMaterial color="#666666" wireframe />
+          </mesh>
+        }>
+          <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
+        </Suspense>
+      </ModelLoadError>
     );
   }
 

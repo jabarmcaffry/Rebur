@@ -1,7 +1,32 @@
-import { Suspense, useMemo } from "react";
+import { Suspense, useMemo, Component, type ReactNode } from "react";
 import { useGLTF } from "@react-three/drei";
 import type { RenderObject } from "@shared/render-types";
 import * as THREE from "three";
+
+// Configure DRACO decoder so compressed GLBs load correctly
+useGLTF.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
+
+/** Error boundary that catches model-load failures and shows a placeholder box */
+class ModelErrorBoundary extends Component<
+  { children: ReactNode; position: [number,number,number]; rotation: [number,number,number]; scale: [number,number,number] },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) { console.warn("[Primitive] model load error:", err.message); }
+  render() {
+    if (this.state.hasError) {
+      const { position, rotation, scale } = this.props;
+      return (
+        <mesh position={position} rotation={rotation} scale={scale}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#ef4444" wireframe />
+        </mesh>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function ModelMesh({
   url, position, rotation, scale, onClick, modelScale = 1,
@@ -16,6 +41,16 @@ function ModelMesh({
   const { scene } = useGLTF(url);
   const cloned = useMemo(() => {
     const c = scene.clone(true);
+    // Ensure materials are preserved on clone
+    c.traverse((child: any) => {
+      if (child.isMesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map((m: THREE.Material) => m.clone());
+        } else {
+          child.material = child.material.clone();
+        }
+      }
+    });
     const box = new THREE.Box3().setFromObject(c);
     const size = new THREE.Vector3();
     box.getSize(size);
@@ -70,22 +105,24 @@ export default function Primitive({ obj }: { obj: RenderObject }) {
       );
     }
     return (
-      <Suspense
-        fallback={
-          <mesh position={position} rotation={rotation} scale={scale}>
-            <boxGeometry args={[1, 1, 1]} />
-            <meshStandardMaterial color="#888888" wireframe />
-          </mesh>
-        }
-      >
-        <ModelMesh
-          url={modelUrl}
-          position={position}
-          rotation={rotation}
-          scale={scale}
-          modelScale={obj.modelScale}
-        />
-      </Suspense>
+      <ModelErrorBoundary position={position} rotation={rotation} scale={scale}>
+        <Suspense
+          fallback={
+            <mesh position={position} rotation={rotation} scale={scale}>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshStandardMaterial color="#888888" wireframe />
+            </mesh>
+          }
+        >
+          <ModelMesh
+            url={modelUrl}
+            position={position}
+            rotation={rotation}
+            scale={scale}
+            modelScale={obj.modelScale}
+          />
+        </Suspense>
+      </ModelErrorBoundary>
     );
   }
 
