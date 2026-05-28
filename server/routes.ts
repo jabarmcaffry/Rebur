@@ -639,8 +639,19 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!client) break;
             const room = gameRooms.get(client.sessionId);
             if (!room) break;
-            const { moveX, moveZ, jump, rotY, camY } = message;
-            room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0);
+            const { moveX, moveZ, jump, rotY, camY, flyUp, flyDown, sprint } = message;
+            room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0, !!flyUp, !!flyDown, !!sprint);
+            break;
+          }
+
+          // ── CLICK3D (3D object click → fire obj.on("clicked")) ─────────────
+          case 'click3d': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            room.handleObjectClick(client.playerId, message.objectId ?? null);
             break;
           }
 

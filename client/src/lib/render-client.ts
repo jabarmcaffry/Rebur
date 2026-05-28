@@ -1,12 +1,13 @@
 /**
  * render-client.ts — Thin client for receiving and interpolating server state
- * 
+ *
  * This client contains NO game logic, physics, or scripting.
  * It only:
  *  1. Receives world state from the server
  *  2. Interpolates between states for smooth 60fps rendering
  *  3. Sends player inputs to the server
  *  4. Manages GUI click events
+ *  5. Auto-reconnects with exponential backoff (max 30s) after drops
  */
 
 import type {
@@ -30,7 +31,6 @@ function lerpVec3(a: Vec3, b: Vec3, t: number): Vec3 {
 }
 
 function lerpAngle(a: number, b: number, t: number): number {
-  // Handle angle wrapping for smooth rotation interpolation
   let diff = b - a;
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
@@ -44,15 +44,15 @@ export class RenderClient {
   readonly objects = new Map<string, RenderObject>();
   readonly players = new Map<string, RenderPlayer>();
   gui: RenderGuiElement[] = [];
-  
+
   localPlayerId: string | null = null;
   localPlayerName: string | null = null;
   connected = false;
-  
+
   // Lighting and camera from server
   lighting: RenderState["lighting"] = undefined;
   camera: RenderState["camera"] = undefined;
-  
+
   // Callbacks
   onPlayersChanged?: () => void;
   onObjectsChanged?: () => void;
@@ -63,20 +63,30 @@ export class RenderClient {
   onError?: (err: { code: string; message: string }) => void;
   onConnected?: () => void;
   onDisconnected?: () => void;
-  
+  /** Called when a reconnect attempt begins. arg = attempt number (1-based). */
+  onReconnecting?: (attempt: number) => void;
+
   // Interpolation state
   private prevState: RenderState | null = null;
   private nextState: RenderState | null = null;
   private stateReceivedAt = 0;
-  private readonly interpDelayMs = 100; // Render 100ms behind server for smoothness
-  
+  private readonly interpDelayMs = 100;
+
   // WebSocket
   private ws: WebSocket | null = null;
   private sessionId: string;
   private gameId: string;
   private username: string;
   private colors: Record<string, string>;
-  
+  private userId: string | undefined;
+
+  // Reconnection
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private intentionalDisconnect = false;
+  private readonly MIN_RECONNECT_MS = 500;
+  private readonly MAX_RECONNECT_MS = 30_000;
+
   // Input state
   private inputTimer: ReturnType<typeof setInterval> | null = null;
   private _moveX = 0;
@@ -84,8 +94,8 @@ export class RenderClient {
   private _jump = false;
   private _camY = 0;
   private _sprint = false;
-  
-  private userId: string | undefined;
+  private _flyUp = false;
+  private _flyDown = false;
 
   constructor(gameId: string, username: string, colors: Record<string, string> = {}, userId?: string) {
     this.sessionId = `game-${gameId}`;
@@ -94,10 +104,24 @@ export class RenderClient {
     this.colors = colors;
     this.userId = userId;
   }
-  
+
   // ── Connection ──────────────────────────────────────────────────────────────
-  
+
   connect() {
+    this.intentionalDisconnect = false;
+    this._openSocket();
+  }
+
+  disconnect() {
+    this.intentionalDisconnect = true;
+    this._clearReconnectTimer();
+    this._closeSocket();
+    this.objects.clear();
+    this.players.clear();
+    this.gui = [];
+  }
+
+  private _openSocket() {
     try {
       let wsUrl: string;
       const apiBase: string =
@@ -110,10 +134,12 @@ export class RenderClient {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = `${proto}//${location.host}/ws`;
       }
+
       this.ws = new WebSocket(wsUrl);
-      
+
       this.ws.onopen = () => {
         this.connected = true;
+        this.reconnectAttempt = 0;
         this._send({
           type: "join",
           sessionId: this.sessionId,
@@ -122,51 +148,81 @@ export class RenderClient {
           colors: this.colors,
           userId: this.userId,
         });
-        // Send inputs at 20 Hz to match server tick rate
         this.inputTimer = setInterval(() => this._sendInput(), 50);
         this.onConnected?.();
       };
-      
+
       this.ws.onmessage = (e) => {
         try {
           this._handleMessage(JSON.parse(e.data as string));
         } catch {
-          // Malformed message
+          // Malformed message — ignore
         }
       };
-      
-      this.ws.onclose = () => this._cleanup();
-      this.ws.onerror = () => this._cleanup();
+
+      this.ws.onclose = () => this._handleClose();
+      this.ws.onerror  = () => this._handleClose();
     } catch {
-      // WebSocket unavailable
+      // WebSocket constructor failed (e.g. invalid URL)
+      this._scheduleReconnect();
     }
   }
-  
-  disconnect() {
-    this._cleanup();
-    this.ws?.close();
-    this.objects.clear();
-    this.players.clear();
-    this.gui = [];
-  }
-  
-  private _cleanup() {
+
+  private _handleClose() {
+    this._clearInputTimer();
+    const wasConnected = this.connected;
     this.connected = false;
+    if (wasConnected) this.onDisconnected?.();
+
+    if (!this.intentionalDisconnect) {
+      this._scheduleReconnect();
+    }
+  }
+
+  private _scheduleReconnect() {
+    if (this.intentionalDisconnect) return;
+    this._clearReconnectTimer();
+    this.reconnectAttempt++;
+    // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, 16s, 30s (cap)
+    const delay = Math.min(
+      this.MIN_RECONNECT_MS * Math.pow(2, this.reconnectAttempt - 1),
+      this.MAX_RECONNECT_MS
+    );
+    this.onReconnecting?.(this.reconnectAttempt);
+    this.reconnectTimer = setTimeout(() => {
+      if (!this.intentionalDisconnect) this._openSocket();
+    }, delay);
+  }
+
+  private _clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private _clearInputTimer() {
     if (this.inputTimer) {
       clearInterval(this.inputTimer);
       this.inputTimer = null;
     }
-    this.onDisconnected?.();
   }
-  
+
+  private _closeSocket() {
+    this._clearInputTimer();
+    this.connected = false;
+    this.ws?.close();
+    this.ws = null;
+  }
+
   private _send(msg: ClientMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
   }
-  
+
   // ── Message Handling ────────────────────────────────────────────────────────
-  
+
   private _handleMessage(msg: ServerMessage) {
     switch (msg.type) {
       case "init": {
@@ -175,21 +231,18 @@ export class RenderClient {
         this._applyState(msg.state);
         break;
       }
-      
+
       case "worldState": {
-        // Store for interpolation
         this.prevState = this.nextState;
         this.nextState = msg.state;
         this.stateReceivedAt = performance.now();
-        
-        // Apply immediately for non-interpolated data
         this.gui = msg.state.gui;
         this.lighting = msg.state.lighting;
         this.camera = msg.state.camera;
         this.onGuiChanged?.();
         break;
       }
-      
+
       case "objectUpdate": {
         const obj = this.objects.get(msg.id);
         if (obj) {
@@ -198,7 +251,7 @@ export class RenderClient {
         }
         break;
       }
-      
+
       case "playerUpdate": {
         const player = this.players.get(msg.id);
         if (player) {
@@ -207,13 +260,13 @@ export class RenderClient {
         }
         break;
       }
-      
+
       case "guiUpdate": {
         this.gui = msg.gui;
         this.onGuiChanged?.();
         break;
       }
-      
+
       case "playerJoined": {
         if (msg.player.id !== this.localPlayerId) {
           this.players.set(msg.player.id, msg.player);
@@ -221,13 +274,13 @@ export class RenderClient {
         }
         break;
       }
-      
+
       case "playerLeft": {
         this.players.delete(msg.playerId);
         this.onPlayersChanged?.();
         break;
       }
-      
+
       case "chat": {
         this.onChat?.({
           playerId: msg.playerId,
@@ -236,57 +289,48 @@ export class RenderClient {
         });
         break;
       }
-      
+
       case "scriptLog": {
         this.onScriptLog?.(msg.logs);
         break;
       }
-      
+
       case "sound": {
         this.onSound?.(msg.soundId, msg.options);
         break;
       }
-      
+
       case "error": {
         this.onError?.({ code: msg.code, message: msg.message });
         break;
       }
     }
   }
-  
+
   private _applyState(state: RenderState) {
-    // Objects
     this.objects.clear();
     for (const obj of state.objects) {
       this.objects.set(obj.id, obj);
     }
-    
-    // Players (excluding local player which is handled separately)
+
     this.players.clear();
     for (const player of state.players) {
       if (player.id !== this.localPlayerId) {
         this.players.set(player.id, player);
       }
     }
-    
-    // GUI
+
     this.gui = state.gui;
-    
-    // Lighting and camera
     this.lighting = state.lighting;
     this.camera = state.camera;
-    
+
     this.onPlayersChanged?.();
     this.onObjectsChanged?.();
     this.onGuiChanged?.();
   }
-  
+
   // ── Interpolation for Smooth Rendering ──────────────────────────────────────
-  
-  /**
-   * Get interpolated state for rendering at 60fps.
-   * Call this every frame with the current timestamp.
-   */
+
   getInterpolatedState(): { objects: RenderObject[]; players: RenderPlayer[] } {
     if (!this.prevState || !this.nextState) {
       return {
@@ -294,12 +338,10 @@ export class RenderClient {
         players: Array.from(this.players.values()),
       };
     }
-    
-    // Calculate interpolation factor (0-1)
+
     const elapsed = performance.now() - this.stateReceivedAt;
     const t = Math.min(1, Math.max(0, elapsed / this.interpDelayMs));
-    
-    // Interpolate objects
+
     const interpObjects: RenderObject[] = [];
     for (const nextObj of this.nextState.objects) {
       const prevObj = this.prevState.objects.find(o => o.id === nextObj.id);
@@ -317,8 +359,7 @@ export class RenderClient {
         interpObjects.push(nextObj);
       }
     }
-    
-    // Interpolate players
+
     const interpPlayers: RenderPlayer[] = [];
     for (const nextPlayer of this.nextState.players) {
       if (nextPlayer.id === this.localPlayerId) continue;
@@ -337,67 +378,72 @@ export class RenderClient {
         interpPlayers.push(nextPlayer);
       }
     }
-    
+
     return { objects: interpObjects, players: interpPlayers };
   }
-  
-  /**
-   * Get the local player's state from the latest server update.
-   * This is used for camera positioning and local prediction.
-   */
+
   getLocalPlayer(): RenderPlayer | null {
     if (!this.localPlayerId || !this.nextState) return null;
     return this.nextState.players.find(p => p.id === this.localPlayerId) ?? null;
   }
-  
+
   // ── Input Handling ──────────────────────────────────────────────────────────
-  
-  /**
-   * Update the input state. Call this every frame with the current input.
-   */
-  updateInput(moveX: number, moveZ: number, jump: boolean, camY: number, sprint = false) {
+
+  updateInput(
+    moveX: number, moveZ: number,
+    jump: boolean, camY: number,
+    sprint = false,
+    flyUp = false,
+    flyDown = false
+  ) {
     this._moveX = moveX;
     this._moveZ = moveZ;
-    this._jump = this._jump || jump; // Latch jump until sent
-    this._camY = camY;
-    this._sprint = sprint;
+    this._jump  = this._jump || jump; // latch jump until sent
+    this._camY  = camY;
+    this._sprint  = sprint;
+    this._flyUp   = flyUp;
+    this._flyDown = flyDown;
   }
-  
+
   private _sendInput() {
     this._send({
       type: "input",
       moveX: this._moveX,
       moveZ: this._moveZ,
-      jump: this._jump,
-      camY: this._camY,
-      sprint: this._sprint,
+      jump:  this._jump,
+      camY:  this._camY,
+      sprint:  this._sprint,
+      flyUp:   this._flyUp,
+      flyDown: this._flyDown,
     });
-    this._jump = false; // Reset jump latch after sending
+    this._jump = false; // reset jump latch after sending
   }
-  
+
   // ── GUI Interaction ─────────────────────────────────────────────────────────
-  
-  /**
-   * Send a GUI element click to the server.
-   */
+
   clickGuiElement(elementId: string) {
     this._send({ type: "guiClick", elementId });
   }
-  
-  // ── Chat ────────────────────────────────────────────────────────────────────
-  
+
+  // ── 3D Object Click ─────────────────────────────────────────────────────────
+
   /**
-   * Send a chat message to all players.
+   * Tell the server that the local player clicked on a 3D object.
+   * Pass `null` if the click missed all objects (hit empty space).
+   * The server fires `obj.on("clicked", player)` in scripts.
    */
+  clickObject3d(objectId: string | null) {
+    this._send({ type: "click3d", objectId });
+  }
+
+  // ── Chat ────────────────────────────────────────────────────────────────────
+
   sendChat(text: string) {
     this._send({ type: "chat", text });
   }
-  
+
   // ── Custom Actions ──────────────────────────────────────────────────────────
-  
-  /**
-   * Send a custom action to the server (e.g., use item, interact).
-   */
+
   sendAction(actionId: string, data?: any) {
     this._send({ type: "action", actionId, data });
   }
