@@ -4,13 +4,23 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # WebSocket connections cannot be proxied by Netlify, so the client
+  # connects to the Render.com backend directly for /ws.
+  # REST API calls go through the Netlify proxy below (same-origin, no CORS).
+  VITE_API_URL = "https://rebur.onrender.com"
 
-# Proxy every /api/* call to the Render backend.
-# The browser sees a same-origin request so there is NO CORS at all.
-# This rule must come BEFORE the SPA catch-all below.
+# Proxy every /api/* and /uploads/* call to the Render backend.
+# The browser sees a same-origin request — zero CORS issues for REST.
+# These rules MUST come BEFORE the SPA catch-all below.
 [[redirects]]
   from = "/api/*"
   to = "https://rebur.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/uploads/*"
+  to = "https://rebur.onrender.com/uploads/:splat"
   status = 200
   force = true
 

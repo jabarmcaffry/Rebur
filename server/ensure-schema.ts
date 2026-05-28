@@ -2,7 +2,9 @@
  * ensure-schema.ts
  *
  * Idempotent startup migration — creates all tables if they don't exist.
- * Safe to run on every boot; uses CREATE TABLE IF NOT EXISTS throughout.
+ * Also cleans up stale multiplayer state left over from the previous server
+ * process (WebSocket connections die when the server restarts, so any
+ * session_players or multiplayer_sessions that were "active" are now ghosts).
  */
 
 import { pool } from "./db";
@@ -10,6 +12,7 @@ import { pool } from "./db";
 export async function ensureSchema(): Promise<void> {
   const client = await pool.connect();
   try {
+    // ── Create tables ──────────────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS sessions (
         sid       VARCHAR PRIMARY KEY,
@@ -88,21 +91,21 @@ export async function ensureSchema(): Promise<void> {
         container   VARCHAR(50) DEFAULT 'ServerScriptService',
         script_type VARCHAR(20) NOT NULL DEFAULT 'Script',
         name        VARCHAR(255) NOT NULL,
-        code        TEXT NOT NULL DEFAULT '// Write your JavaScript code here\n',
+        code        TEXT NOT NULL DEFAULT '-- Write your JavaScript code here\n',
         enabled     BOOLEAN DEFAULT TRUE,
         created_at  TIMESTAMP DEFAULT NOW(),
         updated_at  TIMESTAMP DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS multiplayer_sessions (
-        id             VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-        game_id        VARCHAR NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-        host_user_id   VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        is_active      BOOLEAN DEFAULT TRUE,
-        max_players    INTEGER DEFAULT 10,
+        id              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        game_id         VARCHAR NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        host_user_id    VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        is_active       BOOLEAN DEFAULT TRUE,
+        max_players     INTEGER DEFAULT 10,
         current_players INTEGER DEFAULT 0,
-        created_at     TIMESTAMP DEFAULT NOW(),
-        ended_at       TIMESTAMP
+        created_at      TIMESTAMP DEFAULT NOW(),
+        ended_at        TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS session_players (
@@ -119,7 +122,22 @@ export async function ensureSchema(): Promise<void> {
         left_at     TIMESTAMP
       );
     `);
-    console.log("[db] schema ready");
+
+    // ── Clean up stale multiplayer state from the previous server process ──────
+    // WebSocket connections are terminated when the server restarts, so any
+    // session_players or multiplayer_sessions marked "active" are now stale.
+    // Wipe them so users can re-join without hitting ALREADY_IN_GAME errors,
+    // and so the player-count HUD starts from zero.
+    await client.query(`
+      DELETE FROM session_players WHERE is_active = TRUE;
+      UPDATE multiplayer_sessions
+        SET is_active = FALSE,
+            ended_at  = NOW(),
+            current_players = 0
+        WHERE is_active = TRUE;
+    `);
+
+    console.log("[db] schema ready, stale sessions cleared");
   } catch (err) {
     console.error("[db] ensureSchema failed:", err);
     throw err;

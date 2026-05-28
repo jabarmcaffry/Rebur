@@ -1,28 +1,38 @@
-// types.ts
-import type { RaycastResult } from "./raycast";
-import type { Easing } from "./tween";
+// types.ts — self-contained, no imports from deleted runtime modules
 
-import type { EventChannel as _EventChannel, EventsAPI as _EventsAPI } from "./events/event-bus";
-import type { KeyboardAPI as _KeyboardAPI } from "./events/keyboard";
-import type { MouseAPI as _MouseAPI } from "./events/mouse";
-import type { WorldAPI as _WorldAPI } from "./events/world-events";
-import type { RuntimeInput as _RuntimeInput } from "./input/input-manager";
+export type RaycastResult = { object: RuntimeObject; distance: number; point: Vec3; normal: Vec3 } | null;
+export type NetSnapshot = Record<string, any>;
+export type NetInput = Record<string, any>;
 
-type EventChannel<T extends any[]> = _EventChannel<T>;
-type EventsAPI = _EventsAPI;
-type KeyboardAPI = _KeyboardAPI;
-type MouseAPI = _MouseAPI;
-type WorldAPI = _WorldAPI;
-type RuntimeInput = _RuntimeInput;
+export type EventChannel<T extends any[]> = {
+  on: (...args: T) => void;
+  off: (...args: T) => void;
+};
+export type EventsAPI = Record<string, (...args: any[]) => void>;
 
-export type { RaycastResult } from "./raycast";
-export type { NetSnapshot, NetInput } from "./network";
+export type KeyboardAPI = {
+  onPress: (key: string, fn: () => void) => () => void;
+  onRelease: (key: string, fn: () => void) => () => void;
+  isDown: (key: string) => boolean;
+};
 
-export { EventBus, type EventChannel, type EventsAPI } from "./events/event-bus";
-export { type KeyboardAPI, createKeyboardAPI, processKeyboardInput } from "./events/keyboard";
-export { type MouseAPI, createMouseAPI, processMouseClick } from "./events/mouse";
-export { type WorldAPI, createWorldAPI } from "./events/world-events";
-export { type RuntimeInput, createInputManager, snapshotPreviousKeys, resetJumpFlag } from "./input/input-manager";
+export type MouseAPI = {
+  onClick: (fn: (hit: RuntimeObject | null) => void) => () => void;
+};
+
+export type WorldAPI = {
+  onPlayerSpawned: (fn: (player: RuntimePlayer) => void) => () => void;
+  onPlayerDied: (fn: (player: RuntimePlayer) => void) => () => void;
+};
+
+export type RuntimeInput = {
+  moveX: number;
+  moveZ: number;
+  jump: boolean;
+  flyUp: boolean;
+  flyDown: boolean;
+  keys: Set<string>;
+};
 
 export type Vec3 = { x: number; y: number; z: number };
 
@@ -305,4 +315,10 @@ export type CompiledScript = {
   error?: string;
 };
 
-export { DEFAULT_PROPERTIES } from "./utils/helpers";
+export const DEFAULT_PROPERTIES = {
+  anchored: false,
+  canCollide: true,
+  transparency: 0,
+  mass: 1,
+  friction: 0.5,
+} as const;

@@ -171,6 +171,7 @@ export function createGame(input: { userId: string; title: string; description?:
     isPublished: false,
     isPublic: true,
     plays: 0,
+    maxPlayers: 10,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -624,21 +624,23 @@ export function configureMonacoForEngine(monaco: typeof Monaco): void {
 
   // ── DISABLE built-in TypeScript/JavaScript completions ──────────────────
   // Turn off the TS language service entirely for JS
-  monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tsLang = (monaco.languages as any).typescript;
+  tsLang.javascriptDefaults.setDiagnosticsOptions({
     noSemanticValidation: true,   // no red squiggles from TS inference
     noSyntaxValidation: false,    // keep syntax errors (missing bracket etc.)
   });
 
-  monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-    target: monaco.languages.typescript.ScriptTarget.ESNext,
+  tsLang.javascriptDefaults.setCompilerOptions({
+    target: tsLang.ScriptTarget.ESNext,
     allowNonTsExtensions: true,
     noLib: true, // DO NOT include standard lib — kills built-in completions
-    module: monaco.languages.typescript.ModuleKind.None,
+    module: tsLang.ModuleKind.None,
     noEmit: true,
   });
 
   // Add our type definitions only for hover (not for inference — noLib: true)
-  monaco.languages.typescript.javascriptDefaults.addExtraLib(
+  tsLang.javascriptDefaults.addExtraLib(
     ENGINE_TYPE_DEFS,
     "ts:engine.d.ts"
   );

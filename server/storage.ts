@@ -155,6 +155,7 @@ export class MemStorage implements IStorage {
       isPublished: game.isPublished ?? false,
       isPublic: game.isPublic ?? true,
       plays: 0,
+      maxPlayers: game.maxPlayers ?? 10,
       createdAt: new Date(),
       updatedAt: new Date()
     };

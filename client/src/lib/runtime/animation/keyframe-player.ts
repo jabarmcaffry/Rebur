@@ -405,3 +405,34 @@ export function stepAllAnimators(objectList: RuntimeObject[], dt: number): void 
     }
   }
 }
+
+// ─── AnimationEditor types ─────────────────────────────────────────────────────
+
+/** Flat keyframe used by AnimationEditor (uses px/py/pz instead of position.x/y/z). */
+export interface Keyframe {
+  id: string;
+  time: number;
+  px?: number; py?: number; pz?: number;
+  rx?: number; ry?: number; rz?: number;
+  sx?: number; sy?: number; sz?: number;
+}
+
+/** Animation definition used by AnimationEditor. */
+export interface AnimationDef {
+  id: string;
+  name: string;
+  duration: number;
+  loop: boolean;
+  keyframes: Keyframe[];
+}
+
+/** Joint / constraint definition used by AnimationEditor rig view. */
+export interface JointDef {
+  id: string;
+  type: "fixed" | "hinge" | "ball" | "slider";
+  objectId: string;
+  parentId?: string;
+  anchor?: { x: number; y: number; z: number };
+  axis?: { x: number; y: number; z: number };
+  limits?: { min: number; max: number };
+}

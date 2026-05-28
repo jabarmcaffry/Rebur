@@ -5,30 +5,58 @@ import { setupVite, serveStatic, log } from "./vite";
 import { ensureSchema } from "./ensure-schema";
 
 process.env.NODE_ENV = process.env.NODE_ENV || "development";
-// Server restart trigger
 
 const app = express();
 
-// CORS — reflects the requesting origin so it works with every domain
-// (www or non-www, netlify.app subdomains, custom domains) and with both
-// credentialed and non-credentialed fetches.
+// ── CORS ────────────────────────────────────────────────────────────────────
+// In production (API_ONLY mode on Render.com), the Netlify frontend makes
+// WebSocket connections directly to this server.  Allow those cross-origin
+// connections explicitly while still rejecting unknown origins.
+const ALLOWED_ORIGINS = new Set([
+  // Netlify production domain — update if you rename the site
+  "https://rebur.netlify.app",
+  // Allow any *.netlify.app preview deploy
+]);
+
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // server-to-server or same-origin — always allow
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  // Allow any Netlify preview deploy (rebur--<hash>.netlify.app)
+  if (/\.netlify\.app$/.test(origin)) return true;
+  // Allow any Render.com deploy (for health checks etc.)
+  if (/\.onrender\.com$/.test(origin)) return true;
+  // Allow localhost/127 for development
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+  // Allow Replit dev domains
+  if (/\.replit\.dev$/.test(origin) || /\.repl\.co$/.test(origin)) return true;
+  return false;
+}
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+  const allowed = isAllowedOrigin(origin);
+
+  if (allowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
   if (req.method === "OPTIONS") {
-    res.sendStatus(204);
+    res.sendStatus(allowed ? 204 : 403);
     return;
   }
+
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: false }));
 
+// ── Request logger ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -47,11 +75,9 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "…";
       }
-
       log(logLine);
     }
   });
@@ -61,30 +87,26 @@ app.use((req, res, next) => {
 
 (async () => {
   const httpServer = createServer(app);
-  log('using HTTP');
+  log("using HTTP");
 
-  // Ensure DB schema exists before anything else touches the database
+  // Ensure DB schema exists and stale sessions are cleared before anything
+  // else touches the database.
   await ensureSchema();
 
-  // Register routes and set up WebSocket
+  // Register all REST + WebSocket routes
   await registerRoutes(app, httpServer);
 
+  // Global error handler — log but don't crash the process
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-
     if (!res.headersSent) {
       res.status(status).json({ message });
     }
-    // IMPORTANT: don't re-throw here. Re-throwing produces an unhandled rejection
-    // inside the express middleware chain which (under tsx + node 20) bubbles up
-    // and kills the process — causing the preview proxy to return 502 until the
-    // dev script restarts. Just log it.
     console.error("[express] unhandled error:", err);
   });
 
-  // Same reasoning for top-level async errors — keep the process alive so the
-  // preview never goes to 502 from a single bad request or HMR failure.
+  // Keep the process alive even on unexpected errors
   process.on("unhandledRejection", (reason) => {
     console.error("[process] unhandled rejection:", reason);
   });
@@ -92,11 +114,8 @@ app.use((req, res, next) => {
     console.error("[process] uncaught exception:", err);
   });
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
+  // Bind to PORT (Render.com sets this automatically)
+  const port = parseInt(process.env.PORT || "5000", 10);
   await new Promise<void>((resolve, reject) => {
     httpServer.listen({ port, host: "0.0.0.0" }, () => {
       log(`serving on port ${port}`);
@@ -105,12 +124,15 @@ app.use((req, res, next) => {
     httpServer.on("error", reject);
   });
 
-  // In API-only mode (Render deployment with Netlify serving the frontend)
-  // skip static file serving entirely — just run as a pure API server.
-  // Set API_ONLY=true in Render env vars to enable this mode.
+  // Development: serve Vite HMR + index.html
+  // Production on Render (API_ONLY=true): skip static serving entirely —
+  //   Netlify serves the static files and proxies /api/* here.
+  // Production on Render (no API_ONLY): also serve the built client files.
   if (app.get("env") === "development") {
     await setupVite(app, httpServer);
   } else if (!process.env.API_ONLY) {
     serveStatic(app);
+  } else {
+    log("API-only mode — static files served by Netlify");
   }
 })();

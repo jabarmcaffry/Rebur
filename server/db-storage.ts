@@ -43,7 +43,7 @@ export class DatabaseStorage implements IStorage {
 
   // ── Games ─────────────────────────────────────────────────────────────────
   async createGame(game: InsertGame): Promise<Game> {
-    const [g] = await db.insert(games).values({ ...game, id: genId() }).returning();
+    const [g] = await db.insert(games).values({ ...game, id: genId() } as any).returning();
     return g;
   }
 
