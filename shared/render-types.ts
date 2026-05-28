@@ -123,7 +123,7 @@ export type ServerMessage =
 // Client → Server
 export type ClientMessage =
   | { type: "join"; sessionId: string; gameId: string; playerName: string; colors?: Record<string, string>; userId?: string }
-  | { type: "input"; moveX: number; moveZ: number; jump: boolean; camY: number; sprint?: boolean; flyUp?: boolean; flyDown?: boolean }
+  | { type: "input"; moveX: number; moveZ: number; jump: boolean; camY: number; sprint?: boolean }
   | { type: "guiClick"; elementId: string }
   | { type: "click3d"; objectId: string | null }
   | { type: "chat"; text: string }

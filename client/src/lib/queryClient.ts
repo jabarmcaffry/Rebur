@@ -28,9 +28,10 @@ function resolveApiBase(): string {
   if (!VITE_API_URL) return ""; // local dev — always relative
   if (typeof window === "undefined") return VITE_API_URL;
   const host = window.location.hostname;
-  // Netlify domain → proxy is active → keep relative paths
-  if (host.endsWith(".netlify.app") || host === "rebur.netlify.app") return "";
-  // Otherwise (custom domain without proxy, or direct Render access) → absolute
+  // Netlify domain or custom domain pointing to Netlify → proxy is active → keep relative paths
+  if (host.endsWith(".netlify.app")) return "";
+  if (host === "rebur.co" || host === "www.rebur.co" || host.endsWith(".rebur.co")) return "";
+  // Otherwise (direct Render access) → absolute URL
   return VITE_API_URL;
 }
 

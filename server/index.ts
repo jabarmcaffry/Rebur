@@ -13,9 +13,11 @@ const app = express();
 // WebSocket connections directly to this server.  Allow those cross-origin
 // connections explicitly while still rejecting unknown origins.
 const ALLOWED_ORIGINS = new Set([
-  // Netlify production domain — update if you rename the site
+  // Netlify production domain
   "https://rebur.netlify.app",
-  // Allow any *.netlify.app preview deploy
+  // Custom domain (rebur.co and www.rebur.co)
+  "https://rebur.co",
+  "https://www.rebur.co",
 ]);
 
 function isAllowedOrigin(origin: string | undefined): boolean {
@@ -25,6 +27,8 @@ function isAllowedOrigin(origin: string | undefined): boolean {
   if (/\.netlify\.app$/.test(origin)) return true;
   // Allow any Render.com deploy (for health checks etc.)
   if (/\.onrender\.com$/.test(origin)) return true;
+  // Allow rebur.co subdomains
+  if (/^https?:\/\/([\w-]+\.)?rebur\.co$/.test(origin)) return true;
   // Allow localhost/127 for development
   if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
   // Allow Replit dev domains

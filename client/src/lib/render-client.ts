@@ -94,8 +94,6 @@ export class RenderClient {
   private _jump = false;
   private _camY = 0;
   private _sprint = false;
-  private _flyUp = false;
-  private _flyDown = false;
 
   constructor(gameId: string, username: string, colors: Record<string, string> = {}, userId?: string) {
     this.sessionId = `game-${gameId}`;
@@ -392,17 +390,13 @@ export class RenderClient {
   updateInput(
     moveX: number, moveZ: number,
     jump: boolean, camY: number,
-    sprint = false,
-    flyUp = false,
-    flyDown = false
+    sprint = false
   ) {
     this._moveX = moveX;
     this._moveZ = moveZ;
     this._jump  = this._jump || jump; // latch jump until sent
     this._camY  = camY;
-    this._sprint  = sprint;
-    this._flyUp   = flyUp;
-    this._flyDown = flyDown;
+    this._sprint = sprint;
   }
 
   private _sendInput() {
@@ -412,9 +406,7 @@ export class RenderClient {
       moveZ: this._moveZ,
       jump:  this._jump,
       camY:  this._camY,
-      sprint:  this._sprint,
-      flyUp:   this._flyUp,
-      flyDown: this._flyDown,
+      sprint: this._sprint,
     });
     this._jump = false; // reset jump latch after sending
   }

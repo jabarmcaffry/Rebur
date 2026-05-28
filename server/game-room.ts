@@ -4,34 +4,31 @@
  * Tick pipeline:
  *  1. Script tick  — scripts see last frame's physics state, write new values
  *  2. Apply script obj changes  → allObjs
- *  3. Apply script player mutations (health, speed, canFly, teleport, respawn…)
- *  4. Auto-behaviors on objects (autoRotateY, autoBob, autoSpin, autoMove)
- *  5. Per-object gravity wells (planet gravity)
- *  6. Player physics (gravity/fly, WASD+sprint, jump, collision)
- *  7. Dynamic object physics (gravity, drag, bounce, player-push)
- *  8. Sync physics → scriptObjs (next frame's scripts see current physics)
- *  9. Touched event detection
- * 10. Dynamic object creation from scripts
- * 11. Sound broadcast from scripts
- * 12. Broadcast authoritative worldState
+ *  3. Apply script player mutations (health, speed, teleport, respawn…)
+ *  4. Per-object gravity wells (planet gravity)
+ *  5. Player physics (gravity, WASD+sprint, jump, collision)
+ *  6. Dynamic object physics (gravity, drag, bounce, player-push)
+ *  7. Sync physics → scriptObjs (next frame scripts see current physics)
+ *  8. Touched event detection
+ *  9. Dynamic object creation from scripts
+ * 10. Sound broadcast from scripts
+ * 11. Broadcast authoritative worldState
  */
 
-import { ScriptRunner, type ScriptObjState, type ScriptPlayerState, type GuiElement } from "./script-runner";
+import { ScriptRunner, type ScriptObjState, type ScriptPlayerState } from "./script-runner";
 import type { RenderState, RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const TICK_MS        = 50;    // 20 Hz
-const GRAVITY        = -28;
-const DEFAULT_SPEED  = 14;
-const DEFAULT_JUMP   = 14;
-const FLY_SPEED      = 12;
-const SPRINT_MULT    = 1.6;
-const PLAYER_HALF_H  = 0.9;
-const PLAYER_RADIUS  = 0.4;
-const OBJ_BOUNCE     = 0.25;
-const OBJ_DRAG       = 0.88;
-const KILL_Y         = -50;
-const DEG2RAD        = Math.PI / 180;
+const TICK_MS       = 50;    // 20 Hz
+const GRAVITY       = -28;
+const DEFAULT_SPEED = 14;
+const DEFAULT_JUMP  = 14;
+const SPRINT_MULT   = 1.6;
+const PLAYER_HALF_H = 0.9;
+const PLAYER_RADIUS = 0.4;
+const OBJ_BOUNCE    = 0.25;
+const OBJ_DRAG      = 0.88;
+const KILL_Y        = -50;
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -42,13 +39,11 @@ interface PlayerState {
   rotY: number; onGround: boolean;
   moveX: number; moveZ: number;
   jumpQueued: boolean; camY: number;
-  flyUp: boolean; flyDown: boolean;
   sprint: boolean;
   spawnX: number; spawnY: number; spawnZ: number;
   shirtColor: string; skinColor: string; pantsColor: string;
   health: number; maxHealth: number;
   speed: number; jumpPower: number;
-  canFly: boolean; flying: boolean;
   animation: string;
 }
 
@@ -73,12 +68,7 @@ interface DynamicObj {
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;
-  // Auto-behaviors
-  autoRotateY?: number;
-  autoBob?: { amplitude: number; speed: number; startY: number; _time: number };
-  autoSpin?: { x?: number; y?: number; z?: number };
-  autoMove?: { direction: { x: number; y: number; z: number }; speed: number };
-  // Per-object gravity
+  // Per-object gravity well
   gravityEnabled?: boolean;
   gravityStrength?: number;
   gravityRadius?: number;
@@ -149,7 +139,6 @@ export class GameRoom {
       const px = o.positionX ?? 0, py = o.positionY ?? 0, pz = o.positionZ ?? 0;
 
       const gravProp = o.properties?.gravity;
-      const autoBobProp = o.properties?.autoBob;
 
       const dobj: DynamicObj = {
         id: o.id, name: o.name ?? "Part",
@@ -167,14 +156,6 @@ export class GameRoom {
         animation: o.properties?.animation ?? null,
         animationSpeed: o.properties?.animationSpeed ?? 1,
         animationLoop: o.properties?.animationLoop !== false,
-        // Auto-behaviors
-        autoRotateY: o.properties?.autoRotateY,
-        autoBob: autoBobProp
-          ? { amplitude: autoBobProp.amplitude ?? 1, speed: autoBobProp.speed ?? 1, startY: py, _time: 0 }
-          : undefined,
-        autoSpin: o.properties?.autoSpin,
-        autoMove: o.properties?.autoMove,
-        // Per-object gravity
         gravityEnabled: !!gravProp,
         gravityStrength: gravProp?.strength ?? 20,
         gravityRadius: gravProp?.radius ?? 20,
@@ -225,19 +206,17 @@ export class GameRoom {
       vx: 0, vy: 0, vz: 0,
       rotY: 0, onGround: false,
       moveX: 0, moveZ: 0, jumpQueued: false, camY: 0,
-      flyUp: false, flyDown: false, sprint: false,
+      sprint: false,
       spawnX: x, spawnY: y, spawnZ: z,
       shirtColor: colors.shirtColor ?? "#3b82f6",
       skinColor:  colors.skinColor  ?? "#d4a574",
       pantsColor: colors.pantsColor ?? "#374151",
       health: 100, maxHealth: 100,
       speed: DEFAULT_SPEED, jumpPower: DEFAULT_JUMP,
-      canFly: false, flying: false,
       animation: "idle",
     };
     this.players.set(id, p);
 
-    // Keep scriptRunner's player map in sync
     if (this.scriptRunner) {
       (this.scriptRunner as any).players.set(id, this._makeScriptPlayer(p));
       this.scriptRunner.firePlayerAdded(this._makeScriptPlayer(p));
@@ -269,15 +248,13 @@ export class GameRoom {
     id: string,
     moveX: number, moveZ: number,
     jump: boolean, rotY: number, camY: number,
-    flyUp = false, flyDown = false, sprint = false
+    sprint = false
   ) {
     const p = this.players.get(id);
     if (!p) return;
     p.moveX = moveX; p.moveZ = moveZ;
     if (jump) p.jumpQueued = true;
     p.rotY = rotY; p.camY = camY;
-    p.flyUp = flyUp;
-    p.flyDown = flyDown;
     p.sprint = sprint;
   }
 
@@ -287,22 +264,16 @@ export class GameRoom {
     p.x = x; p.y = y; p.z = z; p.rotY = rotY;
   }
 
-  /** Handle a 3D-object click forwarded from the client. */
+  /** Fire obj.on("clicked") when a client clicks a 3D object. */
   handleObjectClick(playerId: string, objId: string | null) {
     const player = this.players.get(playerId);
     if (!player || !this.scriptRunner) return;
-    const sp = this._makeScriptPlayer(player);
-    if (!objId) {
-      // Click on empty space — no object event
-      return;
-    }
+    if (!objId) return;
     const obj = this.allObjs.get(objId);
-    if (obj) {
-      this.scriptRunner.fireObjClicked(obj.name, sp);
-    }
+    if (obj) this.scriptRunner.fireObjClicked(obj.name, this._makeScriptPlayer(player));
   }
 
-  /** Handle a GUI click from a client. */
+  /** Forward a GUI button click to scripts. */
   handleGuiClick(playerId: string, elementId: string) {
     const player = this.players.get(playerId);
     if (!player || !this.scriptRunner) return;
@@ -348,44 +319,17 @@ export class GameRoom {
         if (mut.maxHealth !== undefined) p.maxHealth = Math.max(1, mut.maxHealth);
         if (mut.speed     !== undefined) p.speed     = Math.max(0, mut.speed);
         if (mut.jumpPower !== undefined) p.jumpPower = Math.max(0, mut.jumpPower);
-        if (mut.canFly    !== undefined) p.canFly    = mut.canFly;
-        if (mut.flying    !== undefined) p.flying    = mut.flying;
         if (mut.shirtColor !== undefined) p.shirtColor = mut.shirtColor;
         if (mut.skinColor  !== undefined) p.skinColor  = mut.skinColor;
         if (mut.pantsColor !== undefined) p.pantsColor = mut.pantsColor;
-        if (mut.teleport)   { p.x = mut.teleport.x; p.y = mut.teleport.y + PLAYER_HALF_H; p.z = mut.teleport.z; p.vx=0;p.vy=0;p.vz=0; }
-        if (mut.respawn)    { this._respawnPlayer(p); }
-        // If health hit 0 via script, trigger death
+        if (mut.teleport)  { p.x = mut.teleport.x; p.y = mut.teleport.y + PLAYER_HALF_H; p.z = mut.teleport.z; p.vx=0;p.vy=0;p.vz=0; }
+        if (mut.respawn)   { this._respawnPlayer(p); }
         if (p.health <= 0) this._handlePlayerDeath(p);
       }
     }
 
-    // ── Step 4: Auto-behaviors on objects ─────────────────────────────────────
-    for (const obj of this.allObjs.values()) {
-      if (obj.autoRotateY && obj.autoRotateY !== 0) {
-        obj.rotY += obj.autoRotateY * DEG2RAD * dt;
-      }
-      if (obj.autoBob) {
-        obj.autoBob._time += dt;
-        obj.y = obj.autoBob.startY + Math.sin(obj.autoBob._time * obj.autoBob.speed) * obj.autoBob.amplitude;
-      }
-      if (obj.autoSpin) {
-        if (obj.autoSpin.x !== undefined) obj.rotX += obj.autoSpin.x * DEG2RAD * dt;
-        if (obj.autoSpin.y !== undefined) obj.rotY += obj.autoSpin.y * DEG2RAD * dt;
-        if (obj.autoSpin.z !== undefined) obj.rotZ += obj.autoSpin.z * DEG2RAD * dt;
-      }
-      if (obj.autoMove) {
-        const d = obj.autoMove.direction;
-        const s = obj.autoMove.speed;
-        obj.x += d.x * s * dt;
-        obj.y += d.y * s * dt;
-        obj.z += d.z * s * dt;
-      }
-    }
-
-    // ── Step 5: Per-object gravity wells (planet gravity) ─────────────────────
+    // ── Step 4: Per-object gravity wells ─────────────────────────────────────
     for (const p of this.players.values()) {
-      if (p.canFly) continue; // Fly mode overrides planet gravity
       for (const obj of this.allObjs.values()) {
         if (!obj.gravityEnabled) continue;
         const dx = obj.x - p.x, dy = obj.y - p.y, dz = obj.z - p.z;
@@ -399,34 +343,19 @@ export class GameRoom {
       }
     }
 
-    // ── Step 6: Player physics ────────────────────────────────────────────────
+    // ── Step 5: Player physics ────────────────────────────────────────────────
     for (const p of this.players.values()) {
       const spd = p.speed * (p.sprint ? SPRINT_MULT : 1);
 
-      if (p.canFly) {
-        // Fly mode — no standard gravity
-        const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
-        p.vx = (-p.moveX * cos - p.moveZ * sin) * spd;
-        p.vz = ( p.moveX * sin - p.moveZ * cos) * spd;
-        if (p.flyUp)        p.vy =  FLY_SPEED;
-        else if (p.flyDown) p.vy = -FLY_SPEED;
-        else if (p.jumpQueued) p.vy = FLY_SPEED; // Space = fly up
-        else                p.vy *= 0.85; // vertical decel
-        p.flying = p.flyUp || p.flyDown || p.jumpQueued || Math.abs(p.vy) > 0.5;
-      } else {
-        // Normal gravity physics
-        p.vy += GRAVITY * dt;
+      p.vy += GRAVITY * dt;
 
-        const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
-        p.vx = (-p.moveX * cos - p.moveZ * sin) * spd;
-        p.vz = ( p.moveX * sin - p.moveZ * cos) * spd;
+      const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
+      p.vx = (-p.moveX * cos - p.moveZ * sin) * spd;
+      p.vz = ( p.moveX * sin - p.moveZ * cos) * spd;
 
-        if (p.jumpQueued && p.onGround) { p.vy = p.jumpPower; p.onGround = false; }
-        p.flying = false;
-      }
+      if (p.jumpQueued && p.onGround) { p.vy = p.jumpPower; p.onGround = false; }
       p.jumpQueued = false;
 
-      // Rotate to face movement
       if (Math.abs(p.vx) > 0.01 || Math.abs(p.vz) > 0.01) {
         p.rotY = Math.atan2(p.vx, p.vz);
       }
@@ -434,14 +363,10 @@ export class GameRoom {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
-
       p.onGround = false;
 
-      // Kill-Y → respawn
       if (p.y - PLAYER_HALF_H < KILL_Y) {
-        this._respawnPlayer(p);
         this._handlePlayerDeath(p);
-        this._respawnPlayer(p);
         continue;
       }
 
@@ -453,16 +378,13 @@ export class GameRoom {
         sp.position = { x: p.x, y: p.y, z: p.z };
         sp.health = p.health; sp.maxHealth = p.maxHealth;
         sp.speed = p.speed; sp.jumpPower = p.jumpPower;
-        sp.canFly = p.canFly; sp.flying = p.flying;
         sp.shirtColor = p.shirtColor; sp.skinColor = p.skinColor; sp.pantsColor = p.pantsColor;
       }
     }
 
-    // ── Step 7: Dynamic object physics ───────────────────────────────────────
+    // ── Step 6: Dynamic object physics ───────────────────────────────────────
     for (const obj of this.dynamics.values()) {
       if (obj.anchored) continue;
-      // Skip objects with autoMove/autoBob (they're already animated)
-      if (obj.autoMove || obj.autoBob) continue;
 
       obj.vy += GRAVITY * dt;
       const drag = Math.pow(OBJ_DRAG, dt);
@@ -476,7 +398,6 @@ export class GameRoom {
 
       this._pushObjOutOfStatics(obj);
 
-      // Player push
       for (const p of this.players.values()) {
         const dx = obj.x - p.x, dz = obj.z - p.z, dy = obj.y - p.y;
         const distSq = dx*dx + dz*dz;
@@ -491,7 +412,7 @@ export class GameRoom {
       }
     }
 
-    // ── Step 8: Sync physics → scriptObjs ────────────────────────────────────
+    // ── Step 7: Sync physics → scriptObjs ────────────────────────────────────
     for (const obj of this.allObjs.values()) {
       const so = this.scriptObjs.get(obj.name);
       if (!so) continue;
@@ -502,7 +423,7 @@ export class GameRoom {
       if (!obj.anchored) { so.velX = obj.vx; so.velY = obj.vy; so.velZ = obj.vz; }
     }
 
-    // ── Step 9: Touched event detection ──────────────────────────────────────
+    // ── Step 8: Touched event detection ──────────────────────────────────────
     if (this.scriptRunner) {
       const nowTouching = new Set<string>();
       for (const p of this.players.values()) {
@@ -535,21 +456,19 @@ export class GameRoom {
       this.touchedPairs = nowTouching;
     }
 
-    // ── Step 10: Dynamic object creation from scripts ─────────────────────────
+    // ── Step 9: Dynamic object creation from scripts ──────────────────────────
     if (this.scriptRunner) {
       const newObjs = this.scriptRunner.drainCreatedObjects();
       for (const spec of newObjs) {
         const id = `script_${++this.objIdCounter}`;
         const dobj: DynamicObj = {
           id, name: spec.name,
-          type: "primitive",
-          primitiveType: spec.primitiveType,
+          type: "primitive", primitiveType: spec.primitiveType,
           x: spec.positionX, y: spec.positionY, z: spec.positionZ,
           vx: 0, vy: 0, vz: 0,
           rotX: spec.rotationX, rotY: spec.rotationY, rotZ: spec.rotationZ,
           sx: spec.scaleX, sy: spec.scaleY, sz: spec.scaleZ,
-          color: spec.color, visible: true,
-          anchored: spec.anchored,
+          color: spec.color, visible: true, anchored: spec.anchored,
           transparency: spec.transparency,
         };
         this.allObjs.set(id, dobj);
@@ -569,26 +488,22 @@ export class GameRoom {
           scaleX: spec.scaleX, scaleY: spec.scaleY, scaleZ: spec.scaleZ,
           color: spec.color, visible: true, anchored: spec.anchored,
           velX: 0, velY: 0, velZ: 0,
-          transparency: spec.transparency,
-          canCollide: spec.canCollide,
+          transparency: spec.transparency, canCollide: spec.canCollide,
         });
       }
     }
 
-    // ── Step 11: Drain and broadcast sounds ───────────────────────────────────
+    // ── Step 10: Drain and broadcast sounds ───────────────────────────────────
     if (this.scriptRunner) {
-      const sounds = this.scriptRunner.drainSounds();
-      for (const s of sounds) {
+      for (const s of this.scriptRunner.drainSounds()) {
         this.broadcastFn({ type: "sound", soundId: s.soundId, options: s.options });
       }
     }
 
-    // ── Step 12: Update player animations ─────────────────────────────────────
+    // ── Step 11: Player animations ────────────────────────────────────────────
     for (const p of this.players.values()) {
       const hspd = Math.sqrt(p.vx*p.vx + p.vz*p.vz);
-      if (p.canFly && p.flying) {
-        p.animation = "jump"; // repurpose jump anim for fly
-      } else if (!p.onGround) {
+      if (!p.onGround) {
         p.animation = p.vy > 1 ? "jump" : "fall";
       } else if (hspd > p.speed * 0.8) {
         p.animation = "run";
@@ -602,45 +517,22 @@ export class GameRoom {
     this.tickNumber++;
     if (this.players.size === 0) return;
 
-    // ── Step 12: Broadcast worldState ─────────────────────────────────────────
+    // ── Step 11: Broadcast worldState ─────────────────────────────────────────
     const guiElements = this.scriptRunner?.getGuiElements() ?? [];
-
-    const renderPlayers: RenderPlayer[] = Array.from(this.players.values()).map((p) => ({
-      id: p.id, name: p.name,
-      position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
-      rotation: { x: 0, y: p.rotY, z: 0 },
-      velocity: { x: p.vx, y: p.vy, z: p.vz },
-      onGround: p.onGround,
-      animation: p.animation,
-      health: p.health, maxHealth: p.maxHealth,
-      colors: { shirt: p.shirtColor, skin: p.skinColor, pants: p.pantsColor },
-      motors: {},
-    }));
-
-    const renderObjects: RenderObject[] = Array.from(this.allObjs.values()).map((o) => ({
-      id: o.id, name: o.name, type: o.type, primitiveType: o.primitiveType,
-      position: { x: o.x, y: o.y, z: o.z },
-      rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
-      scale: { x: o.sx, y: o.sy, z: o.sz },
-      color: o.color, visible: o.visible,
-      transparency: o.transparency ?? 0,
-      modelUrl: o.modelUrl, modelScale: o.modelScale,
-      animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
-    }));
-
-    const renderGui: RenderGuiElement[] = guiElements.map((g) => ({
-      id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
-      width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",
-      color: g.color ?? "#ffffff", fontSize: g.fontSize ?? 14,
-      backgroundColor: g.backgroundColor, imageUrl: g.imageUrl,
-      value: g.value, maxValue: g.maxValue,
-      visible: g.visible !== false, clickable: g.clickable,
-    }));
 
     const state: RenderState = {
       tick: this.tickNumber, serverTime: Date.now(),
-      objects: renderObjects, players: renderPlayers,
-      gui: renderGui, localPlayerId: null,
+      objects: Array.from(this.allObjs.values()).map(this._toRenderObj),
+      players: Array.from(this.players.values()).map(this._toRenderPlayer),
+      gui: guiElements.map((g) => ({
+        id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
+        width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",
+        color: g.color ?? "#ffffff", fontSize: g.fontSize ?? 14,
+        backgroundColor: g.backgroundColor, imageUrl: g.imageUrl,
+        value: g.value, maxValue: g.maxValue,
+        visible: g.visible !== false, clickable: g.clickable,
+      })),
+      localPlayerId: null,
     };
 
     this.broadcastFn({ type: "worldState", state });
@@ -649,14 +541,10 @@ export class GameRoom {
   // ── Player death/respawn ──────────────────────────────────────────────────────
 
   private _handlePlayerDeath(p: PlayerState) {
-    if (this.scriptRunner) {
-      this.scriptRunner.firePlayerDied(this._makeScriptPlayer(p));
-    }
+    this.scriptRunner?.firePlayerDied(this._makeScriptPlayer(p));
     this._respawnPlayer(p);
     p.health = p.maxHealth;
-    if (this.scriptRunner) {
-      this.scriptRunner.firePlayerSpawned(this._makeScriptPlayer(p));
-    }
+    this.scriptRunner?.firePlayerSpawned(this._makeScriptPlayer(p));
   }
 
   private _respawnPlayer(p: PlayerState) {
@@ -707,7 +595,28 @@ export class GameRoom {
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Render helpers ────────────────────────────────────────────────────────────
+
+  private _toRenderObj = (o: DynamicObj): RenderObject => ({
+    id: o.id, name: o.name, type: o.type, primitiveType: o.primitiveType,
+    position: { x: o.x, y: o.y, z: o.z },
+    rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
+    scale: { x: o.sx, y: o.sy, z: o.sz },
+    color: o.color, visible: o.visible, transparency: o.transparency ?? 0,
+    modelUrl: o.modelUrl, modelScale: o.modelScale,
+    animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
+  });
+
+  private _toRenderPlayer = (p: PlayerState): RenderPlayer => ({
+    id: p.id, name: p.name,
+    position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
+    rotation: { x: 0, y: p.rotY, z: 0 },
+    velocity: { x: p.vx, y: p.vy, z: p.vz },
+    onGround: p.onGround, animation: p.animation,
+    health: p.health, maxHealth: p.maxHealth,
+    colors: { shirt: p.shirtColor, skin: p.skinColor, pants: p.pantsColor },
+    motors: {},
+  });
 
   private _makeScriptPlayer(p: PlayerState): ScriptPlayerState {
     return {
@@ -715,7 +624,6 @@ export class GameRoom {
       position: { x: p.x, y: p.y, z: p.z },
       health: p.health, maxHealth: p.maxHealth,
       speed: p.speed, jumpPower: p.jumpPower,
-      canFly: p.canFly, flying: p.flying,
       shirtColor: p.shirtColor, skinColor: p.skinColor, pantsColor: p.pantsColor,
     };
   }
@@ -729,27 +637,9 @@ export class GameRoom {
   getSnapshot(localPlayerId: string): RenderState {
     const guiElements = this.scriptRunner?.getGuiElements() ?? [];
     return {
-      tick: this.tickNumber,
-      serverTime: Date.now(),
-      objects: Array.from(this.allObjs.values()).map((o) => ({
-        id: o.id, name: o.name, type: o.type, primitiveType: o.primitiveType,
-        position: { x: o.x, y: o.y, z: o.z },
-        rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
-        scale: { x: o.sx, y: o.sy, z: o.sz },
-        color: o.color, visible: o.visible, transparency: o.transparency ?? 0,
-        modelUrl: o.modelUrl, modelScale: o.modelScale,
-        animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
-      })),
-      players: Array.from(this.players.values()).map((p) => ({
-        id: p.id, name: p.name,
-        position: { x: p.x, y: p.y - PLAYER_HALF_H, z: p.z },
-        rotation: { x: 0, y: p.rotY, z: 0 },
-        velocity: { x: p.vx, y: p.vy, z: p.vz },
-        onGround: p.onGround, animation: p.animation,
-        health: p.health, maxHealth: p.maxHealth,
-        colors: { shirt: p.shirtColor, skin: p.skinColor, pants: p.pantsColor },
-        motors: {},
-      })),
+      tick: this.tickNumber, serverTime: Date.now(),
+      objects: Array.from(this.allObjs.values()).map(this._toRenderObj),
+      players: Array.from(this.players.values()).map(this._toRenderPlayer),
       gui: guiElements.map((g) => ({
         id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
         width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",

@@ -639,8 +639,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!client) break;
             const room = gameRooms.get(client.sessionId);
             if (!room) break;
-            const { moveX, moveZ, jump, rotY, camY, flyUp, flyDown, sprint } = message;
-            room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0, !!flyUp, !!flyDown, !!sprint);
+            const { moveX, moveZ, jump, rotY, camY, sprint } = message;
+            room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0, !!sprint);
             break;
           }
 
