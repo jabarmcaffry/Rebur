@@ -490,26 +490,55 @@ game.tween(Scene.Elevator, { Y: 10 }, 3, "easeInOut", function() {
 
 ## Sound
 
-Play a sound for all players in the session.
+Play audio for all players in the session. Sound objects must be imported via **Import Audio** in the toolbar first — they appear in the Hierarchy under Workspace and can be positioned like any other object.
 
-### game.sound.play(soundId, opts?)
+### Importing Audio
 
-\`soundId\` maps to a sound file on the client. Built-in sounds: \`"jump"\`, \`"land"\`, \`"hit"\`, \`"collect"\`, \`"click"\`.
+1. Click the **+ / Import** button in the top toolbar
+2. Choose **Import Audio** and pick a `.mp3`, `.wav`, `.ogg`, `.m4a`, or `.aac` file
+3. The audio object appears in the Hierarchy. Rename it — that name is how you reference it in scripts
+4. In the Properties panel you can set a default Volume, Loop, and Autoplay
+
+### game.sound.play(name, opts?)
+
+The \`name\` must exactly match the name of an Audio object in your scene (case-sensitive).
 
 \`\`\`js
-game.sound.play("collect");
+// Play once at full volume
+game.sound.play("CoinPickup");
 
-game.sound.play("hit", {
-  volume: 0.5,   // 0.0–1.0, default 1.0
-  loop: false,   // loop the sound
+// Play with options
+game.sound.play("BackgroundMusic", {
+  volume: 0.6,   // 0.0–1.0, default 1.0
+  loop: true,    // loop continuously
 });
 
-// Example: play sound when player touches zone
+// Play when player enters a zone
 Scene.CoinZone.on("Touched", function(player) {
-  game.sound.play("collect");
+  game.sound.play("CoinPickup", { volume: 0.8 });
   player.Heal(10);
 });
+
+// Background music that starts when the game loads
+game.sound.play("BackgroundMusic", { volume: 0.4, loop: true });
+
+// Footstep sounds on every tick while moving
+game.on("tick", function(dt) {
+  const p = game.getPlayer();
+  const speed = Math.abs(p.Velocity.X) + Math.abs(p.Velocity.Z);
+  if (speed > 0.5) {
+    // game.sound.play("Footstep"); // (keep this commented unless throttled)
+  }
+});
 \`\`\`
+
+### Audio Object Properties (set in Properties panel or via script)
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| Volume | 1.0 | Playback volume 0.0–1.0 |
+| Loop | false | Repeat the sound automatically |
+| Autoplay | false | Play immediately when Play mode starts |
 
 ---
 

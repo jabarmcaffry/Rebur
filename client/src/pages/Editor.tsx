@@ -720,9 +720,11 @@ export default function EditorPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
-    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-    if (!validExts.includes(ext)) {
-      toast({ title: "Invalid file type", description: "Please select an audio file (.mp3, .wav, .ogg, .m4a)", variant: "destructive" });
+    const lastDot = file.name.lastIndexOf('.');
+    const ext = lastDot >= 0 ? file.name.toLowerCase().substring(lastDot) : '';
+    const mimeOk = file.type.startsWith('audio/') || file.type === 'video/mp4';
+    if (!validExts.includes(ext) && !mimeOk) {
+      toast({ title: "Invalid file type", description: "Please select an audio file (.mp3, .wav, .ogg, .m4a, .aac)", variant: "destructive" });
       if (audioInputRef.current) audioInputRef.current.value = "";
       return;
     }
@@ -1284,23 +1286,25 @@ export default function EditorPage() {
               data-testid="input-object-name"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Color</Label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={selected.color ?? "#888888"}
-                onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
-                data-testid="input-object-color"
-              />
-              <Input
-                value={selected.color ?? "#888888"}
-                onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                className="font-mono text-xs"
-              />
+          {selected.type !== "audio" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Color</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={selected.color ?? "#888888"}
+                  onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                  className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                  data-testid="input-object-color"
+                />
+                <Input
+                  value={selected.color ?? "#888888"}
+                  onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                  className="font-mono text-xs"
+                />
+              </div>
             </div>
-          </div>
+          )}
           <Separator />
           <VectorField
             label="Position"
@@ -1335,8 +1339,73 @@ export default function EditorPage() {
 
           <Separator />
 
-          {/* ─── Physics & Behavior ─── */}
-          <div className="space-y-3">
+          {/* ─── Audio Properties (only for audio type) ─── */}
+          {selected.type === "audio" && (
+            <>
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Audio</Label>
+
+                {/* File info */}
+                {(selected.properties as any)?.audioFile && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">File</Label>
+                    <p className="text-xs bg-muted px-2 py-1 rounded truncate" title={(selected.properties as any).audioFile}>
+                      {(selected.properties as any).audioFile}
+                    </p>
+                  </div>
+                )}
+
+                {/* Volume */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Volume</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("volume", 1).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("volume", 1)]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onValueChange={([v]) => handlePropertyChange({ volume: v })}
+                    data-testid="slider-audio-volume"
+                  />
+                </div>
+
+                {/* Loop */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-audio-loop" className="text-xs">Loop</Label>
+                  <Switch
+                    id="prop-audio-loop"
+                    checked={getProp("loop", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ loop: v })}
+                    data-testid="switch-audio-loop"
+                  />
+                </div>
+
+                {/* Autoplay */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-audio-autoplay" className="text-xs">Autoplay</Label>
+                  <Switch
+                    id="prop-audio-autoplay"
+                    checked={getProp("autoplay", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ autoplay: v })}
+                    data-testid="switch-audio-autoplay"
+                  />
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Play from scripts with <code className="bg-muted px-1 rounded">game.sound.play("{selected.name}")</code>
+                </p>
+              </div>
+              <Separator />
+            </>
+          )}
+
+          {/* ─── Physics & Behavior (hidden for audio) ─── */}
+          {selected.type !== "audio" && (
+          <><div className="space-y-3">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Physics</Label>
 
             <div className="flex items-center justify-between">
@@ -1445,7 +1514,8 @@ export default function EditorPage() {
             )}
           </div>
 
-          <Separator />
+          <Separator /></>
+          )}
           <Button
             variant="destructive"
             size="sm"
