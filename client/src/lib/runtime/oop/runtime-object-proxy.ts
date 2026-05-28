@@ -12,6 +12,7 @@ import type { World, EntityId, ComponentDef } from "../ecs/world";
 import { Transform, Velocity, Visual, Physics, AutoBehavior, ObjectHandle } from "../ecs/components";
 import type { Vec3, RuntimeObject, ContainerName, ObjectEventName } from "../types";
 import { EventBus, type EventsAPI } from "../types";
+import { getAnimator } from "../animation/keyframe-player";
 
 /** Engine-reserved event names that user code cannot emit via obj.emit(). */
 export const RESERVED_OBJECT_EVENTS = new Set<string>([
@@ -450,6 +451,11 @@ export function createRuntimeObjectProxy(deps: RuntimeObjectProxyDeps): RuntimeO
     },
     getAttributes() {
       return Object.fromEntries(attributes);
+    },
+
+    // Animator — lazy-created on first access via the Roblox-style animation system
+    get animator() {
+      return getAnimator(obj);
     },
 
     // Internal

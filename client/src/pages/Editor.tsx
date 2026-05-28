@@ -603,8 +603,10 @@ export default function EditorPage() {
       formData.append("file", file);
       formData.append("name", file.name);
       formData.append("type", "model");
+      const token = localStorage.getItem("auth_token");
       const res = await fetch("/api/assets/upload", {
         method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (res.ok) {

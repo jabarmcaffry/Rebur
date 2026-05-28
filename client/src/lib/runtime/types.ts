@@ -105,6 +105,8 @@ export type RuntimeObject = {
   readonly children: RuntimeObject[];
   findFirstChild: (name: string) => RuntimeObject | null;
   setParent: (parent: RuntimeObject | null) => void;
+  /** Roblox-style animation system. Use animator.load(def) to get AnimationTrack. */
+  readonly animator: import("./animation/keyframe-player").Animator;
   _gravityExclusions: Set<string>;
   __cleanup: Set<() => void>;
 };

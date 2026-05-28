@@ -620,30 +620,86 @@ door.emit("exploded", { force: 100 });   // ✅
 
 ---
 
-## Auto-Animation
+## Animation (AnimationTrack)
 
-Let the engine animate objects every frame without a script update loop:
+Every object exposes an \`animator\` property. Use it to load keyframe animations and control playback — similar to Roblox's \`Animator\` + \`AnimationTrack\` pattern.
 
 \`\`\`js
-// Spin around Y axis (radians/second)
-obj.autoRotateY = 2;
+// Load an animation definition — returns an AnimationTrack
+const track = workspace.Platform.animator.load({
+  name: "hover",       // optional name for animator.get("hover")
+  duration: 2,         // total seconds
+  loop: true,          // restart automatically when finished
+  keyframes: [
+    { time: 0, position: { y: 0 } },
+    { time: 1, position: { y: 3 } },
+    { time: 2, position: { y: 0 } },
+  ],
+});
 
-// Bob up and down (sine wave)
-obj.autoBob = { amplitude: 0.3, speed: 2 };
+// Start playback
+track.play();
 
-// Spin on multiple axes simultaneously
-obj.autoSpin = { x: 0.5, y: 1, z: 0 };
+// Stop and reset to time 0 (fires "stopped" event)
+track.stop();
 
-// Move in a direction continuously
-obj.autoMove = { direction: { x: 1, y: 0, z: 0 }, speed: 2 };
+// Pause / resume mid-animation
+track.pause();
+track.resume();
 
-// Follow a target (player or another object)
-obj.autoFollow = { target: player, speed: 4, offset: { x: 0, y: 2, z: 0 } };
+// Adjust speed multiplier (1 = normal, 2 = double, 0.5 = half)
+track.adjustSpeed(2);
 
-// Disable any auto-animation
-obj.autoRotateY = undefined;
-obj.autoBob = undefined;
+// Blend weight (1 = full effect, 0 = no effect; default 1)
+track.adjustWeight(0.5);
+
+// Listen for events — returns an unsubscribe function
+track.on("stopped", () => log("animation done"));
+track.on("keyframeReached", (name) => log("passed keyframe:", name));
+
+// Named keyframes — fire the "keyframeReached" event when passed
+const swing = door.animator.load({
+  name: "open",
+  duration: 0.4,
+  keyframes: [
+    { time: 0,   name: "start", rotation: { y: 0  } },
+    { time: 0.4, name: "end",   rotation: { y: 90 } },
+  ],
+});
+swing.play();
+swing.on("keyframeReached", (kfName) => {
+  if (kfName === "end") log("door fully open");
+});
+
+// Read playback state
+track.isPlaying;       // true while playing and not paused
+track.isPaused;        // true while paused
+track.length;          // total duration in seconds
+track.timePosition;    // current playback time; settable to seek
+
+// Seek to a specific time
+track.timePosition = 0.5;
+
+// Retrieve a previously-loaded track by name
+const t = workspace.Platform.animator.get("hover");  // AnimationTrack | null
+
+// Stop all tracks on an object
+workspace.Platform.animator.stopAll();
 \`\`\`
+
+### Keyframe format
+
+Keyframes define the **absolute** position / rotation (degrees) / scale at a point in time.  
+Omit any axis you don't want to animate — it is left unchanged.
+
+\`\`\`js
+{ time: 0,   position: { x: 0, y: 0, z: 0 }, rotation: { y: 0  }, scale: { x: 1, y: 1, z: 1 } }
+{ time: 0.5, position: { x: 5, y: 0, z: 0 }, rotation: { y: 90 }                               }
+{ time: 1,   position: { x: 0, y: 0, z: 0 }, rotation: { y: 0  }                               }
+\`\`\`
+
+Keyframes are interpolated linearly between each time marker.  
+You can list them in any order — they are sorted by \`time\` internally.
 
 ---
 
@@ -770,32 +826,41 @@ player.inventory.clear();
 
 ## Camera
 
+The engine runs a built-in third-person chase camera.  Scripts can read the current camera state and override it each frame by writing \`position\` and \`lookAt\`.
+
 \`\`\`js
-// Modes
-camera.mode = "thirdPerson";  // default — orbits player
-camera.mode = "firstPerson";  // inside player head
-camera.mode = "scripted";     // fully manual — you set position + lookAt each frame
-camera.mode = "free";         // detached orbit
+// Read current camera world position (engine-computed each frame)
+camera.position   // { x, y, z }  ← read-only unless you override it below
 
-// Third-person
-camera.distance = 6;          // read/write
-camera.minDistance = 2;
-camera.maxDistance = 20;
-camera.offset = { x: 0, y: 1.95, z: 0 };
+// Read where the camera is looking
+camera.lookAt     // { x, y, z }  ← read-only unless you override it below
 
-// General
-camera.fov = 60;             // degrees  ← read/write in all modes
-camera.sensitivity = 1;
-camera.lockYaw = false;
-camera.lockPitch = false;
+// Field of view in degrees  ← read/write
+camera.fov = 60;
 
-// Scripted mode — position and lookAt are ONLY writable in "scripted" mode.
-// In any other mode, writing to them has no effect.
-camera.mode = "scripted";
-camera.position = { x: 0, y: 10, z: 10 };   // read/write (scripted only)
-camera.lookAt   = { x: 0, y: 0,  z: 0  };   // read/write (scripted only)
+// ── Custom (scripted) camera ─────────────────────────────────────────────────
+// Set position + lookAt every update frame to take full control.
+// The engine uses whatever values are in camera.position / camera.lookAt
+// at the end of each frame, so writing them from onUpdate gives you a
+// fully scriptable camera without any mode flag.
 
-// In thirdPerson/firstPerson, camera.position is read-only (engine-computed).
+runService.update.on((dt) => {
+  // Example: overhead security camera panning side-to-side
+  const t = game.time;
+  camera.position = { x: Math.sin(t) * 10, y: 15, z: 0 };
+  camera.lookAt   = { x: 0, y: 0, z: 0 };
+});
+
+// Example: lock camera to a fixed point behind an object
+runService.update.on((dt) => {
+  const car = workspace.Car;
+  camera.position = {
+    x: car.position.x - 8,
+    y: car.position.y + 3,
+    z: car.position.z,
+  };
+  camera.lookAt = { ...car.position };
+});
 \`\`\`
 
 ---

@@ -43,7 +43,7 @@ import { pointVsObjectSurface } from "./utils/helpers";
 import { resolvePlayerVsObject } from "./physics/player-collision";
 import { computeGravityAccel } from "./physics/gravity";
 import { applyAutoProperties, updatePlayerAnimation } from "./animation/auto-properties";
-import { applyKeyframeAnimations, applyJoints } from "./animation/keyframe-player";
+import { stepAllAnimators } from "./animation/keyframe-player";
 
 // New modular imports from submodules
 import { 
@@ -1727,8 +1727,7 @@ export class GameRuntime {
   /** Delegates to the extracted animation/auto-properties module */
   private updateAutoProperties(dt: number) {
     applyAutoProperties(this.objectList, dt);
-    applyKeyframeAnimations(this.objectList, dt);
-    applyJoints(this.objectList, dt);
+    stepAllAnimators(this.objectList, dt);
   }
 
   /** Delegates to the extracted physics/gravity module */
