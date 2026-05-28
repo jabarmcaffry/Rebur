@@ -76,7 +76,7 @@ export class GameRoom {
   /** Current tick number for client interpolation */
   private tickNumber = 0;
   /** Spawn position extracted from the SpawnLocation object in the scene */
-  private spawnPoint = { x: 0, y: 5, z: 0 };
+  private spawnPoint = { x: 0, y: 1.5, z: 0 };
 
   constructor(private readonly broadcastFn: (msg: object) => void) {}
 
@@ -126,9 +126,8 @@ export class GameRoom {
       const sy = spawnObj.scaleY ?? 1;
       this.spawnPoint = {
         x: spawnObj.positionX ?? 0,
-        // Spawn 3 units above the top surface of the pad so the player
-        // always starts in free air and falls onto it naturally.
-        y: (spawnObj.positionY ?? 0) + sy / 2 + PLAYER_HALF_H + 3,
+        // Spawn just above the top surface of the pad (0.05 clearance).
+        y: (spawnObj.positionY ?? 0) + sy / 2 + PLAYER_HALF_H + 0.05,
         z: spawnObj.positionZ ?? 0,
       };
     }

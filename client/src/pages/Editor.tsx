@@ -577,18 +577,18 @@ export default function EditorPage() {
     });
   };
 
-  /** Handle importing 3D model files (.glb, .gltf, .obj) */
+  /** Handle importing 3D model files (.glb, .gltf) */
   const handleImport3DModel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    const validExtensions = ['.glb', '.gltf', '.obj', '.fbx'];
+    const validExtensions = ['.glb', '.gltf'];
     const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
     
     if (!validExtensions.includes(ext)) {
       toast({
         title: "Invalid file type",
-        description: "Please select a .glb, .gltf, .obj, or .fbx file",
+        description: "Please select a .glb or .gltf file",
         variant: "destructive",
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1469,7 +1469,7 @@ export default function EditorPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".glb,.gltf,.obj,.fbx"
+            accept=".glb,.gltf"
             onChange={handleImport3DModel}
             className="hidden"
             data-testid="input-import-model"
