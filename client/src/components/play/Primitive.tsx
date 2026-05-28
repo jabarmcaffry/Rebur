@@ -1,31 +1,34 @@
-import { Suspense, useMemo, Component, type ReactNode } from "react";
-import { useGLTF } from "@react-three/drei";
+import { useMemo } from "react";
+import { useGLTFModel } from "@/lib/gltf-loader";
 import type { RenderObject } from "@shared/render-types";
 import * as THREE from "three";
 
-// Configure DRACO decoder so compressed GLBs load correctly
-useGLTF.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
-
-/** Error boundary that catches model-load failures and shows a placeholder box */
-class ModelErrorBoundary extends Component<
-  { children: ReactNode; position: [number,number,number]; rotation: [number,number,number]; scale: [number,number,number] },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(err: Error) { console.warn("[Primitive] model load error:", err.message); }
-  render() {
-    if (this.state.hasError) {
-      const { position, rotation, scale } = this.props;
-      return (
-        <mesh position={position} rotation={rotation} scale={scale}>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#ef4444" wireframe />
-        </mesh>
-      );
+/**
+ * Clones a Three.js scene and normalises its scale so the longest axis = 1 unit,
+ * then multiplies by modelScale. Deep-clones materials so the model renders with
+ * its own colours rather than inheriting a shared material state.
+ */
+function buildClone(scene: THREE.Group, modelScale: number): THREE.Group {
+  const c = scene.clone(true);
+  c.traverse((child: any) => {
+    if (child.isMesh && child.material) {
+      child.material = Array.isArray(child.material)
+        ? child.material.map((m: THREE.Material) => m.clone())
+        : child.material.clone();
     }
-    return this.props.children;
-  }
+  });
+
+  const box = new THREE.Box3().setFromObject(c);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+  const ns = (1 / maxDim) * modelScale;
+  c.scale.setScalar(ns);
+
+  const centre = new THREE.Vector3();
+  box.getCenter(centre);
+  c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
+  return c;
 }
 
 function ModelMesh({
@@ -38,30 +41,31 @@ function ModelMesh({
   onClick?: (e: any) => void;
   modelScale?: number;
 }) {
-  const { scene } = useGLTF(url);
-  const cloned = useMemo(() => {
-    const c = scene.clone(true);
-    // Ensure materials are preserved on clone
-    c.traverse((child: any) => {
-      if (child.isMesh && child.material) {
-        if (Array.isArray(child.material)) {
-          child.material = child.material.map((m: THREE.Material) => m.clone());
-        } else {
-          child.material = child.material.clone();
-        }
-      }
-    });
-    const box = new THREE.Box3().setFromObject(c);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-    const ns = (1 / maxDim) * modelScale;
-    c.scale.setScalar(ns);
-    const centre = new THREE.Vector3();
-    box.getCenter(centre);
-    c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
-    return c;
-  }, [scene, modelScale]);
+  const { scene, loading, error } = useGLTFModel(url);
+
+  const cloned = useMemo(
+    () => (scene ? buildClone(scene, modelScale) : null),
+    [scene, modelScale],
+  );
+
+  if (loading) {
+    return (
+      <mesh position={position} rotation={rotation} scale={scale}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#888888" wireframe />
+      </mesh>
+    );
+  }
+
+  if (error || !cloned) {
+    return (
+      <mesh position={position} rotation={rotation} scale={scale}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#ef4444" wireframe />
+      </mesh>
+    );
+  }
+
   return (
     <group position={position} rotation={rotation} scale={scale} onClick={onClick}>
       <primitive object={cloned} />
@@ -70,10 +74,10 @@ function ModelMesh({
 }
 
 /**
- * Renders a single object as a Three.js mesh.
- * Uses RenderObject from server state (no GameRuntime dependency).
+ * Renders a single RenderObject from server state.
+ * Supports primitives, lights, 3-D models (GLB/GLTF), and audio sources.
  */
-export default function Primitive({ obj }: { obj: RenderObject }) {
+export default function Primitive({ obj, onClick }: { obj: RenderObject; onClick?: (e: any) => void }) {
   if (!obj.visible) return null;
   if (obj.type === "folder") return null;
 
@@ -94,6 +98,10 @@ export default function Primitive({ obj }: { obj: RenderObject }) {
     );
   }
 
+  if (obj.type === "audio") {
+    return null;
+  }
+
   if (obj.type === "model") {
     const modelUrl = obj.modelUrl;
     if (!modelUrl) {
@@ -105,24 +113,14 @@ export default function Primitive({ obj }: { obj: RenderObject }) {
       );
     }
     return (
-      <ModelErrorBoundary position={position} rotation={rotation} scale={scale}>
-        <Suspense
-          fallback={
-            <mesh position={position} rotation={rotation} scale={scale}>
-              <boxGeometry args={[1, 1, 1]} />
-              <meshStandardMaterial color="#888888" wireframe />
-            </mesh>
-          }
-        >
-          <ModelMesh
-            url={modelUrl}
-            position={position}
-            rotation={rotation}
-            scale={scale}
-            modelScale={obj.modelScale}
-          />
-        </Suspense>
-      </ModelErrorBoundary>
+      <ModelMesh
+        url={modelUrl}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        onClick={onClick}
+        modelScale={obj.modelScale ?? 1}
+      />
     );
   }
 
@@ -143,7 +141,7 @@ export default function Primitive({ obj }: { obj: RenderObject }) {
   }
 
   return (
-    <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow>
+    <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow onClick={onClick}>
       {geometry}
       <meshStandardMaterial color={color} transparent={isTransparent} opacity={opacity} />
     </mesh>

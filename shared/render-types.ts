@@ -24,6 +24,7 @@ export interface RenderObject {
   transparency: number;
   modelUrl?: string;
   modelScale?: number;
+  audioUrl?: string;
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;

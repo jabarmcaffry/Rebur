@@ -2,8 +2,9 @@ import { useState, Suspense, Component, type ReactNode, type DragEvent, useEffec
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls, useGLTF } from "@react-three/drei";
+import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
+import { useGLTFModel } from "@/lib/gltf-loader";
 import MonacoEditor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -195,36 +196,18 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
 ];
 
-// Configure DRACO decoder so compressed GLBs load correctly
-useGLTF.setDecoderPath("https://www.gstatic.com/draco/versioned/decoders/1.5.6/");
-
-/** Per-model error boundary — catches bad GLBs and shows a wireframe placeholder */
-class ModelLoadError extends Component<
-  { children: ReactNode; position: [number,number,number]; scale: [number,number,number]; onClick: () => void },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch(err: Error) { console.warn("[Editor] model load failed:", err.message); }
-  render() {
-    if (this.state.hasError) {
-      const { position, scale, onClick } = this.props;
-      return (
-        <mesh position={position} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#ef4444" wireframe />
-        </mesh>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// GLTF model loader — uses useGLTF (must be a separate component for hook rules).
-// Auto-normalises the model so its longest axis = 1 unit, then applies the user's
-// scale on top — this prevents giant imports while keeping scale=1 meaningful.
-// Selection uses a wireframe clone of the actual model geometry (not a bounding box).
-// An invisible hit-mesh guarantees reliable click detection on any model shape.
+/**
+ * GltfLoader — editor viewport component for GLB/GLTF models.
+ *
+ * Uses the shared useGLTFModel hook (imperative GLTFLoader + local DRACO decoder)
+ * instead of drei's useGLTF/Suspense pattern, giving us full error control and
+ * DRACO support without an external CDN.
+ *
+ * While loading: shows a gray wireframe placeholder.
+ * On error: shows a red wireframe placeholder.
+ * On success: renders the normalised model with a transparent hit-mesh for clicking
+ * and an optional purple wireframe overlay when selected.
+ */
 const GltfLoader = forwardRef<THREE.Object3D, {
   url: string;
   position: [number, number, number];
@@ -233,9 +216,21 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   selected: boolean;
   onClick: () => void;
 }>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
-  const { scene } = useGLTF(url);
+  const { scene, loading, error } = useGLTFModel(url);
+
   const { cloned, wireClone, hitSize, hitCenter } = useMemo(() => {
+    if (!scene) return { cloned: null, wireClone: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number] };
+
     const c = scene.clone(true);
+    // Deep-clone materials so the model renders with its own colours
+    c.traverse((child: any) => {
+      if (child.isMesh && child.material) {
+        child.material = Array.isArray(child.material)
+          ? child.material.map((m: THREE.Material) => m.clone())
+          : child.material.clone();
+      }
+    });
+
     const box = new THREE.Box3().setFromObject(c);
     const size = new THREE.Vector3();
     box.getSize(size);
@@ -246,23 +241,18 @@ const GltfLoader = forwardRef<THREE.Object3D, {
     box.getCenter(centre);
     c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
 
-    // Recalculate bounding box of the normalised model for the hit mesh
+    // Hit-mesh bounding box (normalised coords)
     const normBox = new THREE.Box3().setFromObject(c);
     const normSize = new THREE.Vector3();
     const normCenter = new THREE.Vector3();
     normBox.getSize(normSize);
     normBox.getCenter(normCenter);
 
-    // Wireframe clone — follows the actual model shape for selection highlight
+    // Purple wireframe selection overlay
     const wc = c.clone(true);
     wc.traverse((child: any) => {
       if (child.isMesh) {
-        child.material = new THREE.MeshBasicMaterial({
-          color: '#a855f7',
-          wireframe: true,
-          transparent: true,
-          opacity: 0.45,
-        });
+        child.material = new THREE.MeshBasicMaterial({ color: '#a855f7', wireframe: true, transparent: true, opacity: 0.45 });
         child.renderOrder = 1;
       }
     });
@@ -275,15 +265,34 @@ const GltfLoader = forwardRef<THREE.Object3D, {
     };
   }, [scene]);
 
+  // Loading placeholder
+  if (loading) {
+    return (
+      <mesh ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#888888" wireframe />
+      </mesh>
+    );
+  }
+
+  // Error placeholder
+  if (error || !cloned) {
+    return (
+      <mesh ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color="#ef4444" wireframe />
+      </mesh>
+    );
+  }
+
   return (
     <group ref={ref as any} position={position} rotation={rotation} scale={scale}>
-      {/* Invisible bounding-box mesh — reliable click target regardless of model shape */}
+      {/* Invisible hit-mesh — reliable click target regardless of model shape */}
       <mesh position={hitCenter} onClick={(e) => { e.stopPropagation(); onClick(); }}>
         <boxGeometry args={hitSize} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <primitive object={cloned} />
-      {/* Selection outline: wireframe of the model's actual geometry */}
       {selected && <primitive object={wireClone} />}
     </group>
   );
@@ -326,6 +335,29 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
   const isTransparent = transparency > 0;
 
   if (obj.type === "folder") return null;
+  if (obj.type === "audio") {
+    // Speaker icon in viewport so audio objects can be selected and positioned
+    const isSelected = selected;
+    return (
+      <group ref={ref as any} position={position} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+        <mesh>
+          <sphereGeometry args={[0.18, 12, 12]} />
+          <meshBasicMaterial color={isSelected ? "#a855f7" : "#22d3ee"} wireframe={!isSelected} />
+        </mesh>
+        <mesh position={[0, 0.26, 0]}>
+          <coneGeometry args={[0.12, 0.22, 8]} />
+          <meshBasicMaterial color={isSelected ? "#a855f7" : "#22d3ee"} />
+        </mesh>
+        {isSelected && (
+          <mesh>
+            <sphereGeometry args={[0.26, 12, 12]} />
+            <meshBasicMaterial color="#a855f7" wireframe transparent opacity={0.35} />
+          </mesh>
+        )}
+      </group>
+    );
+  }
+
   if (obj.type === "model") {
     const modelProps = (obj.properties ?? {}) as Record<string, any>;
     const modelUrl = modelProps.fileUrl as string | undefined;
@@ -338,16 +370,7 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
       );
     }
     return (
-      <ModelLoadError position={position} scale={scale} onClick={onClick}>
-        <Suspense fallback={
-          <mesh ref={ref as any} position={position} scale={scale}>
-            <boxGeometry args={[1, 1, 1]} />
-            <meshStandardMaterial color="#666666" wireframe />
-          </mesh>
-        }>
-          <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
-        </Suspense>
-      </ModelLoadError>
+      <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
     );
   }
 
@@ -429,6 +452,7 @@ export default function EditorPage() {
   const transformUpdateTimeout = useRef<number | null>(null);
   const pendingTransform = useRef<Partial<GameObject> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishDest, setPublishDest] = useState<"platform" | "embed" | "both">("platform");
@@ -689,6 +713,62 @@ export default function EditorPage() {
     
     // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  /** Handle importing audio files (.mp3, .wav, .ogg, .m4a, .aac) */
+  const handleImportAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validExts = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
+    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+    if (!validExts.includes(ext)) {
+      toast({ title: "Invalid file type", description: "Please select an audio file (.mp3, .wav, .ogg, .m4a)", variant: "destructive" });
+      if (audioInputRef.current) audioInputRef.current.value = "";
+      return;
+    }
+    toast({ title: "Uploading audio...", description: "Please wait" });
+    let fileUrl: string | undefined;
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("name", file.name);
+      formData.append("type", "audio");
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/assets/upload", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+      if (res.ok) {
+        const asset = await res.json();
+        fileUrl = asset.fileUrl as string;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: "Upload failed", description: err.message ?? `Server returned ${res.status}`, variant: "destructive" });
+        if (audioInputRef.current) audioInputRef.current.value = "";
+        return;
+      }
+    } catch (err: any) {
+      toast({ title: "Upload error", description: err?.message ?? "Network error", variant: "destructive" });
+      if (audioInputRef.current) audioInputRef.current.value = "";
+      return;
+    }
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+    const count = objects.filter((o) => o.type === "audio").length;
+    createObjectMutation.mutate({
+      name: `${baseName}${count > 0 ? count + 1 : ""}`,
+      type: "audio",
+      primitiveType: null,
+      container: "Workspace",
+      positionX: 0,
+      positionY: 1,
+      positionZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1,
+      color: "#22d3ee",
+      properties: { fileUrl, audioFile: file.name, volume: 1, loop: false },
+    } as Partial<GameObject>);
+    toast({ title: "Audio imported", description: `${file.name} added to Scene` });
+    if (audioInputRef.current) audioInputRef.current.value = "";
   };
 
   /** Objects that should appear in the 3D viewport — only Workspace + Lighting. */
@@ -1465,6 +1545,14 @@ export default function EditorPage() {
                 <Upload className="w-3.5 h-3.5 text-muted-foreground" />
                 <span>Import 3D Model</span>
               </button>
+              <button
+                onClick={() => audioInputRef.current?.click()}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
+                data-testid="button-import-audio"
+              >
+                <Upload className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Import Audio</span>
+              </button>
               <div className="my-1 border-t border-border" />
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
                 Publish
@@ -1500,6 +1588,14 @@ export default function EditorPage() {
             onChange={handleImport3DModel}
             className="hidden"
             data-testid="input-import-model"
+          />
+          <input
+            ref={audioInputRef}
+            type="file"
+            accept=".mp3,.wav,.ogg,.m4a,.aac"
+            onChange={handleImportAudio}
+            className="hidden"
+            data-testid="input-import-audio"
           />
           <Link href="/dashboard">
             <Button size="sm" variant="ghost" data-testid="button-back-dashboard">

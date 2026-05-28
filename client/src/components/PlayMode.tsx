@@ -147,6 +147,25 @@ export default function PlayMode({
       setMpError(err);
     };
 
+    renderClient.onSound = (soundId, options) => {
+      // Look up audio object by name in the current render objects
+      const objs = renderClient.getInterpolatedState().objects;
+      const audioObj = objs.find((o) => o.type === "audio" && o.name === soundId);
+      const url = audioObj?.audioUrl;
+      if (!url) {
+        console.warn(`[Sound] No audio object named "${soundId}" found`);
+        return;
+      }
+      try {
+        const audio = new Audio(url);
+        audio.volume = Math.max(0, Math.min(1, options?.volume ?? 1));
+        audio.loop = options?.loop ?? false;
+        audio.play().catch((err) => console.warn("[Sound] Play blocked:", err));
+      } catch (err) {
+        console.warn("[Sound] Error playing audio:", err);
+      }
+    };
+
     renderClient.connect();
 
     return () => {

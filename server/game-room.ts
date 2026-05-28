@@ -65,6 +65,7 @@ interface DynamicObj {
   transparency: number;
   modelUrl?: string;
   modelScale?: number;
+  audioUrl?: string;
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;
@@ -154,7 +155,8 @@ export class GameRoom {
         color: o.color ?? "#888888",
         visible: true, anchored,
         transparency: o.properties?.transparency ?? 0,
-        modelUrl: o.properties?.fileUrl,
+        modelUrl: o.type === "model" ? o.properties?.fileUrl : undefined,
+        audioUrl: o.type === "audio" ? o.properties?.fileUrl : undefined,
         modelScale: o.properties?.modelScale,
         animation: o.properties?.animation ?? null,
         animationSpeed: o.properties?.animationSpeed ?? 1,
@@ -175,14 +177,15 @@ export class GameRoom {
         canCollide: o.properties?.canCollide !== false,
       });
 
-      if (anchored) {
+      const isLogicalOnly = o.type === "audio" || o.type === "folder";
+      if (!isLogicalOnly && anchored) {
         this.statics.push({
           name: dobj.name,
           minX: px - sx/2, maxX: px + sx/2,
           minY: py - sy/2, maxY: py + sy/2,
           minZ: pz - sz/2, maxZ: pz + sz/2,
         });
-      } else {
+      } else if (!isLogicalOnly) {
         this.dynamics.set(o.id, dobj);
       }
     }
@@ -628,7 +631,7 @@ export class GameRoom {
     rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
     scale: { x: o.sx, y: o.sy, z: o.sz },
     color: o.color, visible: o.visible, transparency: o.transparency ?? 0,
-    modelUrl: o.modelUrl, modelScale: o.modelScale,
+    modelUrl: o.modelUrl, modelScale: o.modelScale, audioUrl: o.audioUrl,
     animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
   });
 
