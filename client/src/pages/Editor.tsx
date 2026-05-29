@@ -102,21 +102,20 @@ const CONTAINERS = [
   { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates + ModuleScripts",              defaultScriptType: "ModuleScript" },
 ];
 
-// All snippets use the bare-global, event-first style — matching the in-editor
-// Docs. Scripts run top-to-bottom once on Play;
-// register events for everything else.
+// All snippets use the Rebur.* single-global API.
+// Scripts run top-to-bottom once on Play; register events for everything else.
 const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   {
     label: "On key press",
-    code: `keyboard.onPress("e", () => {\n  log("E was pressed!");\n});\n`,
+    code: `Rebur.Input.onPress("e", () => {\n  log("E was pressed!");\n});\n`,
   },
   {
     label: "On key release",
-    code: `keyboard.onRelease("e", () => {\n  log("E was released");\n});\n`,
+    code: `Rebur.Input.onRelease("e", () => {\n  log("E was released");\n});\n`,
   },
   {
-    label: "Every frame (update event)",
-    code: `runService.update.on((dt) => {\n  const cube = Scene.Cube;\n  if (cube) cube.rotation.y += dt;\n});\n`,
+    label: "Every frame (tick)",
+    code: `Rebur.on("tick", (dt) => {\n  const cube = Rebur.Scene.find("Cube");\n  if (cube) cube.rotation = { x: 0, y: cube.rotation.y + dt, z: 0 };\n});\n`,
   },
   {
     label: "Repeat every N seconds",
@@ -131,68 +130,76 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
     code: `log("intro");\nawait wait(2);\nlog("main");\nawait wait(2);\nlog("done");\n`,
   },
   {
-    label: "On object touched",
-    code: `const cube = Scene.Cube;\ncube.on("touched", (other) => {\n  log("touched by", other.username || other.name);\n});\ncube.on("untouched", () => log("no longer touching"));\n`,
+    label: "On entity touched",
+    code: `const cube = Rebur.Scene.find("Cube");\nif (cube) {\n  cube.on("touched", (other) => {\n    log("touched by", other.isPlayer ? other.username : other.name);\n  });\n  cube.on("untouched", (other) => log("no longer touching", other.name));\n}\n`,
   },
   {
-    label: "On object clicked",
-    code: `const cube = Scene.Cube;\ncube.on("clicked", () => {\n  log("you clicked the cube");\n  cube.color = "#ff4444";\n});\n`,
+    label: "On entity clicked",
+    code: `const cube = Rebur.Scene.find("Cube");\nif (cube) {\n  cube.on("clicked", (player) => {\n    log(player.username, "clicked the cube");\n    cube.color = "#ff4444";\n  });\n}\n`,
   },
   {
     label: "On any 3D click (mouse)",
-    code: `mouse.onClick((obj) => {\n  if (obj) log("clicked", obj.name);\n  else log("clicked the sky");\n});\n`,
+    code: `Rebur.Input.onMouseClick((entity) => {\n  if (entity) log("clicked", entity.name);\n  else log("clicked the sky");\n});\n`,
   },
   {
-    label: "World lifecycle events",
-    code: `world.on("playerSpawned", (p) => log(p.username, "spawned"));\nworld.on("playerDied", (p) => log(p.username, "died"));\nworld.on("objectAdded", (o) => log("added", o.name));\nworld.on("objectRemoved", (o) => log("removed", o.name));\n`,
+    label: "Global lifecycle events",
+    code: `Rebur.on("playerJoined", (p) => log(p.username, "joined"));\nRebur.on("playerLeft", (p) => log(p.username, "left"));\nRebur.on("playerDied", (p) => log(p.username, "died"));\nRebur.on("playerRespawned", (p) => log(p.username, "respawned"));\nRebur.on("entityAdded", (e) => log("added", e.name));\nRebur.on("entityRemoved", (e) => log("removed", e.name));\n`,
   },
   {
-    label: "Spawn from ReplicatedStorage",
-    code: `const tree = spawn("Tree");\nif (tree) tree.position.x = random(-5, 5);\n`,
+    label: "Cross-container interaction (explicit)",
+    code: `// Explicit cross-container — no hidden coupling\nconst coin = Rebur.Scene.find("Coin");\nif (coin) {\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
   },
   {
-    label: "Create an object",
-    code: `const enemy = create({\n  name: "Goblin",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\n`,
+    label: "Create an entity",
+    code: `const enemy = Rebur.Scene.create({\n  name: "Goblin",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\nenemy.body.anchored = false;\nenemy.body.mass = 2;\n`,
   },
   {
-    label: "Make a planet (per-object gravity)",
-    code: `const planet = create({\n  name: "Planet",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 0, y: 5, z: -10 },\n  scale: { x: 6, y: 6, z: 6 },\n  color: "#4ade80",\n  gravity: { strength: 9.81, radius: 30 },\n});\n`,
+    label: "Force-based launch (impulse)",
+    code: `const ball = Rebur.Scene.find("Ball");\nif (ball) {\n  ball.body.anchored = false;\n  ball.body.mass = 3;\n  ball.body.restitution = 0.5;\n  ball.body.applyImpulse({ x: 0, y: 15, z: -20 });\n}\n`,
+  },
+  {
+    label: "Physics cannonball (spawned)",
+    code: `every(3, () => {\n  const ball = Rebur.Scene.create({\n    name: "Ball_" + Date.now(),\n    primitiveType: "sphere",\n    position: { x: 0, y: 5, z: 10 },\n    color: "#222222",\n    scale: { x: 0.5, y: 0.5, z: 0.5 },\n  });\n  ball.body.anchored = false;\n  ball.body.mass = 5;\n  ball.body.applyImpulse({ x: 0, y: 8, z: -25 });\n  after(5, () => { ball.destroy(); });\n});\n`,
   },
   {
     label: "Global state (multiplayer-ready)",
-    code: `state.set("phase", "Lobby");\nstate.on("phase", (next) => log("phase →", next));\n\nkeyboard.onPress("p", () => state.set("phase", "Playing"));\n`,
+    code: `Rebur.State.set("phase", "Lobby");\nRebur.State.on("phase", (next) => log("phase →", next));\n\nRebur.Input.onPress("p", () => Rebur.State.set("phase", "Playing"));\n`,
   },
   {
     label: "Super-jump for 5 seconds",
-    code: `keyboard.onPress("j", () => {\n  player.jumpPower = 16;\n  after(5, () => { player.jumpPower = 8; });\n});\n`,
+    code: `Rebur.Input.onPress("j", () => {\n  const players = Rebur.Players.all();\n  for (const p of players) {\n    p.jumpPower = 30;\n    after(5, () => { p.jumpPower = 8; });\n  }\n});\n`,
   },
   {
-    label: "Take damage / heal",
-    code: `keyboard.onPress("k", () => player.takeDamage(10));\nkeyboard.onPress("h", () => player.heal(20));\n`,
+    label: "Lava damage on touch",
+    code: `const lava = Rebur.Scene.find("Lava");\nif (lava) {\n  lava.on("touched", (other) => {\n    if (other.isPlayer) {\n      other.takeDamage(25);\n      log(other.username, "hit lava! HP:", other.health);\n    }\n  });\n}\n`,
   },
   {
     label: "GUI: text + button",
-    code: `gui.text("title", "Hello!", { anchor: "tc", y: 16, size: 22 });\ngui.button("respawn", "Respawn", { anchor: "br", x: 24, y: 24 }, () => {\n  player.respawn();\n});\n`,
+    code: `Rebur.Gui.text("title", "Hello!", { anchor: "tc", y: 16, size: 22 });\nRebur.Gui.button("respawn", "Respawn", { anchor: "br", x: 24, y: 24 }, () => {\n  for (const p of Rebur.Players.all()) p.respawn();\n});\n`,
   },
   {
-    label: "Player position",
-    code: `log("player", player.position);\n`,
+    label: "Score counter",
+    code: `Rebur.State.set("score", 0);\nRebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });\n\nRebur.State.on("score", (val) => {\n  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });\n});\n`,
   },
   {
-    label: "Inventory: pickup item",
-    code: `// Touch it to add it to your inventory.\nconst coin = create({\n  name: "Coin",\n  container: "Scene",\n  primitiveType: "sphere",\n  position: { x: 2, y: 1, z: 0 },\n  color: "#fbbf24",\n  scale: { x: 0.4, y: 0.4, z: 0.4 },\n});\ncoin.isPickup = true;\ncoin.pickupName = "Coin";\ncoin.pickupData = { value: 10 };\n`,
+    label: "Health bar HUD",
+    code: `Rebur.Gui.bar("hp", 100, 100, {\n  anchor: "bl", x: 20, y: 20,\n  width: 200, height: 16,\n  color: "#22c55e", bg: "#374151",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.on("changed", (prop, val) => {\n    if (prop === "health") Rebur.Gui.bar("hp", val, player.maxHealth);\n  });\n});\n`,
   },
   {
-    label: "Inventory: equip / drop",
-    code: `keyboard.onPress("1", () => inventory.equip("Sword"));\nkeyboard.onPress("q", () => inventory.drop("Sword"));\nkeyboard.onPress("i", () => log("Inventory:", inventory.items.map(i => i.name + " x" + i.count)));\n`,
+    label: "Inventory: pickup on touch",
+    code: `const coin = Rebur.Scene.find("Coin");\nif (coin) {\n  coin.body.isTrigger = true;\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
   },
   {
     label: "Hold item in hand",
-    code: `const tool = create({\n  name: "Tool",\n  container: "Scene",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\n// Choose the arm by choosing the hand slot. That arm raises automatically.\nplayer.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n\nkeyboard.onPress("f", () => {\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
+    code: `const tool = Rebur.Scene.create({\n  name: "Tool",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n});\n\nRebur.Input.onPress("f", () => {\n  for (const p of Rebur.Players.all()) {\n    const held = p.motors.detach("rightHand");\n    if (held) p.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n  }\n});\n`,
+  },
+  {
+    label: "Tween: move entity",
+    code: `const door = Rebur.Scene.find("Door");\nif (door) {\n  Rebur.Input.onPress("e", () => {\n    Rebur.Tween(door.position, { y: 5 }, 1, "easeOutQuad", () => {\n      log("Door opened!");\n    });\n  });\n}\n`,
   },
   {
     label: "Raycast forward",
-    code: `const origin = {\n  x: player.position.x,\n  y: player.position.y + 1.95,\n  z: player.position.z,\n};\nconst hit = raycast(origin, { x: 0, y: 0, z: -1 }, 25);\nif (hit) log("Ray hit", hit.object.name, "at", hit.distance.toFixed(1));\n`,
+    code: `Rebur.on("tick", () => {\n  for (const p of Rebur.Players.all()) {\n    const origin = { x: p.position.x, y: p.position.y + 1.5, z: p.position.z };\n    const hit = raycast(origin, { x: 0, y: 0, z: -1 }, 25);\n    if (hit) log("Ray hit", hit.entity.name, "at", hit.distance.toFixed(1));\n  }\n});\n`,
   },
 ];
 
@@ -1276,6 +1283,8 @@ export default function EditorPage() {
     <ScrollArea className="flex-1 h-full">
       {selected ? (
         <div className="p-3 space-y-4">
+
+          {/* ─── Name (always shown) ─── */}
           <div className="space-y-1.5">
             <Label className="text-xs">Name</Label>
             <Input
@@ -1284,166 +1293,448 @@ export default function EditorPage() {
               data-testid="input-object-name"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Color</Label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={selected.color ?? "#888888"}
-                onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
-                data-testid="input-object-color"
-              />
-              <Input
-                value={selected.color ?? "#888888"}
-                onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                className="font-mono text-xs"
-              />
-            </div>
+
+          {/* ─── Type badge ─── */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Type</span>
+            <span className="text-[11px] font-mono bg-muted px-1.5 py-0.5 rounded">
+              {selected.type}{selected.primitiveType ? ` / ${selected.primitiveType}` : ""}
+            </span>
           </div>
-          <Separator />
-          <VectorField
-            label="Position"
-            testIdPrefix="position"
-            values={[selected.positionX ?? 0, selected.positionY ?? 0, selected.positionZ ?? 0]}
-            onChange={(i, v) => {
-              const field = (["positionX", "positionY", "positionZ"] as const)[i];
-              handleObjectFieldChange(field, v);
-            }}
-          />
-          <VectorField
-            label="Rotation"
-            testIdPrefix="rotation"
-            values={[selected.rotationX ?? 0, selected.rotationY ?? 0, selected.rotationZ ?? 0]}
-            step={0.05}
-            onChange={(i, v) => {
-              const field = (["rotationX", "rotationY", "rotationZ"] as const)[i];
-              handleObjectFieldChange(field, v);
-            }}
-          />
-          <VectorField
-            label="Scale"
-            testIdPrefix="scale"
-            values={[selected.scaleX ?? 1, selected.scaleY ?? 1, selected.scaleZ ?? 1]}
-            step={0.1}
-            onChange={(i, v) => {
-              const field = (["scaleX", "scaleY", "scaleZ"] as const)[i];
-              handleObjectFieldChange(field, v);
-            }}
-          />
-          {/* Container/parent moves are done by dragging in the Hierarchy panel. */}
 
-          <Separator />
+          {/* ─── Audio-specific properties ─── */}
+          {selected.type === "audio" && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Audio</Label>
 
-          {/* ─── Physics & Behavior ─── */}
-          <div className="space-y-3">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Physics</Label>
+                {/* File (read-only) */}
+                {getProp<string>("audioFile", "") && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">File</Label>
+                    <div className="text-xs font-mono text-foreground/70 bg-muted px-2 py-1.5 rounded truncate">
+                      {getProp<string>("audioFile", "")}
+                    </div>
+                  </div>
+                )}
 
-            <div className="flex items-center justify-between">
-              <Label htmlFor="prop-anchored" className="text-xs">Anchored</Label>
-              <Switch
-                id="prop-anchored"
-                checked={getProp("anchored", true)}
-                onCheckedChange={(v) => handlePropertyChange({ anchored: v })}
-                data-testid="switch-anchored"
-              />
-            </div>
+                {/* Volume */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Volume</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("volume", 1).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("volume", 1)]}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    onValueChange={([v]) => handlePropertyChange({ volume: v })}
+                    data-testid="slider-volume"
+                  />
+                </div>
 
-            <div className="flex items-center justify-between">
-              <Label htmlFor="prop-cancollide" className="text-xs">Can Collide</Label>
-              <Switch
-                id="prop-cancollide"
-                checked={getProp("canCollide", true)}
-                onCheckedChange={(v) => handlePropertyChange({ canCollide: v })}
-                data-testid="switch-cancollide"
-              />
-            </div>
+                {/* Loop */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-loop" className="text-xs">Loop</Label>
+                  <Switch
+                    id="prop-loop"
+                    checked={getProp("loop", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ loop: v })}
+                    data-testid="switch-loop"
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">Transparency</Label>
-                <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {getProp<number>("transparency", 0).toFixed(2)}
-                </span>
+                {/* Autoplay */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-autoplay" className="text-xs">Autoplay</Label>
+                  <Switch
+                    id="prop-autoplay"
+                    checked={getProp("autoplay", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ autoplay: v })}
+                    data-testid="switch-autoplay"
+                  />
+                </div>
+
+                {/* Spatial (3D positional audio) */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-spatial" className="text-xs">Spatial (3D)</Label>
+                  <Switch
+                    id="prop-spatial"
+                    checked={getProp("spatial", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ spatial: v })}
+                    data-testid="switch-spatial"
+                  />
+                </div>
+
+                {getProp<boolean>("spatial", false) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Max Distance</Label>
+                      <Input
+                        type="number"
+                        step={1}
+                        min={1}
+                        value={getProp<number>("maxDistance", 40)}
+                        onChange={(e) => handlePropertyChange({ maxDistance: parseFloat(e.target.value) || 1 })}
+                        data-testid="input-max-distance"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Rolloff</Label>
+                      <Input
+                        type="number"
+                        step={0.1}
+                        min={0}
+                        max={1}
+                        value={getProp<number>("rolloff", 1)}
+                        onChange={(e) => handlePropertyChange({ rolloff: parseFloat(e.target.value) || 0 })}
+                        data-testid="input-rolloff"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <Slider
-                value={[getProp<number>("transparency", 0)]}
-                min={0}
-                max={1}
+
+              {/* Position for spatial audio */}
+              <Separator />
+              <VectorField
+                label="Position"
+                testIdPrefix="position"
+                values={[selected.positionX ?? 0, selected.positionY ?? 0, selected.positionZ ?? 0]}
+                onChange={(i, v) => {
+                  const field = (["positionX", "positionY", "positionZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
+              />
+            </>
+          )}
+
+          {/* ─── Light-specific properties ─── */}
+          {selected.type === "light" && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Light</Label>
+
+                {/* Light type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Light Type</Label>
+                  <Select
+                    value={getProp<string>("lightType", "point")}
+                    onValueChange={(v) => handlePropertyChange({ lightType: v })}
+                  >
+                    <SelectTrigger data-testid="select-light-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="point">Point</SelectItem>
+                      <SelectItem value="spot">Spot</SelectItem>
+                      <SelectItem value="directional">Directional</SelectItem>
+                      <SelectItem value="ambient">Ambient</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Color */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selected.color ?? "#ffffff"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                      data-testid="input-object-color"
+                    />
+                    <Input
+                      value={selected.color ?? "#ffffff"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Intensity */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Intensity</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("intensity", 1).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("intensity", 1)]}
+                    min={0}
+                    max={5}
+                    step={0.05}
+                    onValueChange={([v]) => handlePropertyChange({ intensity: v })}
+                    data-testid="slider-intensity"
+                  />
+                </div>
+
+                {/* Range */}
+                {getProp<string>("lightType", "point") !== "directional" && getProp<string>("lightType", "point") !== "ambient" && (
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Range</Label>
+                    <Input
+                      type="number"
+                      step={1}
+                      min={0}
+                      value={getProp<number>("range", 10)}
+                      onChange={(e) => handlePropertyChange({ range: parseFloat(e.target.value) || 0 })}
+                      data-testid="input-light-range"
+                    />
+                  </div>
+                )}
+
+                {/* Spot angle */}
+                {getProp<string>("lightType", "point") === "spot" && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">Cone Angle</Label>
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                        {getProp<number>("spotAngle", 45)}°
+                      </span>
+                    </div>
+                    <Slider
+                      value={[getProp<number>("spotAngle", 45)]}
+                      min={5}
+                      max={170}
+                      step={1}
+                      onValueChange={([v]) => handlePropertyChange({ spotAngle: v })}
+                      data-testid="slider-spot-angle"
+                    />
+                  </div>
+                )}
+
+                {/* Cast shadows */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-shadows" className="text-xs">Cast Shadows</Label>
+                  <Switch
+                    id="prop-shadows"
+                    checked={getProp("castShadows", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ castShadows: v })}
+                    data-testid="switch-cast-shadows"
+                  />
+                </div>
+              </div>
+
+              <Separator />
+              <VectorField
+                label="Position"
+                testIdPrefix="position"
+                values={[selected.positionX ?? 0, selected.positionY ?? 0, selected.positionZ ?? 0]}
+                onChange={(i, v) => {
+                  const field = (["positionX", "positionY", "positionZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
+              />
+              <VectorField
+                label="Rotation"
+                testIdPrefix="rotation"
+                values={[selected.rotationX ?? 0, selected.rotationY ?? 0, selected.rotationZ ?? 0]}
                 step={0.05}
-                onValueChange={([v]) => handlePropertyChange({ transparency: v })}
-                data-testid="slider-transparency"
+                onChange={(i, v) => {
+                  const field = (["rotationX", "rotationY", "rotationZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
               />
-            </div>
+            </>
+          )}
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">Mass</Label>
-                <Input
-                  type="number"
-                  step={0.1}
-                  value={getProp<number>("mass", 1)}
-                  onChange={(e) => handlePropertyChange({ mass: parseFloat(e.target.value) || 0 })}
-                  data-testid="input-mass"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-[11px] text-muted-foreground">Friction</Label>
-                <Input
-                  type="number"
-                  step={0.05}
-                  value={getProp<number>("friction", 0.4)}
-                  onChange={(e) => handlePropertyChange({ friction: parseFloat(e.target.value) || 0 })}
-                  data-testid="input-friction"
-                />
-              </div>
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* ─── Custom Gravity Source ─── */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Gravity Source</Label>
-              <Switch
-                checked={getProp("gravityEnabled", false)}
-                onCheckedChange={(v) => handlePropertyChange({ gravityEnabled: v })}
-                data-testid="switch-gravity-enabled"
-              />
-            </div>
-            <p className="text-[11px] text-muted-foreground leading-snug">
-              When on, this object pulls players & parts toward its center — they'll walk on it like a planet.
-            </p>
-            {getProp<boolean>("gravityEnabled", false) && (
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">Strength</Label>
-                  <Input
-                    type="number"
-                    step={0.5}
-                    value={getProp<number>("gravityStrength", 9.81)}
-                    onChange={(e) =>
-                      handlePropertyChange({ gravityStrength: parseFloat(e.target.value) || 0 })
-                    }
-                    data-testid="input-gravity-strength"
+          {/* ─── Entity (primitive/model) properties ─── */}
+          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Color</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={selected.color ?? "#888888"}
+                    onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                    className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                    data-testid="input-object-color"
                   />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">Radius</Label>
                   <Input
-                    type="number"
-                    step={1}
-                    value={getProp<number>("gravityRadius", 30)}
-                    onChange={(e) =>
-                      handlePropertyChange({ gravityRadius: parseFloat(e.target.value) || 0 })
-                    }
-                    data-testid="input-gravity-radius"
+                    value={selected.color ?? "#888888"}
+                    onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                    className="font-mono text-xs"
                   />
                 </div>
               </div>
-            )}
-          </div>
+              <Separator />
+              <VectorField
+                label="Position"
+                testIdPrefix="position"
+                values={[selected.positionX ?? 0, selected.positionY ?? 0, selected.positionZ ?? 0]}
+                onChange={(i, v) => {
+                  const field = (["positionX", "positionY", "positionZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
+              />
+              <VectorField
+                label="Rotation"
+                testIdPrefix="rotation"
+                values={[selected.rotationX ?? 0, selected.rotationY ?? 0, selected.rotationZ ?? 0]}
+                step={0.05}
+                onChange={(i, v) => {
+                  const field = (["rotationX", "rotationY", "rotationZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
+              />
+              <VectorField
+                label="Scale"
+                testIdPrefix="scale"
+                values={[selected.scaleX ?? 1, selected.scaleY ?? 1, selected.scaleZ ?? 1]}
+                step={0.1}
+                onChange={(i, v) => {
+                  const field = (["scaleX", "scaleY", "scaleZ"] as const)[i];
+                  handleObjectFieldChange(field, v);
+                }}
+              />
+
+              <Separator />
+
+              {/* ─── Physics body ─── */}
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Physics Body</Label>
+
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-anchored" className="text-xs">Anchored</Label>
+                  <Switch
+                    id="prop-anchored"
+                    checked={getProp("anchored", true)}
+                    onCheckedChange={(v) => handlePropertyChange({ anchored: v })}
+                    data-testid="switch-anchored"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-cancollide" className="text-xs">Can Collide</Label>
+                  <Switch
+                    id="prop-cancollide"
+                    checked={getProp("canCollide", true)}
+                    onCheckedChange={(v) => handlePropertyChange({ canCollide: v })}
+                    data-testid="switch-cancollide"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-trigger" className="text-xs">Is Trigger</Label>
+                  <Switch
+                    id="prop-trigger"
+                    checked={getProp("isTrigger", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ isTrigger: v })}
+                    data-testid="switch-trigger"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Transparency</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("transparency", 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("transparency", 0)]}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    onValueChange={([v]) => handlePropertyChange({ transparency: v })}
+                    data-testid="slider-transparency"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Mass</Label>
+                    <Input
+                      type="number"
+                      step={0.1}
+                      min={0.01}
+                      value={getProp<number>("mass", 1)}
+                      onChange={(e) => handlePropertyChange({ mass: parseFloat(e.target.value) || 0 })}
+                      data-testid="input-mass"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Friction</Label>
+                    <Input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      max={1}
+                      value={getProp<number>("friction", 0.4)}
+                      onChange={(e) => handlePropertyChange({ friction: parseFloat(e.target.value) || 0 })}
+                      data-testid="input-friction"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Bounce</Label>
+                    <Input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      max={1}
+                      value={getProp<number>("restitution", 0)}
+                      onChange={(e) => handlePropertyChange({ restitution: parseFloat(e.target.value) || 0 })}
+                      data-testid="input-restitution"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* ─── Custom Gravity Source ─── */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Gravity Source</Label>
+                  <Switch
+                    checked={getProp("gravityEnabled", false)}
+                    onCheckedChange={(v) => handlePropertyChange({ gravityEnabled: v })}
+                    data-testid="switch-gravity-enabled"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  When on, this entity pulls players & parts toward its center — like a planet.
+                </p>
+                {getProp<boolean>("gravityEnabled", false) && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Strength</Label>
+                      <Input
+                        type="number"
+                        step={0.5}
+                        value={getProp<number>("gravityStrength", 9.81)}
+                        onChange={(e) =>
+                          handlePropertyChange({ gravityStrength: parseFloat(e.target.value) || 0 })
+                        }
+                        data-testid="input-gravity-strength"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Radius</Label>
+                      <Input
+                        type="number"
+                        step={1}
+                        value={getProp<number>("gravityRadius", 30)}
+                        onChange={(e) =>
+                          handlePropertyChange({ gravityRadius: parseFloat(e.target.value) || 0 })
+                        }
+                        data-testid="input-gravity-radius"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           <Separator />
           <Button
@@ -1454,7 +1745,7 @@ export default function EditorPage() {
             data-testid="button-delete-object"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span className="ml-1">Delete Object</span>
+            <span className="ml-1">Delete Entity</span>
           </Button>
         </div>
       ) : selectedScript ? (

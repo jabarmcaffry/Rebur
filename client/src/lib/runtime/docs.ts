@@ -1,50 +1,88 @@
 // docs.ts — DEFAULT_SCRIPT + full SCRIPTING_DOCS
 
-export const DEFAULT_SCRIPT = `// Scripts run SERVER-SIDE — safe and secure.
-// Use game.on("tick", fn) for per-frame logic.
-// Press Docs in the toolbar for the full API reference.
+export const DEFAULT_SCRIPT = `// Scripts run server-side in a secure sandbox.
+// Rebur is the only global — everything hangs off it.
 
-// Example: spin a part every frame
+// Example: spin an entity every frame
 let angle = 0;
-game.on("tick", function(dt) {
+Rebur.on("tick", (dt) => {
   angle += dt * 2;
-  Scene.Part.Rotation = { X: 0, Y: angle, Z: 0 };
+  const spinner = Rebur.Scene.find("Part");
+  if (spinner) spinner.rotation = { x: 0, y: angle, z: 0 };
 });
 
-// Example: react when a player touches a part
-Scene.Part.on("Touched", function(player) {
-  log("Touched by", player.Name);
-  Scene.Part.Color = "#ff0000";
-});
+// Example: react when a player touches an entity
+const lava = Rebur.Scene.find("Lava");
+if (lava) {
+  lava.on("touched", (other) => {
+    if (other.isPlayer) {
+      other.takeDamage(25);
+      log(other.username, "hit lava! HP:", other.health);
+    }
+  });
+}
 `;
 
 export const SCRIPTING_DOCS = `# Rebur Engine — Scripting Reference
 
-All scripts run **server-side** inside a secure VM sandbox. They have full access to scene objects, players, GUI, timers, physics, state, tweens, and sounds — but not to the file system, network, or Node.js internals.
+All scripts run **server-side** inside a secure VM sandbox. The only global is **\`Rebur\`** — every subsystem hangs off it. Scripts cannot access the file system, Node.js internals, or the network.
 
 ---
 
 ## Table of Contents
 
-1. [Execution Model](#execution-model)
-2. [Scene Objects](#scene-objects)
-3. [Object Properties](#object-properties)
-4. [Object Events](#object-events)
-5. [Create Objects at Runtime](#create-objects-at-runtime)
-6. [Players](#players)
-7. [Game Events](#game-events)
-8. [Shared State Machine](#shared-state-machine)
-9. [Tween System](#tween-system)
-10. [Sound](#sound)
-11. [GUI](#gui)
-12. [Timers](#timers)
-13. [World Utilities](#world-utilities)
-14. [Logging](#logging)
-15. [Vector3](#vector3)
-16. [Color3](#color3)
-17. [RunService Alias](#runservice-alias)
-18. [Safe Standard Library](#safe-standard-library)
-19. [Quick Start Examples](#quick-start-examples)
+1. [Architecture](#architecture)
+2. [Execution Model](#execution-model)
+3. [Rebur Global Events](#rebur-global-events)
+4. [Entities](#entities)
+5. [Entity Properties](#entity-properties)
+6. [Entity Physics Body](#entity-physics-body)
+7. [Entity Events](#entity-events)
+8. [Rebur.Scene — Entity Container](#reburscene)
+9. [Rebur.Players — Player Entities](#reburplayers)
+10. [Player Entity](#player-entity)
+11. [Rebur.State — Shared State](#reburstate)
+12. [Rebur.Gui — HUD Overlay](#reburgui)
+13. [Rebur.Sound — Audio](#rebursound)
+14. [Rebur.Tween — Animation](#reburtween)
+15. [Rebur.Camera — Camera Control](#reburcamera)
+16. [Rebur.Input — Keyboard & Mouse](#reburinput)
+17. [Rebur.Physics — Global Physics](#reburglobal-physics)
+18. [Rebur.RunService — Game Loop](#reburrunservice)
+19. [Rebur.Network — Multiplayer](#reburnetwork)
+20. [Rebur.Tags — Tag System](#reburtags)
+21. [Timers](#timers)
+22. [Logging](#logging)
+23. [Vector3 & Color3](#vector3--color3)
+24. [Quick Start Examples](#quick-start-examples)
+
+---
+
+## Architecture
+
+\`\`\`
+Rebur                   ← single global
+├── Scene               ← 3D entity container (live world)
+├── Players             ← player entity container
+├── Lighting            ← lighting entity container
+├── Storage             ← template/module container (not rendered)
+├── Gui                 ← HUD overlay
+├── Sound               ← audio playback
+├── State               ← shared key-value store
+├── Tween               ← property animation
+├── Camera              ← camera control
+├── Input               ← keyboard + mouse
+├── Physics             ← global physics settings
+├── RunService          ← game loop phase channels
+├── Network             ← multiplayer messaging
+└── Tags                ← entity tag queries
+\`\`\`
+
+**Key rules:**
+- \`Rebur\` is the **only** global. No \`Scene\`, \`Players\`, \`gui\`, \`game\`, etc.
+- All entities (including players) share the same base API — players are entities with \`isPlayer = true\`.
+- Cross-container interaction is **explicit** — there is no hidden magic coupling.
+- Single access pattern everywhere: \`Rebur.Scene.find("name")\`, \`Rebur.Players.get(id)\`.
 
 ---
 
@@ -53,156 +91,227 @@ All scripts run **server-side** inside a secure VM sandbox. They have full acces
 Scripts load once when Play starts. Top-level code runs immediately; ongoing logic is driven by event handlers.
 
 \`\`\`js
-// Top-level code runs ONCE when the script loads
+// Top-level — runs ONCE when the script loads
 log("Script started!");
 
-// Register handlers for ongoing work
-game.on("tick", function(dt) {
-  // Called every physics step (~20× per second), dt ≈ 0.05 seconds
+// Global tick — called every physics step (~20 Hz)
+Rebur.on("tick", (dt) => {
+  // dt ≈ 0.05 s (seconds since last step)
 });
 
-Scene.Part.on("Touched", function(player) {
-  // Called when a player's capsule enters the part
-});
+// Entity event — must get a reference first
+const coin = Rebur.Scene.find("Coin");
+if (coin) {
+  coin.on("touched", (other) => {
+    log("Coin touched by", other.name);
+  });
+}
 \`\`\`
 
 **Key principle:** Avoid blocking loops (\`while(true)\`). Use events and timers instead.
 
 ---
 
-## Scene Objects
+## Rebur Global Events
 
-Access any named object in your scene via the \`Scene\` proxy. Names are **case-sensitive** and must match the Hierarchy panel exactly.
+Subscribe with \`Rebur.on(event, handler)\`. Returns an unsubscribe function.
+
+| Event | When | Handler receives |
+|-------|------|-----------------|
+| \`"tick"\` | Every physics step (~20 Hz) | \`dt\` (seconds) |
+| \`"playerJoined"\` | A player connects | \`player\` entity |
+| \`"playerLeft"\` | A player disconnects | \`player\` entity |
+| \`"playerDied"\` | A player's health reaches 0 | \`player\` entity |
+| \`"playerRespawned"\` | A player respawns | \`player\` entity |
+| \`"entityAdded"\` | Any entity added to the world | \`entity\` |
+| \`"entityRemoved"\` | Any entity removed from the world | \`entity\` |
 
 \`\`\`js
-// Access by name
-Scene.PartName
-Scene["My Part"]     // bracket notation for names with spaces
+Rebur.on("tick", (dt) => {
+  // runs every physics step
+});
 
-// Find by name across ALL containers (Workspace, Lighting, etc.)
-const obj = find("PartName");
-const obj = game.find("PartName");  // identical
+Rebur.on("playerJoined", (player) => {
+  log(player.username, "joined!");
+  Rebur.Gui.text("welcome", "Welcome " + player.username, { anchor: "tc", y: 20 });
+  after(3, () => Rebur.Gui.clear("welcome"));
+});
 
-// Destroy (hide) an object by name
-destroy("OldBarrier");
-game.destroy("OldBarrier");  // identical
+Rebur.on("playerLeft", (player) => {
+  log(player.username, "left");
+});
+
+Rebur.on("playerDied", (player) => {
+  log(player.username, "died");
+});
+
+Rebur.on("playerRespawned", (player) => {
+  log(player.username, "respawned at", player.position.y);
+});
+
+const unsub = Rebur.on("entityAdded", (entity) => {
+  log("new entity:", entity.name);
+});
+unsub(); // stop listening
 \`\`\`
-
-If the object does not exist, reads return \`undefined\` and a warning is printed to the console. Writes are silently ignored.
 
 ---
 
-## Object Properties
+## Entities
 
-All properties use **PascalCase** and are readable and writable unless noted.
+**Everything in the Rebur world is an entity** — parts, models, players, lights, audio sources. They all share the same base API. Players are entities with \`isPlayer = true\`.
 
-### Position
+Entities are identified by:
+- **\`id\`** — immutable unique string (use for long-lived references)
+- **\`name\`** — mutable display name (use for lookup by \`Rebur.Scene.find()\`)
+- **hierarchy** — parent/child relationships
 
 \`\`\`js
-const pos = Scene.Part.Position;  // { X, Y, Z }
-log(pos.X, pos.Y, pos.Z);
+const part = Rebur.Scene.find("Platform");
+if (!part) return; // always guard — entity may not exist
 
-Scene.Part.Position = { X: 0, Y: 5, Z: 0 };
-Scene.Part.Position = { X: pos.X + 1, Y: pos.Y, Z: pos.Z };
+log(part.id);       // "abc-123" (immutable)
+log(part.name);     // "Platform"
+log(part.type);     // "primitive", "model", "light", "audio", etc.
+log(part.isPlayer); // false for non-player entities
 \`\`\`
 
-### Rotation
+---
 
-Values are in **radians**.
+## Entity Properties
+
+All properties use **lowercase camelCase**. Readable and writable unless noted.
+
+### position · rotation · scale
 
 \`\`\`js
-const rot = Scene.Part.Rotation;  // { X, Y, Z }
-Scene.Part.Rotation = { X: 0, Y: Math.PI / 2, Z: 0 };  // 90° around Y
+const e = Rebur.Scene.find("Part");
 
-// Spin every tick
-let angle = 0;
-game.on("tick", function(dt) {
-  angle += dt;
-  Scene.Spinner.Rotation = { X: 0, Y: angle, Z: 0 };
+// Read
+const p = e.position; // { x, y, z }
+log(p.x, p.y, p.z);
+
+// Write — assign a new object
+e.position = { x: 0, y: 5, z: 0 };
+e.rotation = { x: 0, y: Math.PI / 2, z: 0 }; // radians
+e.scale    = { x: 2, y: 2, z: 2 };
+\`\`\`
+
+### color · visible · transparency
+
+\`\`\`js
+e.color        = "#ff0000";        // CSS hex, rgb(), named
+e.visible      = false;            // hide
+e.transparency = 0.5;              // 0 = opaque, 1 = invisible
+\`\`\`
+
+### name *(read/write)*, id · type *(read-only)*
+
+\`\`\`js
+log(e.id);      // unique id — never changes
+log(e.name);    // display name
+log(e.type);    // "primitive" | "model" | "light" | "audio" | ...
+e.name = "NewName"; // rename (updates Rebur.Scene.find results)
+\`\`\`
+
+### isPlayer *(read-only)*
+
+\`\`\`js
+entity.on("touched", (other) => {
+  if (other.isPlayer) {
+    other.takeDamage(10); // player-specific method
+  }
 });
 \`\`\`
 
-### Color
+---
 
-CSS color string (hex, rgb, named).
+## Entity Physics Body
+
+Physics lives on \`entity.body\`. Direct velocity assignment is gone — use forces/impulses for realistic results that scale to vehicles and complex simulations.
+
+### body properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| \`body.anchored\` | boolean | Static collider (no physics movement) |
+| \`body.canCollide\` | boolean | Participates in collision detection |
+| \`body.mass\` | number | Mass in kg (default 1) |
+| \`body.friction\` | number | Surface friction (default 0.5) |
+| \`body.restitution\` | number | Bounciness 0–1 (default 0) |
+| \`body.isKinematic\` | boolean | Script-moved; not affected by forces |
+| \`body.isTrigger\` | boolean | Detects overlaps but no collision response |
+| \`body.velocity\` | \`{x,y,z}\` | Current velocity (read-only) |
+| \`body.angularVelocity\` | \`{x,y,z}\` | Current angular velocity (read-only) |
 
 \`\`\`js
-Scene.Part.Color = "#ff0000";
-Scene.Part.Color = "blue";
-Scene.Part.Color = "rgb(0, 255, 0)";
+const ball = Rebur.Scene.find("Ball");
+
+ball.body.anchored     = false;
+ball.body.mass         = 2;
+ball.body.friction     = 0.3;
+ball.body.restitution  = 0.8;   // very bouncy
+ball.body.isKinematic  = false;
+ball.body.isTrigger    = false;  // solid collision
 \`\`\`
 
-### Visible
+### body methods — force-based physics
 
 \`\`\`js
-Scene.Part.Visible = false;  // hide
-Scene.Part.Visible = true;   // show
+// Continuous force (applied each frame, good for constant pushes)
+ball.body.applyForce({ x: 0, y: 50, z: 0 });
+
+// Instant impulse (one-shot velocity change, good for launches)
+ball.body.applyImpulse({ x: 0, y: 10, z: 0 });
+
+// Torque (spin force)
+ball.body.applyTorque({ x: 0, y: 5, z: 0 });
+
+// Direct velocity override (use sparingly — breaks physical realism)
+ball.body.setVelocity({ x: 5, y: 0, z: -5 });
+ball.body.setAngularVelocity({ x: 0, y: Math.PI, z: 0 });
+
+// Stop all motion
+ball.body.setVelocity({ x: 0, y: 0, z: 0 });
+ball.body.setAngularVelocity({ x: 0, y: 0, z: 0 });
 \`\`\`
 
-### Transparency
-
-0 = fully opaque, 1 = fully invisible.
-
 \`\`\`js
-Scene.Part.Transparency = 0.5;   // 50% see-through
-\`\`\`
-
-### Anchored
-
-When \`true\` the part is a static collider. When \`false\` it can be moved by scripts and physics.
-
-\`\`\`js
-Scene.Part.Anchored = false;  // becomes dynamic
-Scene.Part.Anchored = true;   // becomes static collider
-\`\`\`
-
-### CanCollide
-
-Whether players and physics objects collide with this part.
-
-\`\`\`js
-Scene.Part.CanCollide = false;  // walk through it
-\`\`\`
-
-### Velocity
-
-Applies a velocity vector to an unanchored dynamic object.
-
-\`\`\`js
-Scene.Ball.Velocity = { X: 0, Y: 10, Z: 0 };   // launch upward
-Scene.Ball.Velocity = { X: 5, Y: 0, Z: -5 };   // launch diagonally
-\`\`\`
-
-### Size / Scale *(read-only)*
-
-\`\`\`js
-const sz = Scene.Part.Size;  // { X, Y, Z }
-log(sz.X, sz.Y, sz.Z);
-\`\`\`
-
-### Name *(read-only)*
-
-\`\`\`js
-log(Scene.Part.Name);  // "Part"
+// Launch a cannonball
+const cannon = Rebur.Scene.create({
+  name: "Cannonball",
+  primitiveType: "sphere",
+  position: { x: 0, y: 3, z: 0 },
+  color: "#333333",
+});
+cannon.body.anchored = false;
+cannon.body.mass = 5;
+cannon.body.applyImpulse({ x: 0, y: 5, z: -20 }); // launch forward-up
 \`\`\`
 
 ---
 
-## Object Events
+## Entity Events
 
-### .on(eventName, handler) → unsubscribe
+### entity.on(event, handler) → unsubscribe
 
-Listen for an event on a specific object. Returns an unsubscribe function.
-
-| Event | When it fires | Handler receives |
-|-------|---------------|-----------------|
-| \`"Touched"\` | Player capsule enters the object | \`player\` |
-| \`"clicked"\` | A player clicks the object in 3D | \`player\` |
-| *(custom)* | Your script calls \`.emit()\` | whatever args you pass |
+| Event | When | Handler receives |
+|-------|------|-----------------|
+| \`"touched"\` | An entity/player overlaps this | \`other\` entity |
+| \`"untouched"\` | Overlap ends | \`other\` entity |
+| \`"clicked"\` | Player clicks in 3D viewport | \`player\` entity |
+| \`"destroyed"\` | Entity is destroyed | — |
+| \`"collisionStarted"\` | Physics collision begins | \`other\`, impulse |
+| \`"collisionEnded"\` | Physics collision ends | \`other\` |
+| *(custom)* | Your script calls \`.emit()\` | your args |
 
 \`\`\`js
-const unsub = Scene.Lava.on("Touched", function(player) {
-  player.TakeDamage(25);
+const lava = Rebur.Scene.find("Lava");
+
+const unsub = lava.on("touched", (other) => {
+  if (other.isPlayer) {
+    other.takeDamage(25);
+  }
 });
 
 // Stop listening later
@@ -210,610 +319,647 @@ unsub();
 \`\`\`
 
 \`\`\`js
-// 3D click — fires when the player clicks an object in the viewport
-Scene.Chest.on("clicked", function(player) {
-  log(player.Name, "opened the chest!");
-  Scene.Chest.Visible = false;
+// Cross-container interaction — explicit, no magic
+const coin = Rebur.Scene.find("Coin");
+coin.on("touched", (other) => {
+  if (other.isPlayer) {
+    // explicit reference — no implicit link between containers
+    const player = Rebur.Players.get(other.id);
+    if (player) {
+      player.inventory.add("Coin", { count: 1 });
+      coin.visible = false;
+      after(3, () => { coin.visible = true; });
+    }
+  }
 });
 \`\`\`
 
-### .off(eventName, handler)
-
-Remove a specific listener.
+### entity.off(event, handler)
 
 \`\`\`js
-function onTouch(player) { log("touched!"); }
-Scene.Button.on("Touched", onTouch);
-Scene.Button.off("Touched", onTouch);
+function onTouch(other) { log("touched!"); }
+entity.on("touched", onTouch);
+entity.off("touched", onTouch);
 \`\`\`
 
-### .emit(eventName, ...args)
+### entity.emit(event, ...args)
 
-Fire a custom event on this object. Any \`.on()\` listener for the same event on the same object will be called.
+Fire a custom event on this entity. Listeners on the same event are called.
 
 \`\`\`js
-Scene.Door.emit("Open", { speed: 2 });
+entity.on("Open", (speed) => {
+  log("Opening at speed", speed);
+});
 
-Scene.Door.on("Open", function(opts) {
-  log("Opening at speed", opts.speed);
+entity.emit("Open", 2);
+\`\`\`
+
+---
+
+## Rebur.Scene
+
+The live 3D world container. All rendered, simulated entities live here.
+
+### Rebur.Scene.find(name) → entity | null
+
+The **one** way to look up an entity by name.
+
+\`\`\`js
+const part = Rebur.Scene.find("Platform");
+if (!part) { log("Platform not found"); return; }
+
+part.position = { x: 0, y: 5, z: 0 };
+\`\`\`
+
+### Rebur.Scene.findById(id) → entity | null
+
+Look up an entity by its immutable id.
+
+\`\`\`js
+const id = entity.id; // store the id
+// ... later ...
+const ref = Rebur.Scene.findById(id);
+\`\`\`
+
+### Rebur.Scene.all() → entity[]
+
+All entities currently in the scene.
+
+\`\`\`js
+const all = Rebur.Scene.all();
+log("Scene has", all.length, "entities");
+
+for (const e of all) {
+  if (e.color === "#ff0000") {
+    e.visible = false;
+  }
+}
+\`\`\`
+
+### Rebur.Scene.create(opts) → entity
+
+Spawn a new entity at runtime.
+
+\`\`\`js
+const bomb = Rebur.Scene.create({
+  name: "Bomb",
+  primitiveType: "sphere",     // "cube" | "sphere" | "cylinder" | "plane"
+  position: { x: 0, y: 10, z: 0 },
+  scale:    { x: 1, y: 1, z: 1 },
+  color: "#222222",
+});
+bomb.body.anchored = false;
+bomb.body.mass = 3;
+\`\`\`
+
+> Runtime-created entities are not saved to the game — they exist only for the current Play session.
+
+### entity.destroy()
+
+\`\`\`js
+const wall = Rebur.Scene.find("OldWall");
+if (wall) wall.destroy();
+\`\`\`
+
+### Entity hierarchy
+
+\`\`\`js
+const parent = Rebur.Scene.find("Platform");
+const child  = Rebur.Scene.find("Coin");
+
+child.setParent(parent);        // attach to parent
+log(child.parent?.name);        // "Platform"
+log(parent.children.length);    // includes child
+
+parent.find("Coin");            // find child by name
+parent.children;                // direct children array
+\`\`\`
+
+---
+
+## Rebur.Players
+
+The player entity container. Players are entities — they have all entity properties plus player-specific ones.
+
+### Rebur.Players.all() → player[]
+
+\`\`\`js
+const players = Rebur.Players.all();
+log("Players online:", players.length);
+
+for (const p of players) {
+  log(p.username, "at y =", p.position.y);
+}
+\`\`\`
+
+### Rebur.Players.find(username) → player | null
+
+\`\`\`js
+const alice = Rebur.Players.find("Alice");
+if (alice) alice.takeDamage(10);
+\`\`\`
+
+### Rebur.Players.get(id) → player | null
+
+Look up by immutable id — safest for cross-container references.
+
+\`\`\`js
+entity.on("touched", (other) => {
+  if (other.isPlayer) {
+    const player = Rebur.Players.get(other.id);
+    if (player) player.heal(20);
+  }
 });
 \`\`\`
 
 ---
 
-## Create Objects at Runtime
+## Player Entity
 
-Use \`game.create()\` to spawn a new object into the scene while the game is running.
-
-\`\`\`js
-game.create({
-  name: "Fireball",           // Name used to reference via Scene.Fireball
-  primitiveType: "sphere",    // "cube" | "sphere" | "cylinder" | "plane"
-  position: { x: 0, y: 5, z: 0 },
-  scale: { x: 1, y: 1, z: 1 },  // also accepts: size: { x, y, z }
-  color: "#ff4400",
-  anchored: false,            // false = physics-driven (default)
-  canCollide: true,           // default: true
-  transparency: 0,            // 0–1
-});
-\`\`\`
-
-\`\`\`js
-// Short form using x/y/z directly
-game.create({
-  name: "Coin_" + Date.now(),
-  primitiveType: "cylinder",
-  x: 3, y: 1, z: -5,
-  color: "#ffd700",
-  anchored: true,
-});
-\`\`\`
-
-After creation the object appears in the scene on the next tick and can be accessed via \`Scene["Coin_..."]\` or \`find("Coin_...")\`.
-
-> **Note:** Objects created at runtime are not saved to the game — they exist only during the current Play session.
-
----
-
-## Players
-
-Access connected players via the \`Players\` proxy.
-
-### Players.GetPlayers() → Player[]
-
-Returns an array of all currently connected players.
-
-\`\`\`js
-const all = Players.GetPlayers();
-log("There are", all.length, "players");
-
-for (const player of all) {
-  log(player.Name, "is at", player.Position.Y);
-}
-\`\`\`
-
-### Players["Name"] → Player | undefined
-
-Look up a specific player by their display name.
-
-\`\`\`js
-const alice = Players["Alice"];
-if (alice) {
-  alice.TakeDamage(10);
-}
-\`\`\`
+A player is an entity with \`isPlayer = true\` plus the following additional properties and methods.
 
 ### Player Properties
 
 | Property | Type | Read | Write | Description |
 |----------|------|------|-------|-------------|
-| \`Name\` | string | ✓ | — | Display name |
-| \`UserId\` | string | ✓ | — | Unique session ID |
-| \`Position\` | \`{X,Y,Z}\` | ✓ | — | Current world position |
-| \`Health\` | number | ✓ | ✓ | Current HP (0–MaxHealth) |
-| \`MaxHealth\` | number | ✓ | ✓ | Max HP (default 100) |
-| \`WalkSpeed\` / \`Speed\` | number | ✓ | ✓ | Movement speed (default 14) |
-| \`JumpPower\` | number | ✓ | ✓ | Jump velocity (default 14) |
-| \`ShirtColor\` | string | ✓ | ✓ | Shirt color (CSS) |
-| \`SkinColor\` | string | ✓ | ✓ | Skin color (CSS) |
-| \`PantsColor\` | string | ✓ | ✓ | Pants color (CSS) |
+| \`id\` | string | ✓ | — | Immutable session id |
+| \`username\` | string | ✓ | — | Display name |
+| \`isPlayer\` | boolean | ✓ | — | Always \`true\` |
+| \`position\` | \`{x,y,z}\` | ✓ | — | World position |
+| \`rotation\` | \`{x,y,z}\` | ✓ | — | Rotation (radians) |
+| \`health\` | number | ✓ | ✓ | Current HP (0–maxHealth) |
+| \`maxHealth\` | number | ✓ | ✓ | Max HP (default 100) |
+| \`walkSpeed\` | number | ✓ | ✓ | Walk speed (default 6) |
+| \`runSpeed\` | number | ✓ | ✓ | Run speed when Shift held (default 12) |
+| \`jumpPower\` | number | ✓ | ✓ | Jump force (default 8) |
+| \`onGround\` | boolean | ✓ | — | True while standing on a surface |
+| \`spawnPoint\` | \`{x,y,z}\` | ✓ | ✓ | Respawn position |
+| \`inventory\` | Inventory | ✓ | — | Item inventory |
+| \`motors\` | MotorAPI | ✓ | — | Body-slot attachment |
+| \`color\` | string | ✓ | ✓ | Shirt color |
 
 ### Player Methods
 
 \`\`\`js
-player.TakeDamage(n)       // reduce health by n; triggers death at 0
-player.Heal(n)             // increase health by n, capped at MaxHealth
-player.Kill()              // set health to 0 (triggers death/respawn)
-player.Respawn()           // teleport to spawn point, restore full health
-player.Teleport(x, y, z)   // move instantly to world position
+player.takeDamage(25)        // reduce health; death at 0
+player.heal(20)              // restore health (capped at maxHealth)
+player.kill()                // instant death → respawn
+player.respawn()             // teleport to spawnPoint, restore health
+player.teleport(x, y, z)    // instant move
 \`\`\`
 
 ### Health system
 
-When a player's health reaches 0 (via \`TakeDamage\`, \`Kill\`, falling out of the world, etc.), the engine automatically:
-1. Fires \`game.on("playerDied", fn)\`
-2. Respawns the player at the SpawnLocation
+When health reaches 0 the engine automatically:
+1. Fires \`Rebur.on("playerDied", fn)\`
+2. Respawns the player at their \`spawnPoint\`
 3. Restores full health
-4. Fires \`game.on("playerSpawned", fn)\`
+4. Fires \`Rebur.on("playerRespawned", fn)\`
 
 \`\`\`js
-Scene.Lava.on("Touched", function(player) {
-  player.TakeDamage(50);
-  log(player.Name, "hit lava! HP:", player.Health);
+const trap = Rebur.Scene.find("Trap");
+trap.on("touched", (other) => {
+  if (other.isPlayer) other.takeDamage(50);
 });
 
-game.on("playerDied", function(player) {
-  log(player.Name, "died and will respawn");
+Rebur.on("playerDied", (player) => {
+  log(player.username, "died");
 });
+\`\`\`
+
+### Player Inventory
+
+\`\`\`js
+player.inventory.add("Sword", { count: 1, data: { damage: 10 } });
+player.inventory.remove("Sword");
+player.inventory.has("Sword");              // boolean
+player.inventory.get("Sword");             // InventoryItem | null
+player.inventory.equip("Sword");           // equip
+player.inventory.equip(null);              // unequip
+player.inventory.drop("Sword");            // drop item, spawn entity
+player.inventory.clear();
+player.inventory.items;                    // InventoryItem[]
+player.inventory.equipped;                 // InventoryItem | null
+player.inventory.maxSlots;                 // number
+\`\`\`
+
+### Player Motors (body-slot attachments)
+
+\`\`\`js
+const sword = Rebur.Scene.find("Sword");
+player.motors.attach("rightHand", sword, { x: 0, y: 0.05, z: 0.25 });
+const held = player.motors.detach("rightHand"); // returns entity
+player.motors.get("rightHand");                 // entity | null
+// Slots: "rightHand" | "leftHand" | "head" | "back" | "chest"
 \`\`\`
 
 ---
 
-## Game Events
+## Rebur.State
 
-Subscribe to global engine events with \`game.on(eventName, handler)\`.
-
-| Event | When | Handler receives |
-|-------|------|-----------------|
-| \`"tick"\` | Every physics step (~20 Hz) | \`dt\` (seconds) |
-| \`"playerAdded"\` | A player joins | \`player\` |
-| \`"playerRemoving"\` | A player leaves | \`player\` |
-| \`"playerDied"\` | A player's health hits 0 | \`player\` |
-| \`"playerSpawned"\` | A player spawns/respawns | \`player\` |
+Shared key-value store for session state (score, rounds, flags, etc.). Reactive — subscribe to changes.
 
 \`\`\`js
-game.on("tick", function(dt) {
-  // dt ≈ 0.05 seconds (20 Hz)
-});
+Rebur.State.set("score", 0);
+Rebur.State.set("phase", "lobby");
 
-game.on("playerAdded", function(player) {
-  log(player.Name, "joined!");
-  gui.text("Welcome " + player.Name, 20, 20, { color: "#00ff00" });
-});
+const score = Rebur.State.get("score");
+log("Score:", score);
 
-game.on("playerRemoving", function(player) {
-  log(player.Name, "left");
-});
-
-game.on("playerDied", function(player) {
-  log(player.Name, "died");
-});
-
-game.on("playerSpawned", function(player) {
-  log(player.Name, "spawned at", player.Position.Y);
-});
-\`\`\`
-
----
-
-## Shared State Machine
-
-\`game.state\` is a key-value store shared across all scripts in the session. Use it for score, rounds, flags, etc.
-
-### game.state.set(key, value)
-
-\`\`\`js
-game.state.set("score", 0);
-game.state.set("phase", "lobby");
-game.state.set("alive", true);
-\`\`\`
-
-### game.state.get(key) → value
-
-\`\`\`js
-const score = game.state.get("score");
-log("Current score:", score);
-\`\`\`
-
-### game.state.on(key, handler) → unsubscribe
-
-Runs whenever the value for \`key\` changes.
-
-\`\`\`js
-game.state.on("score", function(newVal, oldVal) {
+const unsub = Rebur.State.on("score", (newVal, oldVal) => {
   log("Score changed from", oldVal, "to", newVal);
-  scoreLabel.update({ text: "Score: " + newVal });
-});
-\`\`\`
-
-### game.state.keys() → string[]
-
-\`\`\`js
-log(game.state.keys());  // ["score", "phase", ...]
-\`\`\`
-
-### Full example
-
-\`\`\`js
-game.state.set("score", 0);
-const label = gui.text("Score: 0", 20, 20, { fontSize: 20 });
-
-game.state.on("score", function(val) {
-  label.update({ text: "Score: " + val });
 });
 
-Scene.Coin.on("Touched", function(player) {
-  const s = game.state.get("score") + 1;
-  game.state.set("score", s);
-  Scene.Coin.Visible = false;
-  task.delay(3, function() { Scene.Coin.Visible = true; });
+Rebur.State.keys();     // string[]
+Rebur.State.getAll();   // Record<string, any>
+\`\`\`
+
+Full example:
+
+\`\`\`js
+Rebur.State.set("score", 0);
+Rebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
+
+Rebur.State.on("score", (val) => {
+  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
+});
+
+const coin = Rebur.Scene.find("Coin");
+coin.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  Rebur.State.set("score", Rebur.State.get("score") + 1);
+  coin.visible = false;
+  after(3, () => { coin.visible = true; });
 });
 \`\`\`
 
 ---
 
-## Tween System
+## Rebur.Gui
 
-Smoothly interpolate an object's properties over time.
+Screen-space HUD overlay. Elements are keyed by an **id** string.
 
-### game.tween(object, properties, duration, easing?, onDone?)
+### Rebur.Gui.text(id, text, opts?)
+
+\`\`\`js
+Rebur.Gui.text("label", "Score: 0", {
+  anchor: "tl",         // "tl"|"tc"|"tr"|"cl"|"cc"|"cr"|"bl"|"bc"|"br"
+  x: 20,               // pixel offset from anchor
+  y: 20,
+  size: 18,            // font size (px)
+  color: "#ffffff",    // text color
+  bg: "#00000066",     // optional background
+});
+
+// Update later by re-calling with same id
+Rebur.Gui.text("label", "Score: 10", { anchor: "tl", x: 20, y: 20 });
+\`\`\`
+
+### Rebur.Gui.button(id, text, opts?, onClick?)
+
+\`onClick\` receives no arguments — query \`Rebur.Players.all()\` if you need to know who clicked.
+
+\`\`\`js
+Rebur.Gui.button("restart", "Restart", {
+  anchor: "br", x: 24, y: 24,
+  size: 14,
+  color: "#ffffff",
+  bg: "#3b82f6",
+}, () => {
+  for (const p of Rebur.Players.all()) p.respawn();
+});
+\`\`\`
+
+### Rebur.Gui.bar(id, value, maxValue, opts?)
+
+\`\`\`js
+Rebur.Gui.bar("hp", 100, 100, {
+  anchor: "bl", x: 20, y: 20,
+  width: 200, height: 16,
+  color: "#22c55e",
+  bg: "#374151",
+});
+
+// Update fill
+Rebur.Gui.bar("hp", 75, 100);
+\`\`\`
+
+### Rebur.Gui.image(id, url, opts?)
+
+\`\`\`js
+Rebur.Gui.image("icon", "/uploads/coin.png", {
+  anchor: "tl", x: 20, y: 60,
+  width: 48, height: 48,
+});
+\`\`\`
+
+### Rebur.Gui.clear(id?)
+
+\`\`\`js
+Rebur.Gui.clear("label");  // remove one element
+Rebur.Gui.clear();          // remove all elements
+\`\`\`
+
+---
+
+## Rebur.Sound
+
+\`\`\`js
+Rebur.Sound.play("collect");
+
+Rebur.Sound.play("hit", {
+  volume: 0.5,   // 0.0–1.0, default 1.0
+  loop: false,
+});
+
+// Built-in ids: "jump" | "land" | "hit" | "collect" | "click"
+// Custom: use the filename from an imported audio asset
+Rebur.Sound.play("explosion.mp3");
+
+// Stop
+Rebur.Sound.stop("collect");
+\`\`\`
+
+---
+
+## Rebur.Tween
+
+Smoothly interpolate any numeric properties over time.
+
+\`\`\`js
+// Rebur.Tween(target, toProperties, duration, easing?, onDone?) → cancel()
+const cancel = Rebur.Tween(entity.position, { x: 10 }, 2, "easeOutQuad");
+
+// Tween position, rotation, scale, transparency, or any numeric property
+Rebur.Tween(entity.position, { y: 5 }, 2, "easeInOut");
+Rebur.Tween(entity.rotation, { y: Math.PI }, 1, "linear", () => {
+  log("Gate opened!");
+});
+Rebur.Tween({ transparency: entity.transparency }, { transparency: 1 }, 0.5, "easeIn", () => {
+  entity.visible = false;
+});
+
+// Chain
+Rebur.Tween(entity.position, { y: 10 }, 3, "easeInOut", () => {
+  after(2, () => Rebur.Tween(entity.position, { y: 0 }, 3, "easeInOut"));
+});
+\`\`\`
 
 | Easing | Description |
 |--------|-------------|
-| \`"linear"\` | Constant speed (default) |
-| \`"easeIn"\` | Starts slow, ends fast |
-| \`"easeOut"\` | Starts fast, ends slow |
-| \`"easeInOut"\` | Slow at both ends |
-| \`"bounce"\` | Bounces at the end |
-| \`"elastic"\` | Elastic spring overshoot |
+| \`"linear"\` | Constant speed |
+| \`"easeInQuad"\` | Starts slow |
+| \`"easeOutQuad"\` | Ends slow (default feel) |
+| \`"easeInOutQuad"\` | Slow at both ends |
+| \`"easeInCubic"\` / \`"easeOutCubic"\` | Stronger ease |
+| \`"bounce"\` | Bounces at end |
+| \`"elastic"\` | Spring overshoot |
 
-**Supported properties:**
+---
 
-| Key | Controls |
-|-----|---------|
-| \`X\`, \`Y\`, \`Z\` | Position |
-| \`RotX\`, \`RotY\`, \`RotZ\` | Rotation |
-| \`ScaleX\`, \`ScaleY\`, \`ScaleZ\` | Scale |
-| \`Transparency\` | Opacity |
+## Rebur.Camera
 
 \`\`\`js
-// Move Part to Y=5 over 2 seconds (ease in/out)
-game.tween(Scene.Part, { Y: 5 }, 2, "easeInOut");
+Rebur.Camera.mode     = "thirdPerson"; // "thirdPerson"|"firstPerson"|"scripted"|"free"
+Rebur.Camera.distance = 8;
+Rebur.Camera.fov      = 70;            // degrees
+Rebur.Camera.offset   = { x: 0, y: 1.5, z: 0 };
 
-// Spin it 180° around Y over 1 second, then log "done"
-game.tween(Scene.Gate, { RotY: Math.PI }, 1, "linear", function() {
-  log("Gate opened!");
+// Scripted mode — full manual control
+Rebur.Camera.mode = "scripted";
+Rebur.Camera.position = { x: 0, y: 30, z: 30 };
+Rebur.Camera.lookAt   = { x: 0, y: 0, z: 0 };
+\`\`\`
+
+---
+
+## Rebur.Input
+
+Keyboard and mouse input.
+
+\`\`\`js
+// Key press / release
+Rebur.Input.onPress("e", () => {
+  log("E pressed");
+});
+Rebur.Input.onRelease("e", () => {
+  log("E released");
 });
 
-// Fade out over 0.5 seconds
-game.tween(Scene.Ghost, { Transparency: 1 }, 0.5, "easeIn");
+// Poll state inside update loop
+Rebur.on("tick", (dt) => {
+  if (Rebur.Input.isDown("shift")) {
+    player.runSpeed = 20;
+  }
+});
 
-// Chain tweens
-game.tween(Scene.Elevator, { Y: 10 }, 3, "easeInOut", function() {
-  task.delay(2, function() {
-    game.tween(Scene.Elevator, { Y: 0 }, 3, "easeInOut");
-  });
+// 3D viewport click
+Rebur.Input.onMouseClick((entity) => {
+  if (entity) log("clicked", entity.name);
+  else log("clicked sky");
+});
+\`\`\`
+
+Key names: letters (\`"a"\`–\`"z"\`), \`"space"\`, \`"shift"\`, \`"control"\`, \`"alt"\`, \`"enter"\`, \`"escape"\`, \`"arrowup"\`, \`"arrowdown"\`, \`"arrowleft"\`, \`"arrowright"\`.
+
+---
+
+## Rebur.Physics (Global Physics)
+
+\`\`\`js
+Rebur.Physics.gravity = 9.81;   // m/s² downward (default)
+Rebur.Physics.gravity = 0;      // zero-G
+Rebur.Physics.airDrag = 0.01;   // global air resistance
+\`\`\`
+
+---
+
+## Rebur.RunService
+
+Low-level game loop phase channels. Each phase runs in a fixed order every frame: \`input → animation → replication → physics → render → update\`.
+
+\`\`\`js
+const unsub = Rebur.RunService.on("update", (dt) => {
+  // post-physics, pre-render — best for scripted movement
+});
+
+Rebur.RunService.on("physics", (dt) => {
+  // during physics step — apply forces here
+});
+
+Rebur.RunService.on("render", (dt) => {
+  // just before render — camera/visual tweaks
+});
+
+unsub(); // unsubscribe
+\`\`\`
+
+---
+
+## Rebur.Network
+
+\`\`\`js
+// Server → all clients
+Rebur.Network.broadcast("score", { value: 10 });
+
+// Server listens for client messages
+Rebur.Network.on("jump", (payload) => {
+  log("client sent jump:", payload);
+});
+
+// Client → server
+Rebur.Network.send("jump", { power: 15 });
+
+// Client listens for server messages
+Rebur.Network.onMessage("score", (payload) => {
+  Rebur.Gui.text("score", "Score: " + payload.value);
 });
 \`\`\`
 
 ---
 
-## Sound
+## Rebur.Tags
 
-Play a sound for all players in the session.
-
-### game.sound.play(soundId, opts?)
-
-\`soundId\` maps to a sound file on the client. Built-in sounds: \`"jump"\`, \`"land"\`, \`"hit"\`, \`"collect"\`, \`"click"\`.
+Group entities with tags and query them.
 
 \`\`\`js
-game.sound.play("collect");
+Rebur.Tags.add(entity, "enemy");
+Rebur.Tags.add(entity, "boss");
 
-game.sound.play("hit", {
-  volume: 0.5,   // 0.0–1.0, default 1.0
-  loop: false,   // loop the sound
-});
+Rebur.Tags.has(entity, "enemy");          // boolean
+Rebur.Tags.remove(entity, "enemy");
 
-// Example: play sound when player touches zone
-Scene.CoinZone.on("Touched", function(player) {
-  game.sound.play("collect");
-  player.Heal(10);
-});
-\`\`\`
+const enemies = Rebur.Tags.get("enemy");  // entity[]
+for (const e of enemies) e.destroy();
 
----
-
-## GUI
-
-Display text, buttons, progress bars and images on screen. GUI is **global** — every player sees the same elements.
-
-### gui.text(text, x, y, opts?) → handle
-
-\`\`\`js
-const label = gui.text("Score: 0", 20, 20, {
-  color: "#ffffff",           // text color (CSS)
-  fontSize: 18,               // pixels
-  anchor: "topLeft",          // "topLeft"|"topRight"|"bottomLeft"|"bottomRight"|"center"
-  backgroundColor: "#00000066",  // optional background
-});
-
-label.update({ text: "Score: 10", color: "#ffff00" });
-label.remove();
-\`\`\`
-
-### gui.button(text, x, y, onClick, opts?) → handle
-
-\`onClick\` receives the player who clicked the button.
-
-\`\`\`js
-const btn = gui.button("Restart", 20, 60, function(player) {
-  log(player.Name, "pressed Restart");
-  player.Respawn();
-}, {
-  width: 120,
-  height: 36,
-  color: "#ffffff",
-  backgroundColor: "#3b82f6",
-  fontSize: 14,
-  anchor: "topLeft",
-});
-
-btn.update({ text: "Go!" });
-btn.remove();
-\`\`\`
-
-### gui.bar(x, y, value, maxValue, opts?) → handle
-
-Progress / health bar.
-
-\`\`\`js
-const hp = gui.bar(20, 100, 100, 100, {
-  width: 200,
-  height: 16,
-  color: "#22c55e",           // fill color
-  backgroundColor: "#374151", // track color
-  anchor: "topLeft",
-});
-
-hp.setValue(75);              // update fill amount
-hp.update({ color: "#ef4444" });
-hp.remove();
-\`\`\`
-
-### gui.image(imageUrl, x, y, opts?) → handle
-
-\`\`\`js
-const icon = gui.image("/uploads/coin.png", 20, 140, {
-  width: 48,
-  height: 48,
-  anchor: "topLeft",
-});
-
-icon.update({ visible: false });
-icon.remove();
-\`\`\`
-
-### gui.clear()
-
-Remove all GUI elements at once.
-
-\`\`\`js
-gui.clear();
+Rebur.Tags.all(entity);                   // string[] — all tags on entity
 \`\`\`
 
 ---
 
 ## Timers
 
-All timers are **tick-based** (advance during physics steps, not real wall time). Minimum interval: **50 ms** (1 tick).
-
-### setTimeout(fn, ms) / clearTimeout(id)
+Tick-based timers. Available as global helpers.
 
 \`\`\`js
-const id = setTimeout(function() {
-  Scene.Bomb.Visible = false;
-  log("Exploded!");
-}, 2000);  // 2 seconds
+// One-shot delay (seconds)
+const cancel = after(2, () => log("2 seconds later"));
+cancel(); // cancel before it fires
 
-clearTimeout(id);  // cancel before it fires
-\`\`\`
-
-### setInterval(fn, ms) / clearInterval(id)
-
-\`\`\`js
-const id = setInterval(function() {
-  Scene.Coin.Visible = !Scene.Coin.Visible;
-}, 500);   // every 0.5 seconds
-
-clearInterval(id);
-\`\`\`
-
-### task.delay(seconds, fn)
-
-Same as \`setTimeout\` but takes **seconds** instead of milliseconds.
-
-\`\`\`js
-task.delay(5, function() {
-  log("5 seconds later");
+// Repeating interval (seconds)
+const stop = every(0.5, () => {
+  coin.visible = !coin.visible;
 });
-\`\`\`
+stop(); // cancel
 
-### task.spawn(fn)
-
-Runs \`fn\` on the next tick (deferred execution).
-
-\`\`\`js
-task.spawn(function() {
-  log("runs next tick");
-});
-\`\`\`
-
----
-
-## World Utilities
-
-### find(name) → object proxy
-
-Search all containers (Workspace, Lighting, etc.) for an object by name.
-
-\`\`\`js
-const obj = find("HiddenTreasure");
-if (obj) obj.Visible = true;
-\`\`\`
-
-### destroy(name)
-
-Hides an object (sets \`Visible = false\`). Physics is removed, but the object stays in the scene hierarchy.
-
-\`\`\`js
-destroy("OldWall");
+// Async wait (use inside an async function)
+(async () => {
+  log("start");
+  await wait(2);
+  log("2 seconds later");
+})();
 \`\`\`
 
 ---
 
 ## Logging
 
-Output appears in the in-game console (accessible from the Play mode HUD menu → **Show Console**).
+Output appears in the in-game console (HUD → **Show Console**).
 
 \`\`\`js
 log("Hello!", 42, { x: 1 });
-print("Same as log");
-warn("Something's odd");
+warn("Something odd");
 error("Something broke");
 \`\`\`
 
 ---
 
-## Vector3
-
-Lightweight helper for position/rotation/velocity values.
+## Vector3 & Color3
 
 \`\`\`js
-const v = Vector3(1, 2, 3);
-// v.X === 1, v.Y === 2, v.Z === 3 (also v.x, v.y, v.z)
+// Vector3
+const v = Vector3(1, 2, 3);      // { x:1, y:2, z:3 }
+Vector3.zero()                    // { x:0, y:0, z:0 }
+Vector3.one()                     // { x:1, y:1, z:1 }
+Vector3.up()                      // { x:0, y:1, z:0 }
+Vector3.right()                   // { x:1, y:0, z:0 }
+Vector3.forward()                 // { x:0, y:0, z:-1 }
 
-// Factory methods
-Vector3.new(x, y, z)   // same as Vector3(x, y, z)
-Vector3.zero()         // { X:0, Y:0, Z:0 }
-Vector3.one()          // { X:1, Y:1, Z:1 }
-Vector3.up()           // { X:0, Y:1, Z:0 }
-Vector3.right()        // { X:1, Y:0, Z:0 }
-Vector3.forward()      // { X:0, Y:0, Z:-1 }
-
-// Properties
-v.magnitude            // sqrt(X²+Y²+Z²)
-
-// Methods (return a new Vector3)
-v.add(other)
+v.magnitude                       // sqrt(x²+y²+z²)
+v.add(other)                      // returns new Vector3
 v.sub(other)
 v.scale(n)
 v.normalize()
-v.dot(other)           // scalar dot product
+v.dot(other)                      // scalar
+
+entity.position = Vector3(0, 10, 0);
 \`\`\`
 
 \`\`\`js
-// Typical usage
-Scene.Ball.Position = Vector3.new(0, 10, 0);
-Scene.Ball.Velocity  = Vector3.new(5, 0, 0);
+// Color3 — returns a CSS color string
+Color3(1, 0, 0)              // "rgb(255,0,0)"
+Color3.fromRGB(0, 0, 255)    // "rgb(0,0,255)"
+Color3.fromHex("#ff8800")    // "#ff8800"
 
-const dir = Vector3(target.X - pos.X, 0, target.Z - pos.Z).normalize();
-Scene.Enemy.Position = {
-  X: pos.X + dir.X * speed * dt,
-  Y: pos.Y,
-  Z: pos.Z + dir.Z * speed * dt,
-};
+entity.color = Color3(1, 0.5, 0);
 \`\`\`
-
----
-
-## Color3
-
-Build CSS color strings from component values.
-
-\`\`\`js
-Color3(1, 0, 0)              // "rgb(255,0,0)"   — red
-Color3.new(0, 1, 0)          // "rgb(0,255,0)"   — green  (0–1 range)
-Color3.fromRGB(0, 0, 255)    // "rgb(0,0,255)"   — blue   (0–255 range)
-Color3.fromHex("#ff8800")    // "#ff8800"         — orange
-
-Scene.Part.Color = Color3(1, 0.5, 0);
-\`\`\`
-
----
-
-## RunService Alias
-
-\`runService.on\` is a Roblox-style alias for \`game.on("tick")\`.
-
-\`\`\`js
-runService.on("Heartbeat", function(dt) {
-  // identical to game.on("tick", fn)
-});
-
-// Also available as:
-runService.Heartbeat.Connect(function(dt) { ... });
-\`\`\`
-
----
-
-## Safe Standard Library
-
-These globals are available exactly as in a browser:
-
-\`Math\`, \`JSON\`, \`String\`, \`Number\`, \`Boolean\`, \`Array\`, \`Object\`, \`Date\`,
-\`parseInt\`, \`parseFloat\`, \`isNaN\`, \`isFinite\`, \`Symbol\`
-
-\`\`\`js
-const angle = Math.sin(Date.now() / 1000);
-const info  = JSON.stringify({ score: 42 });
-const items = Array.from({ length: 5 }, (_, i) => i + 1);
-\`\`\`
-
-The following are **blocked** for security: \`process\`, \`require\`, \`fetch\`, \`__filename\`, \`__dirname\`, \`Promise\`.
 
 ---
 
 ## Quick Start Examples
 
-### Spinning platform
+### Spin a platform
 
 \`\`\`js
 let angle = 0;
-game.on("tick", function(dt) {
+Rebur.on("tick", (dt) => {
   angle += dt;
-  Scene.Platform.Rotation = { X: 0, Y: angle, Z: 0 };
+  const p = Rebur.Scene.find("Platform");
+  if (p) p.rotation = { x: 0, y: angle, z: 0 };
 });
 \`\`\`
 
-### Moving platform (oscillating)
+### Oscillating platform
 
 \`\`\`js
 let t = 0;
-game.on("tick", function(dt) {
+Rebur.on("tick", (dt) => {
   t += dt;
-  Scene.Platform.Position = {
-    X: Math.sin(t) * 5,
-    Y: 1,
-    Z: 0,
-  };
+  const p = Rebur.Scene.find("Platform");
+  if (p) p.position = { x: Math.sin(t) * 5, y: 1, z: 0 };
 });
 \`\`\`
 
 ### Lava zone — damage on touch
 
 \`\`\`js
-Scene.Lava.Color = "#ff4400";
+const lava = Rebur.Scene.find("Lava");
+lava.color = "#ff4400";
 
-Scene.Lava.on("Touched", function(player) {
-  player.TakeDamage(25);
-  log(player.Name, "touched lava! HP:", player.Health);
+lava.on("touched", (other) => {
+  if (other.isPlayer) {
+    other.takeDamage(25);
+    log(other.username, "hit lava! HP:", other.health);
+  }
 });
 \`\`\`
 
-### Score counter
+### Score counter (multiplayer-safe)
 
 \`\`\`js
-game.state.set("score", 0);
-const label = gui.text("Score: 0", 20, 20, { fontSize: 20 });
+Rebur.State.set("score", 0);
+Rebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
 
-game.state.on("score", function(val) {
-  label.update({ text: "Score: " + val });
+Rebur.State.on("score", (val) => {
+  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
 });
 
-Scene.Coin.on("Touched", function(player) {
-  game.state.set("score", game.state.get("score") + 1);
-  Scene.Coin.Visible = false;
-  task.delay(3, function() { Scene.Coin.Visible = true; });
+const coin = Rebur.Scene.find("Coin");
+coin.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  Rebur.State.set("score", Rebur.State.get("score") + 1);
+  coin.visible = false;
+  after(3, () => { coin.visible = true; });
 });
 \`\`\`
 
@@ -821,116 +967,104 @@ Scene.Coin.on("Touched", function(player) {
 
 \`\`\`js
 let timeLeft = 60;
-const timerLabel = gui.text("Time: 60", 20, 20, { fontSize: 18 });
+Rebur.Gui.text("timer", "Time: 60", { anchor: "tc", y: 20, size: 18 });
 
-setInterval(function() {
+every(1, () => {
   if (timeLeft <= 0) return;
-  timeLeft -= 1;
-  timerLabel.update({ text: "Time: " + timeLeft });
-  if (timeLeft <= 0) {
-    timerLabel.update({ text: "Time's up!", color: "#ef4444" });
-  }
-}, 1000);
+  timeLeft--;
+  Rebur.Gui.text("timer", timeLeft > 0
+    ? "Time: " + timeLeft
+    : "Time's up!",
+    { anchor: "tc", y: 20, size: 18, color: timeLeft <= 10 ? "#ef4444" : "#ffffff" }
+  );
+});
 \`\`\`
 
 ### Health bar HUD
 
 \`\`\`js
-let health = 100;
-const hpBar = gui.bar(20, 20, 100, 100, {
-  width: 200, color: "#22c55e", backgroundColor: "#374151",
+Rebur.Gui.bar("hp", 100, 100, {
+  anchor: "bl", x: 20, y: 20,
+  width: 200, height: 16,
+  color: "#22c55e", bg: "#374151",
 });
 
-Scene.Trap.on("Touched", function(player) {
-  health = Math.max(0, health - 25);
-  hpBar.setValue(health);
-  if (health <= 0) {
-    hpBar.update({ color: "#ef4444" });
-    log("Player died!");
-  }
+const trap = Rebur.Scene.find("Trap");
+trap.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  other.takeDamage(25);
+  Rebur.Gui.bar("hp", other.health, other.maxHealth);
 });
 \`\`\`
 
-### Spawn objects dynamically
+### Force-based launch pad
 
 \`\`\`js
-// Drop a bomb every 3 seconds at a random position
-setInterval(function() {
-  const x = (Math.random() - 0.5) * 20;
-  const z = (Math.random() - 0.5) * 20;
-  game.create({
-    name: "Bomb_" + Date.now(),
+const pad = Rebur.Scene.find("LaunchPad");
+pad.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  // Players don't use body.applyImpulse — use jumpPower override
+  const prev = other.jumpPower;
+  other.jumpPower = 40;
+  after(0.1, () => { other.jumpPower = prev; });
+});
+\`\`\`
+
+### Physics cannonball
+
+\`\`\`js
+every(3, () => {
+  const ball = Rebur.Scene.create({
+    name: "Cannonball_" + Date.now(),
     primitiveType: "sphere",
-    x: x, y: 10, z: z,
+    position: { x: 0, y: 5, z: 10 },
     color: "#222222",
-    anchored: false,
+    scale: { x: 0.5, y: 0.5, z: 0.5 },
   });
-}, 3000);
-\`\`\`
+  ball.body.anchored = false;
+  ball.body.mass = 5;
+  ball.body.restitution = 0.3;
+  ball.body.applyImpulse({ x: 0, y: 8, z: -25 });
 
-### Player join welcome + speed boost
-
-\`\`\`js
-game.on("playerAdded", function(player) {
-  log(player.Name, "joined!");
-  player.Speed = 20;     // boost speed
-  player.JumpPower = 20; // boost jump
+  // Auto-destroy after 5 seconds
+  after(5, () => { if (ball) ball.destroy(); });
 });
 \`\`\`
 
-### Object click to open door
+### Teleport pad
 
 \`\`\`js
-let open = false;
-
-Scene.DoorButton.on("clicked", function(player) {
-  open = !open;
-  log(player.Name, open ? "opened" : "closed", "the door");
-  game.tween(Scene.Door, { RotY: open ? Math.PI / 2 : 0 }, 0.5, "easeInOut");
-});
-\`\`\`
-
-### Tween a platform up and down forever
-
-\`\`\`js
-function goUp() {
-  game.tween(Scene.Elevator, { Y: 8 }, 3, "easeInOut", function() {
-    task.delay(1, goDown);
-  });
-}
-function goDown() {
-  game.tween(Scene.Elevator, { Y: 1 }, 3, "easeInOut", function() {
-    task.delay(1, goUp);
-  });
-}
-goUp();
-\`\`\`
-
-### Shared state between multiple scripts
-
-\`\`\`js
-// Script 1 — sets state
-game.state.set("round", 1);
-
-// Script 2 — reacts to state changes
-game.state.on("round", function(round) {
-  log("Round changed to", round);
-  Scene.RoundSign.Color = round % 2 === 0 ? "#3b82f6" : "#22c55e";
-});
-\`\`\`
-
-### Track player positions every second
-
-\`\`\`js
-setInterval(function() {
-  const players = Players.GetPlayers();
-  for (const p of players) {
-    log(p.Name, "is at Y =", p.Position.Y.toFixed(1));
+const pad = Rebur.Scene.find("TeleportPad");
+pad.on("touched", (other) => {
+  if (other.isPlayer) {
+    other.teleport(0, 5, 50);
   }
-}, 1000);
+});
+\`\`\`
+
+### Player join welcome
+
+\`\`\`js
+Rebur.on("playerJoined", (player) => {
+  log(player.username, "joined!");
+  player.walkSpeed = 10;
+  player.jumpPower = 12;
+
+  Rebur.Gui.text("welcome_" + player.id, "Welcome " + player.username + "!", {
+    anchor: "tc", y: 60, size: 20, color: "#4ade80",
+  });
+  after(3, () => Rebur.Gui.clear("welcome_" + player.id));
+});
 \`\`\`
 
 ---
 
-*All scripts run in a sandboxed Node.js VM. They cannot access the file system, network, or other games.*
+## Safe Standard Library
+
+Available exactly as in a browser:
+
+\`Math\`, \`JSON\`, \`String\`, \`Number\`, \`Boolean\`, \`Array\`, \`Object\`, \`Date\`,
+\`parseInt\`, \`parseFloat\`, \`isNaN\`, \`isFinite\`, \`Symbol\`
+
+**Blocked** for security: \`process\`, \`require\` (use the module system), \`fetch\`, \`__filename\`, \`__dirname\`, \`Promise\`.
 `;
