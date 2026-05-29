@@ -25,9 +25,8 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 
 function RootRoute() {
   const { isAuthenticated, isLoading } = useAuth();
-  // Show Landing immediately — redirect to /home once auth resolves.
-  // Avoids a blank flash while the auth query travels through the proxy.
-  if (!isLoading && isAuthenticated) return <Redirect to="/home" />;
+  if (isLoading) return null;
+  if (isAuthenticated) return <Redirect to="/home" />;
   return <Landing />;
 }
 

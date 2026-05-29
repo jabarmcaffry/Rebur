@@ -1,9 +1,8 @@
 /**
  * gltf-loader.ts — Singleton GLTFLoader with local DRACO decoder support.
  *
- * Each call to useGLTFModel() returns a freshly cloned scene so multiple
- * consumers (editor + play mode) can each own their own copy in the scene
- * graph without Three.js silently re-parenting the shared root.
+ * Using a singleton ensures the DRACO decoder is only instantiated once and that
+ * the internal cache is shared across all model consumers (editor + play mode).
  *
  * The DRACO decoder files are served from /draco/ (copied into client/public/draco/
  * from three/examples/jsm/libs/draco/gltf/ at build time).
@@ -11,7 +10,6 @@
 
 import { useState, useEffect } from "react";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import type { Group } from "three";
 
@@ -22,17 +20,8 @@ _draco.preload();
 const _loader = new GLTFLoader();
 _loader.setDRACOLoader(_draco);
 
-/** Cache the raw GLTF result so we can clone the scene per consumer */
-const _cache = new Map<string, GLTF>();
-
-/**
- * Deep-clone a GLTF scene using Three.js's built-in clone.
- * Each consumer gets its own object graph so it can be safely parented
- * to any Three.js scene without causing re-parenting issues.
- */
-function cloneScene(gltf: GLTF): Group {
-  return gltf.scene.clone(true);
-}
+/** Cached scenes so the same URL is only loaded once per session */
+const _cache = new Map<string, Group>();
 
 export interface GLTFModelState {
   scene: Group | null;
@@ -42,13 +31,11 @@ export interface GLTFModelState {
 
 /**
  * Load a GLB/GLTF model imperatively (no Suspense, no error-boundary needed).
- * Returns a CLONED scene each time so it can safely live in any Three.js scene.
+ * Returns { scene, loading, error }.
  */
 export function useGLTFModel(url: string | undefined): GLTFModelState {
   const [state, setState] = useState<GLTFModelState>(() => {
-    if (url && _cache.has(url)) {
-      return { scene: cloneScene(_cache.get(url)!), loading: false, error: null };
-    }
+    if (url && _cache.has(url)) return { scene: _cache.get(url)!, loading: false, error: null };
     return { scene: null, loading: !!url, error: null };
   });
 
@@ -59,7 +46,7 @@ export function useGLTFModel(url: string | undefined): GLTFModelState {
     }
 
     if (_cache.has(url)) {
-      setState({ scene: cloneScene(_cache.get(url)!), loading: false, error: null });
+      setState({ scene: _cache.get(url)!, loading: false, error: null });
       return;
     }
 
@@ -70,8 +57,8 @@ export function useGLTFModel(url: string | undefined): GLTFModelState {
       url,
       (gltf) => {
         if (cancelled) return;
-        _cache.set(url, gltf);
-        setState({ scene: cloneScene(gltf), loading: false, error: null });
+        _cache.set(url, gltf.scene);
+        setState({ scene: gltf.scene, loading: false, error: null });
       },
       undefined,
       (err: unknown) => {
@@ -82,9 +69,7 @@ export function useGLTFModel(url: string | undefined): GLTFModelState {
       },
     );
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [url]);
 
   return state;

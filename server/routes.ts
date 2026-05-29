@@ -347,14 +347,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   });
 
   // Asset routes
-  app.post("/api/assets/upload", isAuthenticated, (req: any, res: any, next: any) => {
-    upload.single('file')(req, res, (err: any) => {
-      if (err) {
-        return res.status(400).json({ message: err.message || "Upload failed" });
-      }
-      next();
-    });
-  }, async (req: any, res) => {
+  app.post("/api/assets/upload", isAuthenticated, upload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });

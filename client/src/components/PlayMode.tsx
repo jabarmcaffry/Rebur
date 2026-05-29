@@ -137,22 +137,6 @@ export default function PlayMode({
 
     renderClient.onConnected = () => {
       setMpConnected(true);
-      // Handle autoplay audio objects once we're connected and objects arrive
-      setTimeout(() => {
-        const objs = renderClient.getInterpolatedState().objects;
-        for (const obj of objs) {
-          if (obj.type === "audio" && (obj as any).autoplay && obj.audioUrl) {
-            try {
-              const audio = new Audio(obj.audioUrl);
-              audio.volume = Math.max(0, Math.min(1, (obj as any).volume ?? 1));
-              audio.loop = (obj as any).loop ?? false;
-              audio.play().catch((e) => console.warn("[Autoplay] Blocked:", e));
-            } catch (e) {
-              console.warn("[Autoplay] Error:", e);
-            }
-          }
-        }
-      }, 500);
     };
 
     renderClient.onDisconnected = () => {
