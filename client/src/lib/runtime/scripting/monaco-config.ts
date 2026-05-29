@@ -78,6 +78,9 @@ interface PlayerEntity extends Entity {
   readonly onGround: boolean;
   spawnPoint: Vec3;
   readonly inventory: Inventory;
+  readonly gui: PlayerGuiAPI;
+  readonly data: PlayerDataAPI;
+  readonly animator: AnimatorAPI;
   motors: MotorAPI;
   takeDamage(n: number): void;
   heal(n: number): void;
@@ -107,11 +110,56 @@ interface MotorAPI {
   get(slot: string): Entity | null;
 }
 
+// ─── Per-player GUI ───────────────────────────────────────────────────────────
+interface PlayerGuiAPI {
+  text(id: string, text: string, opts?: GuiOpts): void;
+  button(id: string, text: string, opts?: GuiOpts, onClick?: () => void): void;
+  bar(id: string, value: number, maxValue: number, opts?: GuiOpts): void;
+  image(id: string, url: string, opts?: GuiOpts): void;
+  clear(id?: string): void;
+}
+
+// ─── Per-player persistent data ──────────────────────────────────────────────
+interface PlayerDataAPI {
+  get(key: string): any;
+  set(key: string, value: any): void;
+  delete(key: string): void;
+  increment(key: string, amount?: number): number;
+  getAll(): Record<string, any>;
+}
+
+// ─── Animator ─────────────────────────────────────────────────────────────────
+interface AnimatorAPI {
+  readonly current: string | null;
+  readonly playing: boolean;
+  play(name: string, opts?: { blend?: number; loop?: boolean }): void;
+  stop(): void;
+  on(event: 'done', fn: (name: string) => void): () => void;
+}
+
+// ─── Raycast ──────────────────────────────────────────────────────────────────
+interface RaycastResult {
+  entity: Entity;
+  point: Vec3;
+  normal: Vec3;
+  distance: number;
+}
+
+interface SceneQueryFilter {
+  tag?: string;
+  tags?: string[];
+  type?: string;
+  limit?: number;
+  where?: (entity: Entity) => boolean;
+}
+
 // ─── Rebur subsystems ─────────────────────────────────────────────────────────
 interface SceneContainer {
   find(name: string): Entity | null;
   findById(id: string): Entity | null;
   all(): Entity[];
+  query(filter: SceneQueryFilter): Entity[];
+  raycast(origin: Vec3, direction: Vec3, opts?: { maxDistance?: number; ignore?: Entity[]; tag?: string }): RaycastResult | null;
   create(opts: {
     name?: string;
     primitiveType?: 'cube' | 'sphere' | 'cylinder' | 'plane';
@@ -168,6 +216,14 @@ interface TagsAPI {
   all(entity: Entity): string[];
 }
 
+interface DataStoreAPI {
+  get(key: string): any;
+  set(key: string, value: any): void;
+  delete(key: string): void;
+  increment(key: string, amount?: number): number;
+  keys(): string[];
+}
+
 interface PhysicsAPI { gravity: number; airDrag: number; }
 
 interface CameraAPI {
@@ -210,6 +266,7 @@ interface ReburAPI {
   readonly Lighting: SceneContainer;
   readonly Storage: SceneContainer;
   readonly State: StateAPI;
+  readonly DataStore: DataStoreAPI;
   readonly Gui: GuiAPI;
   readonly Sound: SoundAPI;
   readonly Tags: TagsAPI;
@@ -304,6 +361,22 @@ const COMPLETIONS: CompletionDef[] = [
     detail: "Rebur.Scene.all() → Entity[]",
     doc: "Return all entities currently in the scene.",
     insert: "Rebur.Scene.all()",
+  },
+  {
+    label: "Rebur.Scene.query",
+    kind: K.Function,
+    detail: "Rebur.Scene.query(filter) → Entity[]",
+    doc: "Filter entities by criteria. More efficient than all().filter() for large worlds.\n\nFilter options:\n- tag: string — entities with this tag\n- tags: string[] — entities with ALL these tags\n- type: string — 'primitive', 'model', 'light', 'audio'\n- limit: number — max results\n- where: (entity) => boolean — custom predicate\n\nExamples:\n  Rebur.Scene.query({ tag: \"enemy\" })\n  Rebur.Scene.query({ type: \"light\" })\n  Rebur.Scene.query({ tag: \"coin\", limit: 5 })\n  Rebur.Scene.query({ where: (e) => e.body.mass > 10 })",
+    insert: "Rebur.Scene.query({ tag: \"${1:enemy}\" })",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Scene.raycast",
+    kind: K.Function,
+    detail: "Rebur.Scene.raycast(origin, direction, opts?) → RaycastResult | null",
+    doc: "Cast a ray and return the first entity hit.\n\nReturns: { entity, point, normal, distance } or null if nothing hit.\n\nOpts:\n- maxDistance: number (default 500)\n- ignore: Entity[] — skip these entities\n- tag: string — only hit entities with this tag\n\nExample:\n  const hit = Rebur.Scene.raycast(\n    player.position,\n    { x: 0, y: 0, z: -1 },\n    { maxDistance: 30, ignore: [player] }\n  );\n  if (hit) log(hit.entity.name, hit.distance);",
+    insert: "Rebur.Scene.raycast(\n\t${1:origin},\n\t${2:direction},\n\t{ maxDistance: ${3:50} }\n)",
+    snippet: true,
   },
   {
     label: "Rebur.Scene.create",
@@ -778,6 +851,126 @@ const COMPLETIONS: CompletionDef[] = [
     snippet: true,
   },
 
+  // ─── player.gui (per-player private HUD) ─────────────────────────────────
+  {
+    label: "player.gui",
+    kind: K.Property,
+    detail: "PlayerGuiAPI — private per-player HUD",
+    doc: "Private HUD visible ONLY to this player. Same API as Rebur.Gui but scoped to one player.\n\nUse for: inventories, health bars, quest logs, shops, notifications, dialogue, admin panels.\nUse Rebur.Gui for shared elements: round timers, kill feeds, scoreboards.\n\nMethods:\n- player.gui.text(id, text, opts?)\n- player.gui.button(id, text, opts?, onClick?)\n- player.gui.bar(id, value, max, opts?)\n- player.gui.image(id, url, opts?)\n- player.gui.clear(id?)",
+    insert: ".gui",
+  },
+  {
+    label: "player.gui.text",
+    kind: K.Function,
+    detail: "player.gui.text(id, text, opts?) → void",
+    doc: "Show private text to this player only. Re-call with same id to update.",
+    insert: ".gui.text(\"${1:label}\", \"${2:Hello}\", { anchor: \"${3:tc}\", y: ${4:20} })",
+    snippet: true,
+  },
+  {
+    label: "player.gui.button",
+    kind: K.Function,
+    detail: "player.gui.button(id, text, opts?, onClick?) → void",
+    doc: "Show a private button to this player only.",
+    insert: ".gui.button(\"${1:btn}\", \"${2:Click}\", { anchor: \"${3:cc}\" }, () => {\n\t${4}\n})",
+    snippet: true,
+  },
+  {
+    label: "player.gui.bar",
+    kind: K.Function,
+    detail: "player.gui.bar(id, value, maxValue, opts?) → void",
+    doc: "Show a private progress/health bar to this player only.",
+    insert: ".gui.bar(\"${1:hp}\", ${2:100}, ${3:100}, { anchor: \"${4:bl}\", x: 20, y: 20, width: 200, height: 16 })",
+    snippet: true,
+  },
+  {
+    label: "player.gui.clear",
+    kind: K.Function,
+    detail: "player.gui.clear(id?) → void",
+    doc: "Remove a private GUI element. Omit id to clear all of this player's private GUI.",
+    insert: ".gui.clear(${1})",
+    snippet: true,
+  },
+
+  // ─── player.data (per-player persistent storage) ─────────────────────────
+  {
+    label: "player.data",
+    kind: K.Property,
+    detail: "PlayerDataAPI — persistent per-player storage",
+    doc: "Persistent key-value store for this player. Values survive between sessions.\n\nUse for: coins, XP, level, unlocks, inventory persistence, settings.\n\nMethods:\n- player.data.get(key)\n- player.data.set(key, value)\n- player.data.increment(key, amount?)\n- player.data.delete(key)\n- player.data.getAll()",
+    insert: ".data",
+  },
+  {
+    label: "player.data.get",
+    kind: K.Function,
+    detail: "player.data.get(key) → any",
+    doc: "Read a persistent value for this player. Returns undefined if never set.\n\n  const coins = player.data.get(\"coins\") ?? 0;",
+    insert: ".data.get(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "player.data.set",
+    kind: K.Function,
+    detail: "player.data.set(key, value) → void",
+    doc: "Write a persistent value for this player. Saved immediately.",
+    insert: ".data.set(\"${1:key}\", ${2:value})",
+    snippet: true,
+  },
+  {
+    label: "player.data.increment",
+    kind: K.Function,
+    detail: "player.data.increment(key, amount?) → number",
+    doc: "Increment a number atomically. Returns the new value. Amount defaults to 1.\n\n  player.data.increment(\"coins\", 10); // coins += 10\n  player.data.increment(\"deaths\");     // deaths += 1",
+    insert: ".data.increment(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "player.data.delete",
+    kind: K.Function,
+    detail: "player.data.delete(key) → void",
+    doc: "Delete a persistent key for this player.",
+    insert: ".data.delete(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "player.data.getAll",
+    kind: K.Function,
+    detail: "player.data.getAll() → Record<string, any>",
+    doc: "Snapshot of all persistent values for this player.",
+    insert: ".data.getAll()",
+  },
+
+  // ─── player.animator (skeletal animation controller) ─────────────────────
+  {
+    label: "player.animator",
+    kind: K.Property,
+    detail: "AnimatorAPI — skeletal animation controller",
+    doc: "Animation controller for humanoid player characters.\n\nBuilt-in animations: 'Idle', 'Walk', 'Run', 'Jump', 'Fall', 'Land', 'Wave', 'Dance', 'Sit'\n\nMethods:\n- player.animator.play(name, opts?)\n- player.animator.stop()\n- player.animator.on('done', fn)\n\nProps:\n- player.animator.current — currently playing animation name\n- player.animator.playing — whether animation is active",
+    insert: ".animator",
+  },
+  {
+    label: "player.animator.play",
+    kind: K.Function,
+    detail: "player.animator.play(name, opts?) → void",
+    doc: "Play an animation by name. Blends from the current animation.\n\nOpts:\n- blend: number — blend time in seconds (default 0.1)\n- loop: boolean — loop the animation (default true)\n\nBuilt-in: 'Idle', 'Walk', 'Run', 'Jump', 'Fall', 'Land', 'Wave', 'Dance', 'Sit'",
+    insert: ".animator.play(\"${1|Idle,Walk,Run,Jump,Fall,Land,Wave,Dance,Sit|}\", { blend: ${2:0.2} })",
+    snippet: true,
+  },
+  {
+    label: "player.animator.stop",
+    kind: K.Function,
+    detail: "player.animator.stop() → void",
+    doc: "Stop the current animation and return to idle.",
+    insert: ".animator.stop()",
+  },
+  {
+    label: "player.animator.current",
+    kind: K.Property,
+    detail: "string | null (read-only)",
+    doc: "Name of the currently playing animation, or null if stopped.",
+    insert: ".animator.current",
+  },
+
   // ─── Rebur.State ─────────────────────────────────────────────────────────
   {
     label: "Rebur.State",
@@ -825,12 +1018,60 @@ const COMPLETIONS: CompletionDef[] = [
     insert: "Rebur.State.getAll()",
   },
 
+  // ─── Rebur.DataStore ─────────────────────────────────────────────────────
+  {
+    label: "Rebur.DataStore",
+    kind: K.Variable,
+    detail: "DataStoreAPI — persistent cross-session storage",
+    doc: "Persistent key-value store that survives server restarts and new sessions. Use for game-wide data: leaderboards, world records, global flags, total games played.\n\nFor per-player data use player.data instead.",
+    insert: "Rebur.DataStore",
+  },
+  {
+    label: "Rebur.DataStore.get",
+    kind: K.Function,
+    detail: "Rebur.DataStore.get(key) → any",
+    doc: "Read a persistent value. Returns undefined if not set.",
+    insert: "Rebur.DataStore.get(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.DataStore.set",
+    kind: K.Function,
+    detail: "Rebur.DataStore.set(key, value) → void",
+    doc: "Write a persistent value. Survives server restarts.",
+    insert: "Rebur.DataStore.set(\"${1:key}\", ${2:value})",
+    snippet: true,
+  },
+  {
+    label: "Rebur.DataStore.increment",
+    kind: K.Function,
+    detail: "Rebur.DataStore.increment(key, amount?) → number",
+    doc: "Atomically increment a numeric value. Returns the new value. Amount defaults to 1.",
+    insert: "Rebur.DataStore.increment(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.DataStore.delete",
+    kind: K.Function,
+    detail: "Rebur.DataStore.delete(key) → void",
+    doc: "Delete a persistent key.",
+    insert: "Rebur.DataStore.delete(\"${1:key}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.DataStore.keys",
+    kind: K.Function,
+    detail: "Rebur.DataStore.keys() → string[]",
+    doc: "Return all keys in the data store.",
+    insert: "Rebur.DataStore.keys()",
+  },
+
   // ─── Rebur.Gui ───────────────────────────────────────────────────────────
   {
     label: "Rebur.Gui",
     kind: K.Variable,
-    detail: "GuiAPI — screen HUD overlay",
-    doc: "Script-driven HUD overlay. Elements are keyed by an id string — re-call with the same id to update.\n\nAnchor shortcuts: 'tl'=top-left, 'tc'=top-center, 'tr'=top-right, 'bl'/'bc'/'br'=bottom, 'cc'=center.",
+    detail: "GuiAPI — shared global HUD overlay",
+    doc: "Global HUD overlay — ALL players see every element. Re-call with the same id to update.\n\nUse for: round timers, kill feeds, scoreboards, game-wide announcements.\nFor private per-player UI (health bars, inventories, shops) use player.gui instead.\n\nAnchor shortcuts: 'tl'=top-left, 'tc'=top-center, 'tr'=top-right, 'bl'/'bc'/'br'=bottom, 'cc'=center.",
     insert: "Rebur.Gui",
   },
   {
@@ -1144,8 +1385,8 @@ const COMPLETIONS: CompletionDef[] = [
   {
     label: "wait",
     kind: K.Function,
-    detail: "await wait(seconds) → Promise<void>",
-    doc: "Pause async execution. Use with await inside an async function.",
+    detail: "wait(seconds) → Promise<void>",
+    doc: "Returns a native Promise<void> that resolves after the given seconds.\n\nUse with async/await:\n  async function example() {\n    await wait(2);\n    log(\"done\");\n  }\n  example();\n\nOr with .then():\n  wait(2).then(() => log(\"done\"));\n\nOr combined:\n  Promise.all([wait(1), wait(2)]).then(() => log(\"both done\"));\n\nNote: native Promise is fully available in Rebur scripts.",
     insert: "await wait(${1:1})",
     snippet: true,
   },

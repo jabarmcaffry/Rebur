@@ -25,36 +25,41 @@ if (lava) {
 
 export const SCRIPTING_DOCS = `# Rebur Engine — Scripting Reference
 
-All scripts run **server-side** inside a secure VM sandbox. The only global is **\`Rebur\`** — every subsystem hangs off it. Scripts cannot access the file system, Node.js internals, or the network.
+All scripts currently run **server-side** inside a secure VM sandbox. The only global is **\`Rebur\`** — every subsystem hangs off it. Scripts cannot access the file system, Node.js internals, or the network directly.
 
 ---
 
 ## Table of Contents
 
 1. [Architecture](#architecture)
-2. [Execution Model](#execution-model)
-3. [Rebur Global Events](#rebur-global-events)
-4. [Entities](#entities)
-5. [Entity Properties](#entity-properties)
-6. [Entity Physics Body](#entity-physics-body)
-7. [Entity Events](#entity-events)
-8. [Rebur.Scene — Entity Container](#reburscene)
-9. [Rebur.Players — Player Entities](#reburplayers)
-10. [Player Entity](#player-entity)
-11. [Rebur.State — Shared State](#reburstate)
-12. [Rebur.Gui — HUD Overlay](#reburgui)
-13. [Rebur.Sound — Audio](#rebursound)
-14. [Rebur.Tween — Animation](#reburtween)
-15. [Rebur.Camera — Camera Control](#reburcamera)
-16. [Rebur.Input — Keyboard & Mouse](#reburinput)
-17. [Rebur.Physics — Global Physics](#reburglobal-physics)
-18. [Rebur.RunService — Game Loop](#reburrunservice)
-19. [Rebur.Network — Multiplayer](#reburnetwork)
-20. [Rebur.Tags — Tag System](#reburtags)
-21. [Timers](#timers)
-22. [Logging](#logging)
-23. [Vector3 & Color3](#vector3--color3)
-24. [Quick Start Examples](#quick-start-examples)
+2. [Script Contexts](#script-contexts)
+3. [Execution Model](#execution-model)
+4. [Rebur Global Events](#rebur-global-events)
+5. [Entities](#entities)
+6. [Entity Properties](#entity-properties)
+7. [Entity Physics Body](#entity-physics-body)
+8. [Entity Events](#entity-events)
+9. [Rebur.Scene — Entity Container](#reburscene)
+10. [Rebur.Players — Player Entities](#reburplayers)
+11. [Player Entity](#player-entity)
+12. [Player GUI (per-player)](#player-gui)
+13. [Player Data](#player-data)
+14. [Player Animator](#player-animator)
+15. [Rebur.State — Shared Session State](#reburstate)
+16. [Rebur.DataStore — Persistent Storage](#reburdatastore)
+17. [Rebur.Gui — Global HUD](#reburgui)
+18. [Rebur.Sound — Audio](#rebursound)
+19. [Rebur.Tween — Property Animation](#reburtween)
+20. [Rebur.Camera — Camera Control](#reburcamera)
+21. [Rebur.Input — Keyboard & Mouse](#reburinput)
+22. [Rebur.Physics — Global Physics](#reburglobal-physics)
+23. [Rebur.RunService — Game Loop](#reburrunservice)
+24. [Rebur.Network — Multiplayer](#reburnetwork)
+25. [Rebur.Tags — Tag System](#reburtags)
+26. [Timers](#timers)
+27. [Logging](#logging)
+28. [Vector3 & Color3](#vector3--color3)
+29. [Quick Start Examples](#quick-start-examples)
 
 ---
 
@@ -66,9 +71,10 @@ Rebur                   ← single global
 ├── Players             ← player entity container
 ├── Lighting            ← lighting entity container
 ├── Storage             ← template/module container (not rendered)
-├── Gui                 ← HUD overlay
+├── State               ← shared session key-value store
+├── DataStore           ← persistent cross-session storage
+├── Gui                 ← global/shared HUD overlay
 ├── Sound               ← audio playback
-├── State               ← shared key-value store
 ├── Tween               ← property animation
 ├── Camera              ← camera control
 ├── Input               ← keyboard + mouse
@@ -76,6 +82,13 @@ Rebur                   ← single global
 ├── RunService          ← game loop phase channels
 ├── Network             ← multiplayer messaging
 └── Tags                ← entity tag queries
+
+player                  ← a PlayerEntity (also an Entity)
+├── player.gui          ← per-player private HUD
+├── player.data         ← per-player persistent data store
+├── player.animator     ← skeletal animation controller
+├── player.inventory    ← item inventory
+└── player.motors       ← body-slot attachments
 \`\`\`
 
 **Key rules:**
@@ -83,6 +96,47 @@ Rebur                   ← single global
 - All entities (including players) share the same base API — players are entities with \`isPlayer = true\`.
 - Cross-container interaction is **explicit** — there is no hidden magic coupling.
 - Single access pattern everywhere: \`Rebur.Scene.find("name")\`, \`Rebur.Players.get(id)\`.
+
+---
+
+## Script Contexts
+
+Rebur scripts currently execute in a **server-side** context. This is intentional — the server is the authority on all game state, which prevents cheating and keeps the model simple.
+
+### Current: Server Scripts (all scripts today)
+
+- Run on the server, have full access to all \`Rebur.*\` APIs.
+- Entity positions, physics, health, inventory — all authoritative here.
+- What you write today is a server script.
+
+### Replication Rules (what syncs automatically)
+
+| What | Replicates? | Notes |
+|------|-------------|-------|
+| Entity position/rotation/scale | ✓ Auto | Synced to all clients every frame |
+| Entity visible / color / transparency | ✓ Auto | Property changes propagate |
+| Player health / speed / jumpPower | ✓ Auto | Visible to all clients |
+| \`Rebur.State\` values | ✓ Auto | Broadcast to all clients |
+| \`Rebur.DataStore\` writes | Server-only | Persisted but not broadcast |
+| \`Rebur.Gui.text()\` | ✓ Shared | All players see it |
+| \`player.gui.text()\` | ✓ Private | Only that player sees it |
+| \`Rebur.Sound.play()\` | ✓ Shared | All players hear it |
+| Runtime entity creation | ✓ Auto | Visible to all clients |
+
+### Ownership
+
+- The **server owns everything** right now.
+- Player input is read server-side; the server moves each player character.
+- This means no client-side prediction or local-only effects yet — that is a planned future context.
+
+### Future: Client Scripts
+
+A future \`LocalScript\` context will run in each player's browser for:
+- Responsive UI, camera shake, particle effects
+- Client-side prediction for movement
+- Per-player visual-only changes
+
+For now, all creative scripting is server-side. This is fine for most game genres.
 
 ---
 
@@ -133,8 +187,10 @@ Rebur.on("tick", (dt) => {
 
 Rebur.on("playerJoined", (player) => {
   log(player.username, "joined!");
-  Rebur.Gui.text("welcome", "Welcome " + player.username, { anchor: "tc", y: 20 });
-  after(3, () => Rebur.Gui.clear("welcome"));
+  player.gui.text("welcome", "Welcome, " + player.username + "!", {
+    anchor: "tc", y: 20, size: 20, color: "#4ade80",
+  });
+  after(3, () => player.gui.clear("welcome"));
 });
 
 Rebur.on("playerLeft", (player) => {
@@ -388,12 +444,62 @@ All entities currently in the scene.
 \`\`\`js
 const all = Rebur.Scene.all();
 log("Scene has", all.length, "entities");
+\`\`\`
 
-for (const e of all) {
-  if (e.color === "#ff0000") {
-    e.visible = false;
-  }
+### Rebur.Scene.query(filter) → entity[]
+
+Filter entities by one or more criteria. More efficient than \`.all().filter()\` for large worlds — only matching entities are returned.
+
+\`\`\`js
+// By tag
+const enemies = Rebur.Scene.query({ tag: "enemy" });
+
+// By type
+const lights = Rebur.Scene.query({ type: "light" });
+
+// By multiple tags (AND — entity must have all)
+const bosses = Rebur.Scene.query({ tags: ["enemy", "boss"] });
+
+// By custom predicate
+const heavy = Rebur.Scene.query({ where: (e) => e.body.mass > 10 });
+
+// Combined
+const activeEnemies = Rebur.Scene.query({
+  tag: "enemy",
+  where: (e) => e.visible,
+});
+
+// Limit results
+const firstFive = Rebur.Scene.query({ tag: "coin", limit: 5 });
+\`\`\`
+
+### Rebur.Scene.raycast(origin, direction, opts?) → RaycastResult | null
+
+Cast a ray from a point in a direction and return the first entity hit.
+
+\`\`\`js
+// Cast downward from above a point
+const hit = Rebur.Scene.raycast(
+  { x: 0, y: 20, z: 0 },
+  { x: 0, y: -1, z: 0 }
+);
+
+if (hit) {
+  log("Hit:", hit.entity.name, "at distance", hit.distance);
+  log("Hit position:", hit.point.x, hit.point.y, hit.point.z);
+  log("Hit normal:", hit.normal.x, hit.normal.y, hit.normal.z);
 }
+
+// With options
+const hit2 = Rebur.Scene.raycast(
+  player.position,
+  { x: 0, y: 0, z: -1 },
+  {
+    maxDistance: 50,          // default: 500
+    ignore: [player],         // skip these entities
+    tag: "enemy",             // only hit entities with this tag
+  }
+);
 \`\`\`
 
 ### Rebur.Scene.create(opts) → entity
@@ -495,6 +601,9 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`onGround\` | boolean | ✓ | — | True while standing on a surface |
 | \`spawnPoint\` | \`{x,y,z}\` | ✓ | ✓ | Respawn position |
 | \`inventory\` | Inventory | ✓ | — | Item inventory |
+| \`gui\` | PlayerGuiAPI | ✓ | — | Private per-player HUD |
+| \`data\` | PlayerDataAPI | ✓ | — | Persistent per-player storage |
+| \`animator\` | AnimatorAPI | ✓ | — | Animation controller |
 | \`motors\` | MotorAPI | ✓ | — | Body-slot attachment |
 | \`color\` | string | ✓ | ✓ | Shirt color |
 
@@ -555,9 +664,214 @@ player.motors.get("rightHand");                 // entity | null
 
 ---
 
+## Player GUI
+
+**\`player.gui\`** — a private HUD visible **only to that player**. Use this for inventories, health bars, quest logs, shops, notifications, dialogue, and admin panels. Its API is identical to \`Rebur.Gui\` but scoped to one player.
+
+\`Rebur.Gui\` is **shared** — all players see it. Use it for round timers, kill feeds, and scoreboards. Use \`player.gui\` for anything that should differ between players.
+
+\`\`\`js
+// Private health bar — only this player sees it
+Rebur.on("playerJoined", (player) => {
+  player.gui.bar("hp", 100, 100, {
+    anchor: "bl", x: 20, y: 20,
+    width: 200, height: 16,
+    color: "#22c55e", bg: "#374151",
+  });
+
+  player.gui.text("coins", "Coins: 0", {
+    anchor: "tl", x: 20, y: 20, size: 16,
+  });
+});
+
+// Update per-player HUD on damage
+Rebur.on("playerDied", (player) => {
+  player.gui.bar("hp", 0, player.maxHealth);
+  player.gui.text("status", "You died!", {
+    anchor: "cc", size: 32, color: "#ef4444",
+  });
+  after(2, () => player.gui.clear("status"));
+});
+\`\`\`
+
+\`\`\`js
+// Shop UI — private dialogue only this player sees
+const shopTrigger = Rebur.Scene.find("ShopZone");
+shopTrigger.body.isTrigger = true;
+
+shopTrigger.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.gui.text("shopTitle", "Shop", { anchor: "cc", y: -80, size: 24 });
+  player.gui.button("buySword", "Buy Sword — 50 coins", { anchor: "cc", size: 16 }, () => {
+    const coins = player.data.get("coins") ?? 0;
+    if (coins >= 50) {
+      player.data.set("coins", coins - 50);
+      player.inventory.add("Sword");
+      player.gui.text("notice", "Sword purchased!", { anchor: "cc", y: 40 });
+      after(2, () => player.gui.clear("notice"));
+    } else {
+      player.gui.text("notice", "Not enough coins!", { anchor: "cc", y: 40, color: "#ef4444" });
+      after(2, () => player.gui.clear("notice"));
+    }
+  });
+  player.gui.button("closeShop", "Close", { anchor: "cc", y: 60, size: 14 }, () => {
+    player.gui.clear("shopTitle");
+    player.gui.clear("buySword");
+    player.gui.clear("closeShop");
+    player.gui.clear("notice");
+  });
+});
+\`\`\`
+
+### player.gui methods
+
+\`\`\`js
+player.gui.text(id, text, opts?)
+player.gui.button(id, text, opts?, onClick?)
+player.gui.bar(id, value, maxValue, opts?)
+player.gui.image(id, url, opts?)
+player.gui.clear(id?)              // clear one or all elements
+\`\`\`
+
+All opts are the same as \`Rebur.Gui\`:
+
+\`\`\`js
+{
+  anchor: "tl"|"tc"|"tr"|"cl"|"cc"|"cr"|"bl"|"bc"|"br",
+  x: number,       // pixel offset from anchor
+  y: number,
+  size: number,    // font size
+  color: string,   // text / fill color
+  bg: string,      // background color
+  width: number,
+  height: number,
+}
+\`\`\`
+
+---
+
+## Player Data
+
+**\`player.data\`** — persistent per-player storage backed by \`Rebur.DataStore\`. Values survive between sessions automatically. Use this for coins, XP, unlocks, progression, settings.
+
+\`\`\`js
+// Read — returns undefined if key never set
+const coins = player.data.get("coins") ?? 0;
+const xp    = player.data.get("xp") ?? 0;
+const level = player.data.get("level") ?? 1;
+
+// Write — persisted immediately
+player.data.set("coins", coins + 10);
+player.data.set("xp", xp + 50);
+
+// Increment helper
+player.data.increment("coins", 5);      // coins += 5
+player.data.increment("deaths");        // deaths += 1
+
+// Delete a key
+player.data.delete("tempFlag");
+
+// Read all
+const all = player.data.getAll();       // Record<string, any>
+\`\`\`
+
+\`\`\`js
+// Full progression example
+Rebur.on("playerJoined", (player) => {
+  const xp    = player.data.get("xp")    ?? 0;
+  const level = player.data.get("level") ?? 1;
+  const coins = player.data.get("coins") ?? 0;
+
+  player.gui.text("hud_xp",    "XP: " + xp,       { anchor: "tl", x: 20, y: 20 });
+  player.gui.text("hud_level", "Level: " + level,  { anchor: "tl", x: 20, y: 40 });
+  player.gui.text("hud_coins", "Coins: " + coins,  { anchor: "tl", x: 20, y: 60 });
+});
+
+const xpZone = Rebur.Scene.find("XpZone");
+xpZone.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.data.increment("xp", 25);
+  const xp    = player.data.get("xp");
+  const level = player.data.get("level") ?? 1;
+
+  if (xp >= level * 100) {
+    player.data.set("level", level + 1);
+    player.gui.text("levelup", "Level Up!", { anchor: "cc", size: 28, color: "#facc15" });
+    after(2, () => player.gui.clear("levelup"));
+  }
+
+  player.gui.text("hud_xp", "XP: " + xp, { anchor: "tl", x: 20, y: 20 });
+});
+\`\`\`
+
+---
+
+## Player Animator
+
+**\`player.animator\`** — skeletal animation controller for humanoid player characters.
+
+\`\`\`js
+// Play an animation by name
+player.animator.play("Run");
+player.animator.play("Jump");
+player.animator.play("Idle");
+
+// Stop current animation (returns to idle)
+player.animator.stop();
+
+// Transition with blend time (seconds)
+player.animator.play("Run", { blend: 0.2 });
+
+// Check current animation
+log(player.animator.current);  // "Run"
+log(player.animator.playing);  // true
+
+// Events
+player.animator.on("done", (name) => {
+  log("Animation finished:", name);
+});
+\`\`\`
+
+### Built-in animation names
+
+| Name | Description |
+|------|-------------|
+| \`"Idle"\` | Standing still |
+| \`"Walk"\` | Walking |
+| \`"Run"\` | Running |
+| \`"Jump"\` | Jump start |
+| \`"Fall"\` | Falling |
+| \`"Land"\` | Landing |
+| \`"Wave"\` | Emote — wave |
+| \`"Dance"\` | Emote — dance |
+| \`"Sit"\` | Sitting |
+
+Custom animations can be imported as model assets and referenced by filename.
+
+\`\`\`js
+// Trigger an emote on interaction
+const dancepad = Rebur.Scene.find("DancePad");
+dancepad.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.animator.play("Dance", { blend: 0.15 });
+  after(4, () => player.animator.play("Idle", { blend: 0.3 }));
+});
+\`\`\`
+
+---
+
 ## Rebur.State
 
-Shared key-value store for session state (score, rounds, flags, etc.). Reactive — subscribe to changes.
+Shared key-value store for **session state** (score, rounds, flags, etc.). Resets when the session ends. Reactive — subscribe to changes.
 
 \`\`\`js
 Rebur.State.set("score", 0);
@@ -595,9 +909,52 @@ coin.on("touched", (other) => {
 
 ---
 
+## Rebur.DataStore
+
+Persistent cross-session key-value storage. Values survive server restarts and new sessions. Use for game-wide data like leaderboards, world records, global flags, and persistent world changes.
+
+For per-player data use **\`player.data\`** instead — it's scoped to each player automatically.
+
+\`\`\`js
+// Write
+Rebur.DataStore.set("worldRecord", { username: "Alice", score: 9999 });
+Rebur.DataStore.set("serverLaunchCount", 1);
+
+// Read (returns undefined if not set)
+const record = Rebur.DataStore.get("worldRecord");
+if (record) log("World record holder:", record.username);
+
+// Increment a number atomically
+Rebur.DataStore.increment("totalGamesPlayed");
+Rebur.DataStore.increment("totalGamesPlayed", 5);
+
+// Delete
+Rebur.DataStore.delete("oldFlag");
+
+// List all keys
+const keys = Rebur.DataStore.keys();
+\`\`\`
+
+\`\`\`js
+// Global leaderboard example
+Rebur.on("playerDied", (player) => {
+  const score = Rebur.State.get("score") ?? 0;
+  const record = Rebur.DataStore.get("highScore") ?? { username: "", score: 0 };
+
+  if (score > record.score) {
+    Rebur.DataStore.set("highScore", { username: player.username, score });
+    Rebur.Gui.text("record", "New High Score: " + score + " by " + player.username, {
+      anchor: "tc", y: 60, size: 18, color: "#facc15",
+    });
+  }
+});
+\`\`\`
+
+---
+
 ## Rebur.Gui
 
-Screen-space HUD overlay. Elements are keyed by an **id** string.
+Screen-space HUD overlay. Elements are **shared — all players see them**. For private per-player UI use **\`player.gui\`** instead.
 
 ### Rebur.Gui.text(id, text, opts?)
 
@@ -616,8 +973,6 @@ Rebur.Gui.text("label", "Score: 10", { anchor: "tl", x: 20, y: 20 });
 \`\`\`
 
 ### Rebur.Gui.button(id, text, opts?, onClick?)
-
-\`onClick\` receives no arguments — query \`Rebur.Players.all()\` if you need to know who clicked.
 
 \`\`\`js
 Rebur.Gui.button("restart", "Restart", {
@@ -694,9 +1049,6 @@ const cancel = Rebur.Tween(entity.position, { x: 10 }, 2, "easeOutQuad");
 Rebur.Tween(entity.position, { y: 5 }, 2, "easeInOut");
 Rebur.Tween(entity.rotation, { y: Math.PI }, 1, "linear", () => {
   log("Gate opened!");
-});
-Rebur.Tween({ transparency: entity.transparency }, { transparency: 1 }, 0.5, "easeIn", () => {
-  entity.visible = false;
 });
 
 // Chain
@@ -839,26 +1191,47 @@ Rebur.Tags.all(entity);                   // string[] — all tags on entity
 
 ## Timers
 
-Tick-based timers. Available as global helpers.
+Tick-based timer helpers. All are global functions available in every script.
 
 \`\`\`js
-// One-shot delay (seconds)
+// One-shot delay (seconds) — returns a cancel function
 const cancel = after(2, () => log("2 seconds later"));
 cancel(); // cancel before it fires
 
-// Repeating interval (seconds)
+// Repeating interval (seconds) — returns a stop function
 const stop = every(0.5, () => {
   coin.visible = !coin.visible;
 });
-stop(); // cancel
-
-// Async wait (use inside an async function)
-(async () => {
-  log("start");
-  await wait(2);
-  log("2 seconds later");
-})();
+stop(); // stop repeating
 \`\`\`
+
+### Async / await
+
+\`wait(seconds)\` returns a native \`Promise<void>\`. You can use it with \`async\`/\`await\` or \`.then()\` — both work:
+
+\`\`\`js
+// async/await style — cleanest for sequences
+async function sequence() {
+  log("step 1");
+  await wait(2);
+  log("step 2");
+  await wait(1);
+  log("step 3");
+}
+sequence();
+
+// Promise chain style — equivalent
+wait(2).then(() => {
+  log("2 seconds later");
+});
+
+// Parallel — wait for multiple things
+Promise.all([wait(1), wait(2)]).then(() => {
+  log("both done after 2 seconds");
+});
+\`\`\`
+
+> **Note:** \`async\` functions in Rebur scripts are top-level fire-and-forget. Errors inside them are caught by the sandbox and logged. Native \`Promise\` is fully available.
 
 ---
 
@@ -944,26 +1317,66 @@ lava.on("touched", (other) => {
 });
 \`\`\`
 
-### Score counter (multiplayer-safe)
+### Per-player health bar + coin counter
 
 \`\`\`js
-Rebur.State.set("score", 0);
-Rebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
+Rebur.on("playerJoined", (player) => {
+  const coins = player.data.get("coins") ?? 0;
 
-Rebur.State.on("score", (val) => {
-  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
+  player.gui.bar("hp", player.health, player.maxHealth, {
+    anchor: "bl", x: 20, y: 20, width: 200, height: 16,
+    color: "#22c55e", bg: "#374151",
+  });
+  player.gui.text("coins", "Coins: " + coins, {
+    anchor: "tl", x: 20, y: 20, size: 16,
+  });
 });
 
 const coin = Rebur.Scene.find("Coin");
 coin.on("touched", (other) => {
   if (!other.isPlayer) return;
-  Rebur.State.set("score", Rebur.State.get("score") + 1);
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.data.increment("coins");
+  const total = player.data.get("coins");
+  player.gui.text("coins", "Coins: " + total, { anchor: "tl", x: 20, y: 20, size: 16 });
   coin.visible = false;
   after(3, () => { coin.visible = true; });
 });
 \`\`\`
 
-### Countdown timer
+### Scene query — destroy all enemies
+
+\`\`\`js
+const enemies = Rebur.Scene.query({ tag: "enemy" });
+for (const e of enemies) e.destroy();
+log("Cleared", enemies.length, "enemies");
+\`\`\`
+
+### Raycast — shoot to hit
+
+\`\`\`js
+Rebur.Input.onPress("f", () => {
+  const player = Rebur.Players.all()[0];
+  if (!player) return;
+
+  const forward = { x: 0, y: 0, z: -1 };
+  const hit = Rebur.Scene.raycast(player.position, forward, {
+    maxDistance: 30,
+    ignore: [player],
+  });
+
+  if (hit) {
+    log("Shot hit:", hit.entity.name, "at distance", hit.distance.toFixed(1));
+    if (Rebur.Tags.has(hit.entity, "enemy")) {
+      hit.entity.destroy();
+    }
+  }
+});
+\`\`\`
+
+### Countdown timer (shared HUD)
 
 \`\`\`js
 let timeLeft = 60;
@@ -980,30 +1393,12 @@ every(1, () => {
 });
 \`\`\`
 
-### Health bar HUD
-
-\`\`\`js
-Rebur.Gui.bar("hp", 100, 100, {
-  anchor: "bl", x: 20, y: 20,
-  width: 200, height: 16,
-  color: "#22c55e", bg: "#374151",
-});
-
-const trap = Rebur.Scene.find("Trap");
-trap.on("touched", (other) => {
-  if (!other.isPlayer) return;
-  other.takeDamage(25);
-  Rebur.Gui.bar("hp", other.health, other.maxHealth);
-});
-\`\`\`
-
 ### Force-based launch pad
 
 \`\`\`js
 const pad = Rebur.Scene.find("LaunchPad");
 pad.on("touched", (other) => {
   if (!other.isPlayer) return;
-  // Players don't use body.applyImpulse — use jumpPower override
   const prev = other.jumpPower;
   other.jumpPower = 40;
   after(0.1, () => { other.jumpPower = prev; });
@@ -1025,35 +1420,53 @@ every(3, () => {
   ball.body.mass = 5;
   ball.body.restitution = 0.3;
   ball.body.applyImpulse({ x: 0, y: 8, z: -25 });
-
-  // Auto-destroy after 5 seconds
   after(5, () => { if (ball) ball.destroy(); });
 });
 \`\`\`
 
-### Teleport pad
+### Async sequence
 
 \`\`\`js
-const pad = Rebur.Scene.find("TeleportPad");
-pad.on("touched", (other) => {
-  if (other.isPlayer) {
-    other.teleport(0, 5, 50);
-  }
+async function startRound() {
+  Rebur.Gui.text("msg", "Get ready!", { anchor: "cc", size: 28 });
+  await wait(2);
+  Rebur.Gui.text("msg", "3", { anchor: "cc", size: 48, color: "#facc15" });
+  await wait(1);
+  Rebur.Gui.text("msg", "2", { anchor: "cc", size: 48, color: "#fb923c" });
+  await wait(1);
+  Rebur.Gui.text("msg", "GO!", { anchor: "cc", size: 48, color: "#4ade80" });
+  await wait(1);
+  Rebur.Gui.clear("msg");
+  Rebur.State.set("phase", "playing");
+}
+
+Rebur.on("playerJoined", () => {
+  if (Rebur.Players.all().length === 2) startRound();
 });
 \`\`\`
 
-### Player join welcome
+### Player animator — emote pad
 
 \`\`\`js
-Rebur.on("playerJoined", (player) => {
-  log(player.username, "joined!");
-  player.walkSpeed = 10;
-  player.jumpPower = 12;
+const dancepad = Rebur.Scene.find("DancePad");
+dancepad.body.isTrigger = true;
 
-  Rebur.Gui.text("welcome_" + player.id, "Welcome " + player.username + "!", {
-    anchor: "tc", y: 60, size: 20, color: "#4ade80",
-  });
-  after(3, () => Rebur.Gui.clear("welcome_" + player.id));
+dancepad.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.animator.play("Dance", { blend: 0.15 });
+  player.gui.text("emote", "Dancing!", { anchor: "tc", y: 40, size: 16 });
+});
+
+dancepad.on("untouched", (other) => {
+  if (!other.isPlayer) return;
+  const player = Rebur.Players.get(other.id);
+  if (!player) return;
+
+  player.animator.play("Idle", { blend: 0.3 });
+  player.gui.clear("emote");
 });
 \`\`\`
 
@@ -1064,7 +1477,7 @@ Rebur.on("playerJoined", (player) => {
 Available exactly as in a browser:
 
 \`Math\`, \`JSON\`, \`String\`, \`Number\`, \`Boolean\`, \`Array\`, \`Object\`, \`Date\`,
-\`parseInt\`, \`parseFloat\`, \`isNaN\`, \`isFinite\`, \`Symbol\`
+\`parseInt\`, \`parseFloat\`, \`isNaN\`, \`isFinite\`, \`Symbol\`, \`Promise\`
 
-**Blocked** for security: \`process\`, \`require\` (use the module system), \`fetch\`, \`__filename\`, \`__dirname\`, \`Promise\`.
+**Blocked** for security: \`process\`, \`require\`, \`fetch\`, \`__filename\`, \`__dirname\`
 `;
