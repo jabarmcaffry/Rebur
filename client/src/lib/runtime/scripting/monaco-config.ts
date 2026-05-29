@@ -47,6 +47,8 @@ interface Entity {
   name: string;
   readonly type: string;
   readonly isPlayer: boolean;
+  /** True once destroy() has been called. Methods on a destroyed entity are no-ops. */
+  readonly destroyed: boolean;
   position: Vec3;
   rotation: Vec3;
   scale: Vec3;
@@ -240,7 +242,8 @@ interface InputAPI {
   onPress(key: string, fn: () => void): () => void;
   onRelease(key: string, fn: () => void): () => void;
   isDown(key: string): boolean;
-  onMouseClick(fn: (entity: Entity | null) => void): () => void;
+  /** 3D viewport click. Currently server-proxied — fires for any player. fn receives (entity | null, player). */
+  onMouseClick(fn: (entity: Entity | null, player: PlayerEntity) => void): () => void;
 }
 
 interface RunServiceAPI {
@@ -249,9 +252,16 @@ interface RunServiceAPI {
 }
 
 interface NetworkAPI {
+  /** SERVER — send a message to all connected clients. */
   broadcast(channel: string, payload: any): void;
-  on(channel: string, fn: (payload: any) => void): () => void;
+  /** SERVER — send a message to a specific player only. */
+  broadcastTo(player: PlayerEntity, channel: string, payload: any): void;
+  /** SERVER — listen for a message sent up from any client. fn receives (payload, sender). */
+  on(channel: string, fn: (payload: any, sender: PlayerEntity) => void): () => void;
+  off(channel: string, fn: any): void;
+  /** CLIENT (future LocalScript) — send a message up to the server. */
   send(channel: string, payload: any): void;
+  /** CLIENT (future LocalScript) — listen for a message coming down from the server. */
   onMessage(channel: string, fn: (payload: any) => void): () => void;
 }
 
@@ -526,8 +536,15 @@ const COMPLETIONS: CompletionDef[] = [
     label: "entity.destroy",
     kind: K.Function,
     detail: "entity.destroy() → void",
-    doc: "Remove and destroy this entity from the world.",
+    doc: "Remove and destroy this entity from the world. After this, entity.destroyed is true.",
     insert: ".destroy()",
+  },
+  {
+    label: "entity.destroyed",
+    kind: K.Property,
+    detail: "boolean (read-only)",
+    doc: "True once this entity has been destroyed. Methods called on a destroyed entity are no-ops (they log a warning but don't throw).\n\nAlways check entity.destroyed when holding long-lived references:\n\n  every(1, () => {\n    if (!enemy || enemy.destroyed) return;\n    enemy.rotation.y += 0.1;\n  });",
+    insert: ".destroyed",
   },
   {
     label: "entity.setAttribute",
@@ -1230,8 +1247,8 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur.Input.onMouseClick",
     kind: K.Function,
     detail: "Rebur.Input.onMouseClick(fn) → unsubscribe",
-    doc: "Called on every 3D viewport click. Callback receives the clicked Entity or null (sky/background).",
-    insert: "Rebur.Input.onMouseClick((entity) => {\n\tif (entity) {\n\t\t${1}\n\t}\n})",
+    doc: "Called on every 3D viewport click. Callback receives (entity | null, player).\n\nCurrently server-proxied: fires for any player's click. Check player to know who clicked.\n\nExample:\nRebur.Input.onMouseClick((entity, player) => {\n  if (entity) log(player.username, 'clicked', entity.name);\n});",
+    insert: "Rebur.Input.onMouseClick((entity, player) => {\n\tif (entity) {\n\t\t${1}\n\t}\n})",
     snippet: true,
   },
 
@@ -1286,32 +1303,40 @@ const COMPLETIONS: CompletionDef[] = [
   {
     label: "Rebur.Network.broadcast",
     kind: K.Function,
-    detail: "Rebur.Network.broadcast(channel, payload) → void",
-    doc: "Send a message from server to all connected clients.",
+    detail: "Rebur.Network.broadcast(channel, payload) → void  [SERVER]",
+    doc: "SERVER — Send a message to ALL connected clients.\n\nExample:\nRebur.Network.broadcast('roundOver', { winner: 'Alice', score: 42 });",
     insert: "Rebur.Network.broadcast(\"${1:channel}\", ${2:payload})",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Network.broadcastTo",
+    kind: K.Function,
+    detail: "Rebur.Network.broadcastTo(player, channel, payload) → void  [SERVER]",
+    doc: "SERVER — Send a message to a specific player only.\n\nExample:\nRebur.Network.broadcastTo(player, 'personalMessage', { text: 'You won!' });",
+    insert: "Rebur.Network.broadcastTo(${1:player}, \"${2:channel}\", ${3:payload})",
     snippet: true,
   },
   {
     label: "Rebur.Network.on",
     kind: K.Function,
-    detail: "Rebur.Network.on(channel, fn) → unsubscribe",
-    doc: "Listen for client messages on the server. fn receives the payload.",
-    insert: "Rebur.Network.on(\"${1:channel}\", (payload) => {\n\t${2}\n})",
+    detail: "Rebur.Network.on(channel, fn) → unsubscribe  [SERVER]",
+    doc: "SERVER — Listen for a message sent up from any client. fn receives (payload, sender: PlayerEntity).\n\nExample:\nRebur.Network.on('action', (payload, sender) => {\n  log(sender.username, 'sent:', payload);\n});",
+    insert: "Rebur.Network.on(\"${1:channel}\", (payload, sender) => {\n\t${2}\n})",
     snippet: true,
   },
   {
     label: "Rebur.Network.send",
     kind: K.Function,
-    detail: "Rebur.Network.send(channel, payload) → void",
-    doc: "Send a message from client to server.",
+    detail: "Rebur.Network.send(channel, payload) → void  [CLIENT — future LocalScript]",
+    doc: "CLIENT (future LocalScript) — Send a message up to the server.\n\nNot available in current server scripts.",
     insert: "Rebur.Network.send(\"${1:channel}\", ${2:payload})",
     snippet: true,
   },
   {
     label: "Rebur.Network.onMessage",
     kind: K.Function,
-    detail: "Rebur.Network.onMessage(channel, fn) → unsubscribe",
-    doc: "Listen for server messages on the client.",
+    detail: "Rebur.Network.onMessage(channel, fn) → unsubscribe  [CLIENT — future LocalScript]",
+    doc: "CLIENT (future LocalScript) — Listen for a message coming down from the server. fn receives (payload).\n\nNot available in current server scripts. Pair with Rebur.Network.broadcast() on the server.",
     insert: "Rebur.Network.onMessage(\"${1:channel}\", (payload) => {\n\t${2}\n})",
     snippet: true,
   },

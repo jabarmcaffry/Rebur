@@ -40,26 +40,27 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 7. [Entity Physics Body](#entity-physics-body)
 8. [Entity Events](#entity-events)
 9. [Rebur.Scene — Entity Container](#reburscene)
-10. [Rebur.Players — Player Entities](#reburplayers)
-11. [Player Entity](#player-entity)
-12. [Player GUI (per-player)](#player-gui)
-13. [Player Data](#player-data)
-14. [Player Animator](#player-animator)
-15. [Rebur.State — Shared Session State](#reburstate)
-16. [Rebur.DataStore — Persistent Storage](#reburdatastore)
-17. [Rebur.Gui — Global HUD](#reburgui)
-18. [Rebur.Sound — Audio](#rebursound)
-19. [Rebur.Tween — Property Animation](#reburtween)
-20. [Rebur.Camera — Camera Control](#reburcamera)
-21. [Rebur.Input — Keyboard & Mouse](#reburinput)
-22. [Rebur.Physics — Global Physics](#reburglobal-physics)
-23. [Rebur.RunService — Game Loop](#reburrunservice)
-24. [Rebur.Network — Multiplayer](#reburnetwork)
-25. [Rebur.Tags — Tag System](#reburtags)
-26. [Timers](#timers)
-27. [Logging](#logging)
-28. [Vector3 & Color3](#vector3--color3)
-29. [Quick Start Examples](#quick-start-examples)
+10. [Entity Lifetime & Validity](#entity-lifetime--validity)
+11. [Rebur.Players — Player Entities](#reburplayers)
+12. [Player Entity](#player-entity)
+13. [Player GUI (per-player)](#player-gui)
+14. [Player Data](#player-data)
+15. [Player Animator](#player-animator)
+16. [Rebur.State — Shared Session State](#reburstate)
+17. [Rebur.DataStore — Persistent Storage](#reburdatastore)
+18. [Rebur.Gui — Global HUD](#reburgui)
+19. [Rebur.Sound — Audio](#rebursound)
+20. [Rebur.Tween — Property Animation](#reburtween)
+21. [Rebur.Camera — Camera Control](#reburcamera)
+22. [Rebur.Input — Keyboard & Mouse](#reburinput)
+23. [Rebur.Physics — Global Physics](#reburglobal-physics)
+24. [Rebur.RunService — Game Loop](#reburrunservice)
+25. [Rebur.Network — Multiplayer](#reburnetwork)
+26. [Rebur.Tags — Tag System](#reburtags)
+27. [Timers](#timers)
+28. [Logging](#logging)
+29. [Vector3 & Color3](#vector3--color3)
+30. [Quick Start Examples](#quick-start-examples)
 
 ---
 
@@ -92,7 +93,8 @@ player                  ← a PlayerEntity (also an Entity)
 \`\`\`
 
 **Key rules:**
-- \`Rebur\` is the **only** global. No \`Scene\`, \`Players\`, \`gui\`, \`game\`, etc.
+- \`Rebur\` is the **primary** engine global — all subsystems hang off it. No \`Scene\`, \`Players\`, \`gui\`, \`game\`, etc.
+- A small safe **utility global set** is also exposed: \`after\`, \`every\`, \`wait\`, \`Vector3\`, \`Color3\`, \`log\`, \`warn\`, \`error\`, \`random\`, \`randInt\`, \`pick\`. Everything else requires \`Rebur.\`.
 - All entities (including players) share the same base API — players are entities with \`isPlayer = true\`.
 - Cross-container interaction is **explicit** — there is no hidden magic coupling.
 - Single access pattern everywhere: \`Rebur.Scene.find("name")\`, \`Rebur.Players.get(id)\`.
@@ -109,6 +111,20 @@ Rebur scripts currently execute in a **server-side** context. This is intentiona
 - Entity positions, physics, health, inventory — all authoritative here.
 - What you write today is a server script.
 
+### Client-Bound APIs (currently server-proxied)
+
+Some APIs are conceptually **per-player/client** but are currently bridged through the server:
+
+| API | Concept | Current behaviour |
+|-----|---------|-------------------|
+| \`Rebur.Input\` | Per-player keyboard/mouse | Server receives player input events, forwarded to scripts |
+| \`Rebur.Camera\` | Per-player camera | Server sets camera params, pushed to each client |
+| \`Rebur.Network.send()\` | Client → server message | Callable from server context only in current build |
+| \`Rebur.Network.onMessage()\` | Client receives server message | Server-side listener stub; actual delivery is client-side |
+| \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
+
+> **Why this matters:** \`Rebur.Input.onPress("e", fn)\` fires once globally on the server when **any** player presses E. When client scripts arrive, each player's input will be isolated. For now, always check which player acted before applying effects.
+
 ### Replication Rules (what syncs automatically)
 
 | What | Replicates? | Notes |
@@ -123,20 +139,33 @@ Rebur scripts currently execute in a **server-side** context. This is intentiona
 | \`Rebur.Sound.play()\` | ✓ Shared | All players hear it |
 | Runtime entity creation | ✓ Auto | Visible to all clients |
 
-### Ownership
+### Replication Ownership & Conflicts
 
-- The **server owns everything** right now.
-- Player input is read server-side; the server moves each player character.
-- This means no client-side prediction or local-only effects yet — that is a planned future context.
+**The server is the single authority** on all replicated state. This has one critical consequence:
 
-### Future: Client Scripts
+- If a future client script writes \`entity.position\` locally for prediction, and the server then sets \`entity.position\` authoritatively — **the server wins**.
+- Client-written values are always overwritten by the next server tick for any server-owned entity.
+- This is intentional: it prevents cheating but does mean client prediction can visually snap.
+
+Current rule: **everything is server-owned**. When client scripts arrive, each entity will have an explicit owner (server or a specific player), and only the owner can write its replicated properties. Any write from a non-owner will be silently ignored on the remote side.
+
+### Server Authority Summary
+
+\`\`\`
+Server writes entity.position  →  replicates to all clients ✓
+Client prediction writes it    →  overwritten by next server tick ✗ (snaps)
+Future: client owns entity     →  client writes replicate up then to others ✓
+\`\`\`
+
+### Future: Client Scripts (LocalScript)
 
 A future \`LocalScript\` context will run in each player's browser for:
-- Responsive UI, camera shake, particle effects
-- Client-side prediction for movement
-- Per-player visual-only changes
+- **Responsive input** — react to key presses without a round-trip to the server
+- **Camera control** — smooth camera shake, zoom, cutscenes
+- **Client-side prediction** — move the player character locally; reconcile with server
+- **Per-player visual effects** — particles, screen flash, local-only UI animations
 
-For now, all creative scripting is server-side. This is fine for most game genres.
+For now, all creative scripting is server-side. This covers the vast majority of game types cleanly.
 
 ---
 
@@ -240,18 +269,28 @@ All properties use **lowercase camelCase**. Readable and writable unless noted.
 
 ### position · rotation · scale
 
+Transforms (\`position\`, \`rotation\`, \`scale\`) are **mutable proxied objects**. You can mutate individual axes in-place **or** assign a whole new object — both are valid and both replicate to clients.
+
 \`\`\`js
 const e = Rebur.Scene.find("Part");
 
-// Read
-const p = e.position; // { x, y, z }
-log(p.x, p.y, p.z);
+// Read individual axes
+log(e.position.x, e.position.y, e.position.z);
 
-// Write — assign a new object
+// Mutate in place — fine, changes replicate
+e.position.y = 5;
+e.rotation.y += 0.1;        // good for incremental tick updates
+e.scale.x    = 2;
+
+// Assign a whole new object — also fine
 e.position = { x: 0, y: 5, z: 0 };
 e.rotation = { x: 0, y: Math.PI / 2, z: 0 }; // radians
 e.scale    = { x: 2, y: 2, z: 2 };
 \`\`\`
+
+> **Pick one style and be consistent.** Mixing both in the same script is fine — the engine treats them identically. Tweens mutate in-place, which is why \`Rebur.Tween(entity.position, { y: 5 }, 2)\` works — it receives the live proxied object and writes to it over time.
+
+> **Players are an exception.** \`player.position\` and \`player.rotation\` are **read-only** — see [Player transform restrictions](#player-transform-restrictions).
 
 ### color · visible · transparency
 
@@ -351,27 +390,66 @@ cannon.body.applyImpulse({ x: 0, y: 5, z: -20 }); // launch forward-up
 
 ### entity.on(event, handler) → unsubscribe
 
-| Event | When | Handler receives |
-|-------|------|-----------------|
-| \`"touched"\` | An entity/player overlaps this | \`other\` entity |
-| \`"untouched"\` | Overlap ends | \`other\` entity |
-| \`"clicked"\` | Player clicks in 3D viewport | \`player\` entity |
-| \`"destroyed"\` | Entity is destroyed | — |
-| \`"collisionStarted"\` | Physics collision begins | \`other\`, impulse |
-| \`"collisionEnded"\` | Physics collision ends | \`other\` |
-| *(custom)* | Your script calls \`.emit()\` | your args |
+#### Overlap events: touched / untouched
+
+\`"touched"\` and \`"untouched"\` are **overlap events**. They fire when the bounding volumes of two entities intersect, regardless of whether either entity is a solid collider or a trigger.
+
+- **Trigger entity** (\`body.isTrigger = true\`): overlapping entities pass through with no physical response. Only \`touched\`/\`untouched\` fire. Use for pickup zones, damage zones, checkpoints.
+- **Solid entity** (\`body.isTrigger = false\`, default): physical collision response happens. Both \`touched\`/\`untouched\` AND \`collisionStarted\`/\`collisionEnded\` fire.
+
+\`\`\`
+Event              Trigger entity    Solid entity
+─────────────────────────────────────────────────
+touched            ✓ overlap starts  ✓ contact starts
+untouched          ✓ overlap ends    ✓ contact ends
+collisionStarted   ✗ never           ✓ physical impact (+ impulse)
+collisionEnded     ✗ never           ✓ physical separation
+\`\`\`
+
+**Rule of thumb:**
+- Use \`touched\`/\`untouched\` for **gameplay logic** — item pickup, damage, checkpoints, shops.
+- Use \`collisionStarted\` for **impact-dependent logic** — breakable objects, impact sounds based on force, shatter thresholds.
 
 \`\`\`js
+// Damage zone — trigger, gameplay logic → use touched
 const lava = Rebur.Scene.find("Lava");
+lava.body.isTrigger = true;
 
-const unsub = lava.on("touched", (other) => {
-  if (other.isPlayer) {
-    other.takeDamage(25);
-  }
+lava.on("touched", (other) => {
+  if (other.isPlayer) other.takeDamage(25);
+});
+lava.on("untouched", (other) => {
+  // player left the lava zone — stop damage
 });
 
-// Stop listening later
-unsub();
+// Breakable crate — solid, impact-dependent → use collisionStarted
+const crate = Rebur.Scene.find("Crate");
+
+crate.on("collisionStarted", (other, impulse) => {
+  if (impulse > 15) {
+    crate.destroy();
+    Rebur.Sound.play("break");
+  }
+});
+\`\`\`
+
+#### Full event table
+
+| Event | Fires when | Handler receives | Trigger? | Solid? |
+|-------|-----------|-----------------|----------|--------|
+| \`"touched"\` | Overlap/contact starts | \`other: Entity\` | ✓ | ✓ |
+| \`"untouched"\` | Overlap/contact ends | \`other: Entity\` | ✓ | ✓ |
+| \`"collisionStarted"\` | Physical impact begins | \`other: Entity\`, \`impulse: number\` | ✗ | ✓ |
+| \`"collisionEnded"\` | Physical separation | \`other: Entity\` | ✗ | ✓ |
+| \`"clicked"\` | Player clicks this entity in 3D view | \`player: PlayerEntity\` | — | — |
+| \`"destroyed"\` | Entity is destroyed | — | — | — |
+| *(custom)* | Your script calls \`.emit()\` | your args | — | — |
+
+\`\`\`js
+const unsub = entity.on("touched", (other) => {
+  if (other.isPlayer) other.takeDamage(25);
+});
+unsub(); // stop listening
 \`\`\`
 
 \`\`\`js
@@ -527,6 +605,79 @@ const wall = Rebur.Scene.find("OldWall");
 if (wall) wall.destroy();
 \`\`\`
 
+---
+
+## Entity Lifetime & Validity
+
+Entities can be destroyed at any time — by scripts, by collisions, or by the engine. A **stale reference** is a variable that holds an entity that no longer exists.
+
+### entity.destroyed *(read-only boolean)*
+
+Every entity has a \`destroyed\` property. It is \`false\` while the entity is alive and becomes \`true\` immediately when \`entity.destroy()\` is called or the engine removes it.
+
+\`\`\`js
+const enemy = Rebur.Scene.find("Enemy");
+
+after(5, () => {
+  if (enemy && !enemy.destroyed) {
+    enemy.destroy();
+  }
+});
+\`\`\`
+
+### Calling methods on a destroyed entity
+
+Calling any method or reading/writing any property on a destroyed entity is **a no-op** — it does not throw. The engine logs a warning in the console so you can trace it:
+
+\`\`\`
+[warn] Attempted to call .takeDamage() on destroyed entity "Enemy"
+\`\`\`
+
+This is intentional: it keeps scripts from crashing if two events race to destroy the same entity. But it means **silent failures are possible** — always check \`entity.destroyed\` when holding long-lived references.
+
+### Safe patterns
+
+\`\`\`js
+// Pattern 1: guard before use (recommended for long-lived refs)
+const coin = Rebur.Scene.find("Coin");
+
+every(1, () => {
+  if (!coin || coin.destroyed) return; // entity was destroyed, skip
+  coin.rotation.y += 0.1;
+});
+
+// Pattern 2: re-find each time (safe but slower)
+Rebur.on("tick", (dt) => {
+  const coin = Rebur.Scene.find("Coin"); // null if destroyed
+  if (coin) coin.rotation.y += dt;
+});
+
+// Pattern 3: listen for "destroyed" event to clean up
+const enemy = Rebur.Scene.find("Enemy");
+if (enemy) {
+  enemy.on("destroyed", () => {
+    log("Enemy was destroyed — cleaning up");
+    // remove timers, clear GUI, etc.
+  });
+}
+\`\`\`
+
+### entity.destroyed in touch/collision handlers
+
+Touch handlers can fire for already-destroyed entities in the same physics step (two entities destroyed in the same frame). Always guard:
+
+\`\`\`js
+coin.on("touched", (other) => {
+  if (coin.destroyed) return;   // already picked up this frame
+  if (!other.isPlayer) return;
+
+  coin.visible = false;
+  coin.body.canCollide = false;
+  // ... give item ...
+  after(3, () => { coin.visible = true; coin.body.canCollide = true; });
+});
+\`\`\`
+
 ### Entity hierarchy
 
 \`\`\`js
@@ -607,6 +758,45 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`motors\` | MotorAPI | ✓ | — | Body-slot attachment |
 | \`color\` | string | ✓ | ✓ | Shirt color |
 
+### Player Transform Restrictions
+
+Player \`position\` and \`rotation\` are **read-only from scripts**. The character controller (movement system) owns them. Attempting to assign them directly is silently ignored:
+
+\`\`\`js
+// ✗ These do nothing — player.position is read-only
+player.position = { x: 0, y: 0, z: 0 };
+player.position.y = 10;
+player.rotation.y = Math.PI;
+\`\`\`
+
+**Why?** The physics character controller runs at every tick and resets player position based on its own simulation. Any direct write gets immediately overwritten.
+
+**Use the correct APIs instead:**
+
+\`\`\`js
+// ✓ Instant teleport — bypasses the controller for one frame
+player.teleport(0, 10, 0);
+
+// ✓ Movement parameters — controller reads these each tick
+player.walkSpeed = 12;
+player.runSpeed  = 24;
+player.jumpPower = 15;
+
+// ✓ Respawn to a designated point
+player.spawnPoint = { x: 50, y: 5, z: 0 };
+player.respawn();
+
+// ✓ Apply a force/impulse to the player's physics body
+player.body.applyImpulse({ x: 0, y: 20, z: 0 }); // knock upward
+\`\`\`
+
+> **Reading** player.position is always valid — it reflects the current server-authoritative position:
+>
+> \`\`\`js
+> log(player.position.x, player.position.y, player.position.z);
+> const distFromOrigin = Vector3(player.position.x, player.position.y, player.position.z).magnitude;
+> \`\`\`
+
 ### Player Methods
 
 \`\`\`js
@@ -614,7 +804,7 @@ player.takeDamage(25)        // reduce health; death at 0
 player.heal(20)              // restore health (capped at maxHealth)
 player.kill()                // instant death → respawn
 player.respawn()             // teleport to spawnPoint, restore health
-player.teleport(x, y, z)    // instant move
+player.teleport(x, y, z)    // instant move (bypasses controller for one frame)
 \`\`\`
 
 ### Health system
@@ -1071,13 +1261,15 @@ Rebur.Tween(entity.position, { y: 10 }, 3, "easeInOut", () => {
 
 ## Rebur.Camera
 
+> **Client-bound API (currently server-proxied).** Camera settings are pushed from the server to all clients each tick. In the current model, setting \`Rebur.Camera.mode\` applies to every connected player simultaneously. When per-player LocalScripts arrive, each player will have their own camera scope.
+
 \`\`\`js
 Rebur.Camera.mode     = "thirdPerson"; // "thirdPerson"|"firstPerson"|"scripted"|"free"
 Rebur.Camera.distance = 8;
 Rebur.Camera.fov      = 70;            // degrees
 Rebur.Camera.offset   = { x: 0, y: 1.5, z: 0 };
 
-// Scripted mode — full manual control
+// Scripted mode — full manual control (affects all players)
 Rebur.Camera.mode = "scripted";
 Rebur.Camera.position = { x: 0, y: 30, z: 30 };
 Rebur.Camera.lookAt   = { x: 0, y: 0, z: 0 };
@@ -1087,12 +1279,16 @@ Rebur.Camera.lookAt   = { x: 0, y: 0, z: 0 };
 
 ## Rebur.Input
 
-Keyboard and mouse input.
+> **Client-bound API (currently server-proxied).** In the current build, \`Rebur.Input\` is a server-global listener — \`onPress("e", fn)\` fires when **any** player presses E, not a specific one. The callback does not tell you which player pressed the key. Always cross-reference \`Rebur.Players.all()\` or \`Rebur.Players.find()\` to identify the acting player.
+>
+> When per-player LocalScripts arrive, each player's input will be scoped to their own context and the correct player will be implicit.
 
 \`\`\`js
 // Key press / release
 Rebur.Input.onPress("e", () => {
-  log("E pressed");
+  // ⚠ fires for ANY player pressing E
+  // You must determine which player acted from context
+  log("E pressed by someone");
 });
 Rebur.Input.onRelease("e", () => {
   log("E released");
@@ -1101,14 +1297,14 @@ Rebur.Input.onRelease("e", () => {
 // Poll state inside update loop
 Rebur.on("tick", (dt) => {
   if (Rebur.Input.isDown("shift")) {
-    player.runSpeed = 20;
+    // ⚠ shift is down for at least one player — unclear which
   }
 });
 
-// 3D viewport click
-Rebur.Input.onMouseClick((entity) => {
-  if (entity) log("clicked", entity.name);
-  else log("clicked sky");
+// 3D viewport click — returns the entity hit and the player who clicked
+Rebur.Input.onMouseClick((entity, player) => {
+  if (entity) log(player.username, "clicked", entity.name);
+  else log(player.username, "clicked sky");
 });
 \`\`\`
 
@@ -1150,21 +1346,96 @@ unsub(); // unsubscribe
 
 ## Rebur.Network
 
-\`\`\`js
-// Server → all clients
-Rebur.Network.broadcast("score", { value: 10 });
+The Network API is split by who is sending and who is receiving. Because all current scripts are server-side, **only the server methods are authoritative today**. The client methods (\`send\`, \`onMessage\`) are stubs that will be available in future LocalScript contexts.
 
-// Server listens for client messages
-Rebur.Network.on("jump", (payload) => {
-  log("client sent jump:", payload);
+### Server Networking (use this in all current scripts)
+
+The server can broadcast to all clients or to a specific player, and listen for messages that clients send up.
+
+\`\`\`js
+// Broadcast a message to ALL connected clients
+Rebur.Network.broadcast("roundOver", { winner: "Alice", score: 42 });
+
+// Send to a specific player only
+Rebur.Network.broadcastTo(player, "personalMessage", { text: "You won!" });
+
+// Listen for a message sent UP from any client
+Rebur.Network.on("purchaseRequest", (payload, sender) => {
+  // sender is the PlayerEntity who sent this
+  log(sender.username, "wants to buy:", payload.item);
+
+  const coins = sender.data.get("coins") ?? 0;
+  if (coins >= payload.cost) {
+    sender.data.set("coins", coins - payload.cost);
+    sender.inventory.add(payload.item);
+    Rebur.Network.broadcastTo(sender, "purchaseResult", { success: true, item: payload.item });
+  } else {
+    Rebur.Network.broadcastTo(sender, "purchaseResult", { success: false, reason: "Not enough coins" });
+  }
+});
+\`\`\`
+
+\`\`\`js
+// Broadcast score updates to all clients for a live HUD
+Rebur.State.on("score", (val) => {
+  Rebur.Network.broadcast("scoreUpdate", { score: val });
+});
+\`\`\`
+
+#### Server Network methods
+
+| Method | Description |
+|--------|-------------|
+| \`Rebur.Network.broadcast(event, payload)\` | Send to all connected clients |
+| \`Rebur.Network.broadcastTo(player, event, payload)\` | Send to one specific player |
+| \`Rebur.Network.on(event, handler)\` | Listen for a message from any client; handler receives \`(payload, sender: PlayerEntity)\` |
+| \`Rebur.Network.off(event, handler)\` | Remove a listener |
+
+### Client Networking (LocalScript context — future)
+
+These methods will be callable from client scripts once LocalScript contexts are available. They are listed here for completeness and forward planning.
+
+\`\`\`js
+// CLIENT SCRIPT (future LocalScript — not available yet)
+
+// Send a message up to the server
+Rebur.Network.send("purchaseRequest", { item: "Sword", cost: 50 });
+
+// Listen for a message coming down from the server
+Rebur.Network.onMessage("purchaseResult", (payload) => {
+  if (payload.success) {
+    Rebur.Gui.text("notice", "Bought " + payload.item + "!", { anchor: "cc" });
+  } else {
+    Rebur.Gui.text("notice", payload.reason, { anchor: "cc", color: "#ef4444" });
+  }
+  after(2, () => Rebur.Gui.clear("notice"));
 });
 
-// Client → server
-Rebur.Network.send("jump", { power: 15 });
+// Listen for broadcasts from the server
+Rebur.Network.onMessage("scoreUpdate", (payload) => {
+  Rebur.Gui.text("score", "Score: " + payload.score, { anchor: "tl", x: 20, y: 20 });
+});
+\`\`\`
 
-// Client listens for server messages
-Rebur.Network.onMessage("score", (payload) => {
-  Rebur.Gui.text("score", "Score: " + payload.value);
+#### Client Network methods (future)
+
+| Method | Description |
+|--------|-------------|
+| \`Rebur.Network.send(event, payload)\` | Send a message up to the server |
+| \`Rebur.Network.onMessage(event, handler)\` | Listen for a message from the server; handler receives \`(payload)\` |
+
+### Security note
+
+Never trust payload data from clients for authoritative decisions. Always validate on the server:
+
+\`\`\`js
+Rebur.Network.on("claimScore", (payload, sender) => {
+  // ✗ Don't do this — client could send any number
+  // Rebur.State.set("score", payload.score);
+
+  // ✓ Always compute authoritatively server-side
+  const current = Rebur.State.get("score") ?? 0;
+  Rebur.State.set("score", current + 1);
 });
 \`\`\`
 
