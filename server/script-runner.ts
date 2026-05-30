@@ -12,6 +12,8 @@
 
 import { createContext, Script } from "vm";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ScriptObjState {
@@ -388,6 +390,7 @@ export class ScriptRunner {
           return _posProxy;
         },
         set position(v: any) {
+          if (obj._destroyed) { const m = `position write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; }
           obj.positionX = +(v?.x ?? obj.positionX);
           obj.positionY = +(v?.y ?? obj.positionY);
           obj.positionZ = +(v?.z ?? obj.positionZ);
@@ -398,6 +401,7 @@ export class ScriptRunner {
           return _rotProxy;
         },
         set rotation(v: any) {
+          if (obj._destroyed) { const m = `rotation write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; }
           obj.rotationX = +(v?.x ?? obj.rotationX);
           obj.rotationY = +(v?.y ?? obj.rotationY);
           obj.rotationZ = +(v?.z ?? obj.rotationZ);
@@ -408,6 +412,7 @@ export class ScriptRunner {
           return _scaleProxy;
         },
         set scale(v: any) {
+          if (obj._destroyed) { const m = `scale write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; }
           obj.scaleX = +(v?.x ?? obj.scaleX);
           obj.scaleY = +(v?.y ?? obj.scaleY);
           obj.scaleZ = +(v?.z ?? obj.scaleZ);
@@ -415,11 +420,11 @@ export class ScriptRunner {
         },
 
         get color()        { return obj.color; },
-        set color(v)       { obj.color = String(v); },
+        set color(v)       { if (obj._destroyed) { const m = `color write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.color = String(v); },
         get visible()      { return obj.visible; },
-        set visible(v)     { obj.visible = Boolean(v); },
+        set visible(v)     { if (obj._destroyed) { const m = `visible write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.visible = Boolean(v); },
         get transparency() { return obj.transparency ?? 0; },
-        set transparency(v){ obj.transparency = Math.max(0, Math.min(1, +v)); },
+        set transparency(v){ if (obj._destroyed) { const m = `transparency write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.transparency = Math.max(0, Math.min(1, +v)); },
 
         get body()     { return body; },
         get parent()   { return null; },
@@ -439,7 +444,9 @@ export class ScriptRunner {
 
         on(event: string, fn: EventHandler) {
           if (obj._destroyed) {
-            warn(`on() called on destroyed entity "${obj.name}"`);
+            const msg = `on() called on destroyed entity "${obj.name}"`;
+            if (IS_DEV) throw new Error(msg);
+            warn(msg);
             return () => {};
           }
           const key = `${obj.name}::${event.toLowerCase()}`;
@@ -456,7 +463,9 @@ export class ScriptRunner {
         },
         emit(event: string, ...args: any[]) {
           if (obj._destroyed) {
-            warn(`emit() called on destroyed entity "${obj.name}"`);
+            const msg = `emit() called on destroyed entity "${obj.name}"`;
+            if (IS_DEV) throw new Error(msg);
+            warn(msg);
             return false;
           }
           const evtLower = event.toLowerCase();
@@ -654,6 +663,15 @@ export class ScriptRunner {
       clear(id?: string) {
         if (id !== undefined) { runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); }
         else { runner.guiElements.clear(); runner.guiClickHandlers.clear(); }
+      },
+      bind(id: string, stateKey: string, renderFn: (val: any) => void) {
+        const run = (val: any) => { try { renderFn(val); } catch { /* isolate */ } };
+        const arr = runner.stateHandlers.get(stateKey) ?? [];
+        arr.push(run);
+        runner.stateHandlers.set(stateKey, arr);
+        const current = runner.gameState.get(stateKey);
+        if (current !== undefined) run(current);
+        return () => runner.stateHandlers.set(stateKey, (runner.stateHandlers.get(stateKey) ?? []).filter(h => h !== run));
       },
     };
 
@@ -957,7 +975,8 @@ export class ScriptRunner {
         const k = event.toLowerCase();
         runner.inputHandlers.set(k, (runner.inputHandlers.get(k)??[]).filter(h=>h!==fn));
       },
-      isDown(key: string) { return runner.heldKeys.has(key.toLowerCase()); },
+      isDown(key: string)    { return runner.heldKeys.has(key.toLowerCase()); },
+      isDownAny(key: string) { return runner.heldKeys.has(key.toLowerCase()); },
     };
 
     // ── Rebur.Physics ──────────────────────────────────────────────────────

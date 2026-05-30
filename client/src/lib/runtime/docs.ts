@@ -120,7 +120,7 @@ Some APIs are conceptually **per-player/client** but are currently bridged throu
 | \`Rebur.Input\` | Per-player keyboard/mouse | Server receives player input events, forwarded to scripts |
 | \`Rebur.Camera\` | Per-player camera | Server sets camera params, pushed to each client |
 | \`Rebur.Network.send()\` | Server → all clients / client → server | Symmetric: same method name on both sides |
-| \`Rebur.Network.on()\` | Receive messages | Server: receives from clients. Client (future): receives from server |
+| \`Rebur.Network.on()\` | Receive messages | Server: receives from clients. Client (LocalScript): receives from server |
 | \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
 
 > **Why this matters:** \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted so you can apply effects correctly.
@@ -139,23 +139,47 @@ Some APIs are conceptually **per-player/client** but are currently bridged throu
 | \`Rebur.Sound.play()\` | ✓ Shared | All players hear it |
 | Runtime entity creation | ✓ Auto | Visible to all clients |
 
-### Replication Ownership & Conflicts
+### Entity Ownership Model
 
-**The server is the single authority** on all replicated state. This has one critical consequence:
+Every entity has an **owner**. The owner is the only authority allowed to write replicated properties; writes from non-owners are ignored on the remote side.
 
-- If a future client script writes \`entity.position\` locally for prediction, and the server then sets \`entity.position\` authoritatively — **the server wins**.
-- Client-written values are always overwritten by the next server tick for any server-owned entity.
-- This is intentional: it prevents cheating but does mean client prediction can visually snap.
+| Owner | Value | Who sets it |
+|-------|-------|-------------|
+| Server | \`"server"\` | Default for all entities |
+| Specific player | player \`id\` string | \`entity.owner = player.id\` in a server script |
 
-Current rule: **everything is server-owned**. When client scripts arrive, each entity will have an explicit owner (server or a specific player), and only the owner can write its replicated properties. Any write from a non-owner will be silently ignored on the remote side.
+**Ownership rules (current):**
+- All entities start server-owned.
+- The server can transfer ownership at any time: \`entity.owner = player.id\`.
+- Only one owner at a time — no shared ownership.
+- When the owning player disconnects, ownership returns to \`"server"\` automatically.
+- A server script can always read \`entity.owner\` to check who controls it.
 
-### Server Authority Summary
+**What "server is the authority" means in practice:**
 
 \`\`\`
 Server writes entity.position  →  replicates to all clients ✓
-Client prediction writes it    →  overwritten by next server tick ✗ (snaps)
-Future: client owns entity     →  client writes replicate up then to others ✓
+Client (LocalScript) reads it  →  always reflects the latest server value ✓
+Client writes entity.position  →  no authority; overwritten by next server tick ✗
 \`\`\`
+
+**No client-side prediction.** The engine uses pure server authority — clients show what the server says, with interpolation for smoothness. There is no prediction, no rollback, and no reconciliation step. This keeps the model simple and cheat-resistant, at the cost of slightly higher perceived latency on fast interactions (e.g. jump response).
+
+### Client-Side Interpolation
+
+Clients do **not** receive a raw position stream. The engine interpolates entity transforms between server snapshots so motion appears smooth even at 20 Hz server tick rate.
+
+\`\`\`
+Server tick rate:    ~20 Hz  (50 ms per tick)
+Interpolation buffer: 1–2 snapshots (~50–100 ms of buffered history)
+Client render rate:  browser frame rate (60+ Hz)
+Visible latency:     ~50–100 ms behind true server state
+\`\`\`
+
+What this means for your scripts:
+- Rapid position changes (teleports) will still be snappy — the interpolation buffer is short.
+- Smooth physics motion (balls, projectiles) will appear fluid even over a moderate connection.
+- There is no client-side extrapolation; if packets are lost, the entity holds its last interpolated position until the next snapshot arrives.
 
 ### LocalScript (Client-Side)
 
@@ -351,7 +375,7 @@ ball.body.isKinematic  = false;
 ball.body.isTrigger    = false;  // solid collision
 \`\`\`
 
-### body methods — force-based physics
+### body methods — force-based physics (recommended)
 
 \`\`\`js
 // Continuous force (applied each frame, good for constant pushes)
@@ -362,12 +386,21 @@ ball.body.applyImpulse({ x: 0, y: 10, z: 0 });
 
 // Torque (spin force)
 ball.body.applyTorque({ x: 0, y: 5, z: 0 });
+\`\`\`
 
-// Direct velocity override (use sparingly — breaks physical realism)
+### body methods — direct override (⚠ unsafe)
+
+\`\`\`js
+// ⚠ UNSAFE OVERRIDE — bypasses the physics simulation.
+// Mixing these with applyForce/applyImpulse in the same frame causes
+// undefined behaviour: forces applied this tick are silently discarded.
+// Only use these when you own the motion entirely (kinematic entities,
+// scripted cutscenes) and do NOT also call force/impulse APIs on the same body.
 ball.body.setVelocity({ x: 5, y: 0, z: -5 });
 ball.body.setAngularVelocity({ x: 0, y: Math.PI, z: 0 });
 
-// Stop all motion
+// ⚠ Safe use: stopping a kinematic body (no forces are in play)
+ball.body.isKinematic = true;
 ball.body.setVelocity({ x: 0, y: 0, z: 0 });
 ball.body.setAngularVelocity({ x: 0, y: 0, z: 0 });
 \`\`\`
@@ -637,13 +670,28 @@ after(5, () => {
 
 ### Calling methods on a destroyed entity
 
-Calling any method or reading/writing any property on a destroyed entity is **a no-op** — it does not throw. The engine logs a warning in the console so you can trace it:
+The behaviour depends on the environment:
 
+| Environment | On destroyed entity access | Why |
+|-------------|---------------------------|-----|
+| **Development** (`NODE_ENV !== "production"`) | **Throws an error** | Catches bugs immediately — no silent failures |
+| **Production** | Warn + no-op | Prevents crashes from race conditions in live games |
+
+**Development error example:**
 \`\`\`
-[warn] Attempted to write property on destroyed entity "Enemy"
+Error: on() called on destroyed entity "Enemy"
 \`\`\`
 
-This is intentional: it keeps scripts from crashing if two events race to destroy the same entity. But it means **silent failures are possible** — always check \`entity.destroyed\` when holding long-lived references.
+This design means you find stale-reference bugs during development, before players hit them. The production fallback (warn + no-op) keeps a race condition from crashing an otherwise healthy game session.
+
+**The most common race condition:** two events fire in the same physics step and both try to destroy the same entity. Guard against it:
+
+\`\`\`js
+coin.on("touched", (other) => {
+  if (coin.destroyed) return;  // guard first
+  // ... safe to proceed
+});
+\`\`\`
 
 ### Safe patterns
 
@@ -1079,23 +1127,42 @@ Rebur.State.keys();     // string[]
 Rebur.State.getAll();   // Record<string, any>
 \`\`\`
 
-Full example:
+### State-driven UI (canonical pattern)
+
+**GUI is a render layer. State is the data layer. They should not both be updated from the same line of game logic.**
+
+The correct pattern:
+1. **Game logic writes State only** — \`Rebur.State.set("score", n)\`
+2. **GUI binds to State** — automatically re-renders when State changes
 
 \`\`\`js
+// 1. Declare your State
 Rebur.State.set("score", 0);
-Rebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
 
-Rebur.State.on("score", (val) => {
-  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
+// 2. Bind GUI to State — runs immediately with the current value,
+//    then automatically re-runs every time "score" changes.
+Rebur.Gui.bind("scoreLabel", "score", (val) => {
+  Rebur.Gui.text("scoreLabel", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
 });
 
+// 3. Game logic ONLY touches State — GUI updates itself
 const coin = Rebur.Scene.find("Coin");
 coin.on("touched", (other) => {
   if (!other.isPlayer) return;
-  Rebur.State.set("score", Rebur.State.get("score") + 1);
+  Rebur.State.set("score", Rebur.State.get("score") + 1); // ← only line needed
   coin.visible = false;
   after(3, () => { coin.visible = true; });
 });
+\`\`\`
+
+**Why this matters:** if you call \`Rebur.Gui.text("scoreLabel", ...)\` directly in game logic AND have a \`State.on("score")\` binding, you get two updates per event — one from the handler, one from your manual call. This causes drift, double-renders, and race conditions in complex games.
+
+**Exception — one-shot messages:** Use \`Rebur.Gui.text()\` directly for transient, stateless messages that don't need to survive a state change (countdown announcements, kill feed, etc.):
+
+\`\`\`js
+// One-shot OK: this message has no State backing, it's purely ephemeral
+Rebur.Gui.text("msg", "GAME OVER", { anchor: "cc", size: 36 });
+after(3, () => Rebur.Gui.clear("msg"));
 \`\`\`
 
 ---
@@ -1206,6 +1273,30 @@ Rebur.Gui.clear("label");  // remove one element
 Rebur.Gui.clear();          // remove all elements
 \`\`\`
 
+### Rebur.Gui.bind(id, stateKey, renderFn) → unsubscribe
+
+Bind a GUI element to a State key. The \`renderFn\` fires immediately with the current value and again every time the state changes. Returns an unsubscribe function to detach the binding.
+
+\`\`\`js
+// Score label — always shows the current score
+Rebur.State.set("score", 0);
+const unbind = Rebur.Gui.bind("score", "score", (val) => {
+  Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
+});
+
+// Health bar — updates whenever health state changes
+Rebur.State.set("hp", 100);
+Rebur.Gui.bind("hpBar", "hp", (val) => {
+  Rebur.Gui.bar("hpBar", val, 100, { anchor: "bl", x: 20, y: 20, width: 200, height: 14, color: "#22c55e" });
+});
+
+// Game logic only writes State — GUI updates automatically
+Rebur.State.set("score", Rebur.State.get("score") + 1);  // score label refreshes
+Rebur.State.set("hp", 75);                                // health bar refreshes
+\`\`\`
+
+\`bind\` is the **only** correct way to connect persistent HUD elements to game data. Use \`Rebur.Gui.text()\` directly only for ephemeral one-shot messages.
+
 ---
 
 ## Rebur.Sound
@@ -1309,12 +1400,32 @@ unsub();
 // or explicitly:
 Rebur.Input.off("press", handler);
 
-// Poll whether a key is currently held — use inside a tick loop
+// Poll whether any player is holding a key — use inside a tick loop.
+// Prefer isDownAny() — the name makes the "any player" scope explicit.
 Rebur.on("tick", (dt) => {
-  if (Rebur.Input.isDown("shift")) {
-    // ⚠ SERVER-GLOBAL: true if ANY connected player is holding shift.
-    // This is intentional for single-player games or shared-state checks.
-    // For per-player logic always use the event callback instead (see below).
+  if (Rebur.Input.isDownAny("shift")) {
+    // true if AT LEAST ONE connected player is holding shift.
+    // Only safe when the answer is the same regardless of which player
+    // holds the key (e.g. pausing a shared timer, toggling a debug view).
+  }
+});
+
+// isDown() is an alias for isDownAny() — same behaviour, less obvious name.
+// Rebur.Input.isDown("shift") — avoid in new code; prefer isDownAny().
+\`\`\`
+
+**Never use \`isDownAny\` for per-player gameplay logic** (damage, abilities, purchases). If you write \`if (isDownAny("e")) player.health -= 10\` in a multiplayer game, ANY player holding E will damage every player — because \`isDownAny\` has no concept of "which player".
+
+\`\`\`js
+// ✓ CORRECT — per-player damage, via event callback
+Rebur.Input.on("press", (player, key) => {
+  if (key === "e") player.health -= 10;  // only the player who pressed E
+});
+
+// ✗ WRONG — all players get damaged when anyone holds E
+Rebur.on("tick", () => {
+  if (Rebur.Input.isDownAny("e")) {
+    for (const p of Rebur.Players.all()) p.health -= 1;
   }
 });
 \`\`\`
@@ -1327,9 +1438,9 @@ Key names: letters (\`"a"\`–\`"z"\`), \`"space"\`, \`"shift"\`, \`"control"\`,
 |----------|-----|
 | React to a specific player pressing a key | \`Rebur.Input.on("press", (player, key) => {})\` — callback gives you the exact player |
 | React to a specific player clicking in 3D | \`Rebur.Input.on("mouseClick", (player, entity) => {})\` |
-| Detect any-player input in a tick loop | \`Rebur.Input.isDown(key)\` — **global**: true if at least one player holds the key |
+| Detect any-player input in a tick loop | \`Rebur.Input.isDownAny(key)\` — **global**: true if at least one player holds the key |
 
-In a multiplayer game **always use event callbacks for gameplay-affecting logic** (damage, abilities, purchases). \`isDown\` is only safe when the answer is the same regardless of which player holds the key (e.g. pausing a shared timer).
+In a multiplayer game **always use event callbacks for gameplay-affecting logic** (damage, abilities, purchases). \`isDownAny\` is only safe when the answer is the same regardless of which player holds the key (e.g. pausing a shared timer).
 
 ---
 
