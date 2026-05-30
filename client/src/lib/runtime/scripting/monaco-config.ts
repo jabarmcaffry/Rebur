@@ -9,7 +9,7 @@
  * API design:
  *   - Rebur is the ONLY global — all subsystems hang off it
  *   - Entities (including players) share one base API
- *   - Single access pattern: Rebur.Scene.find("name")
+ *   - Single access pattern: Rebur.Workspace.find("name")
  *   - Force-based physics via entity.body.*
  *   - Consistent camelCase everywhere
  */
@@ -310,7 +310,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur",
     kind: K.Variable,
     detail: "ReburAPI — the only global",
-    doc: "The single global entry point for the Rebur engine. All subsystems hang off it:\n\n- Rebur.Scene — 3D entity container\n- Rebur.Players — player entity container\n- Rebur.State — shared key-value store\n- Rebur.Gui — HUD overlay\n- Rebur.Sound — audio\n- Rebur.Tween — property animation\n- Rebur.Camera — camera control\n- Rebur.Input — keyboard & mouse\n- Rebur.Physics — global physics settings\n- Rebur.RunService — game loop phases\n- Rebur.Network — multiplayer messaging\n- Rebur.Tags — entity tag queries",
+    doc: "The single global entry point for the Rebur engine. All subsystems hang off it:\n\n- Rebur.Workspace — live 3D entity container (rendered + simulated)\n- Rebur.Lighting — lighting entity container\n- Rebur.ReplicatedStorage — shared templates visible to all (⚠️ not for secrets)\n- Rebur.ServerStorage — server-only storage, never replicated to clients\n- Rebur.Players — player entity container\n- Rebur.State — shared key-value store\n- Rebur.Gui — HUD overlay\n- Rebur.Sound — audio\n- Rebur.Tween — property animation\n- Rebur.Camera — camera control\n- Rebur.Input — keyboard & mouse\n- Rebur.Physics — global physics settings\n- Rebur.RunService — game loop phases\n- Rebur.Network — multiplayer messaging\n- Rebur.Tags — entity tag queries",
     insert: "Rebur",
   },
 
@@ -332,60 +332,132 @@ const COMPLETIONS: CompletionDef[] = [
     snippet: true,
   },
 
-  // ─── Rebur.Scene ─────────────────────────────────────────────────────────
+  // ─── Rebur.Workspace ─────────────────────────────────────────────────────────
   {
-    label: "Rebur.Scene",
+    label: "Rebur.Workspace",
     kind: K.Variable,
     detail: "SceneContainer — live 3D world",
     doc: "The live 3D world container. All rendered and simulated entities live here.\n\nMethods:\n- find(name) — look up entity by name\n- get(id) — look up by immutable id\n- all() — all entities in the scene\n- create(opts) — spawn a new entity at runtime",
-    insert: "Rebur.Scene",
+    insert: "Rebur.Workspace",
   },
   {
-    label: "Rebur.Scene.find",
+    label: "Rebur.Workspace.find",
     kind: K.Function,
-    detail: "Rebur.Scene.find(name) → Entity | null",
-    doc: "Look up an entity by name. Returns null if not found — always guard the result.\n\nExample:\n  const part = Rebur.Scene.find(\"Platform\");\n  if (!part) return;\n  part.position = { x: 0, y: 5, z: 0 };",
-    insert: "Rebur.Scene.find(\"${1:Name}\")",
+    detail: "Rebur.Workspace.find(name) → Entity | null",
+    doc: "Look up an entity by name. Returns null if not found — always guard the result.\n\nExample:\n  const part = Rebur.Workspace.find(\"Platform\");\n  if (!part) return;\n  part.position = { x: 0, y: 5, z: 0 };",
+    insert: "Rebur.Workspace.find(\"${1:Name}\")",
     snippet: true,
   },
   {
-    label: "Rebur.Scene.get",
+    label: "Rebur.Workspace.get",
     kind: K.Function,
-    detail: "Rebur.Scene.get(id) → Entity | null",
+    detail: "Rebur.Workspace.get(id) → Entity | null",
     doc: "Look up an entity by its immutable id. Safer than find() for long-lived references since names can change.",
-    insert: "Rebur.Scene.get(\"${1:id}\")",
+    insert: "Rebur.Workspace.get(\"${1:id}\")",
     snippet: true,
   },
   {
-    label: "Rebur.Scene.all",
+    label: "Rebur.Workspace.all",
     kind: K.Function,
-    detail: "Rebur.Scene.all() → Entity[]",
+    detail: "Rebur.Workspace.all() → Entity[]",
     doc: "Return all entities currently in the scene.",
-    insert: "Rebur.Scene.all()",
+    insert: "Rebur.Workspace.all()",
   },
   {
-    label: "Rebur.Scene.query",
+    label: "Rebur.Workspace.query",
     kind: K.Function,
-    detail: "Rebur.Scene.query(filter) → Entity[]",
-    doc: "Filter entities by criteria. More efficient than all().filter() for large worlds.\n\nFilter options:\n- tag: string — entities with this tag\n- tags: string[] — entities with ALL these tags\n- type: string — 'primitive', 'model', 'light', 'audio'\n- limit: number — max results\n- where: (entity) => boolean — custom predicate\n\nExamples:\n  Rebur.Scene.query({ tag: \"enemy\" })\n  Rebur.Scene.query({ type: \"light\" })\n  Rebur.Scene.query({ tag: \"coin\", limit: 5 })\n  Rebur.Scene.query({ where: (e) => e.body.mass > 10 })",
-    insert: "Rebur.Scene.query({ tag: \"${1:enemy}\" })",
+    detail: "Rebur.Workspace.query(filter) → Entity[]",
+    doc: "Filter entities by criteria. More efficient than all().filter() for large worlds.\n\nFilter options:\n- tag: string — entities with this tag\n- tags: string[] — entities with ALL these tags\n- type: string — 'primitive', 'model', 'light', 'audio'\n- limit: number — max results\n- where: (entity) => boolean — custom predicate\n\nExamples:\n  Rebur.Workspace.query({ tag: \"enemy\" })\n  Rebur.Workspace.query({ type: \"light\" })\n  Rebur.Workspace.query({ tag: \"coin\", limit: 5 })\n  Rebur.Workspace.query({ where: (e) => e.body.mass > 10 })",
+    insert: "Rebur.Workspace.query({ tag: \"${1:enemy}\" })",
     snippet: true,
   },
   {
-    label: "Rebur.Scene.raycast",
+    label: "Rebur.Workspace.raycast",
     kind: K.Function,
-    detail: "Rebur.Scene.raycast(origin, direction, opts?) → RaycastResult | null",
-    doc: "Cast a ray and return the first entity hit.\n\nReturns: { entity, point, normal, distance } or null if nothing hit.\n\nOpts:\n- maxDistance: number (default 500)\n- ignore: Entity[] — skip these entities\n- tag: string — only hit entities with this tag\n\nExample:\n  const hit = Rebur.Scene.raycast(\n    player.position,\n    { x: 0, y: 0, z: -1 },\n    { maxDistance: 30, ignore: [player] }\n  );\n  if (hit) log(hit.entity.name, hit.distance);",
-    insert: "Rebur.Scene.raycast(\n\t${1:origin},\n\t${2:direction},\n\t{ maxDistance: ${3:50} }\n)",
+    detail: "Rebur.Workspace.raycast(origin, direction, opts?) → RaycastResult | null",
+    doc: "Cast a ray and return the first entity hit.\n\nReturns: { entity, point, normal, distance } or null if nothing hit.\n\nOpts:\n- maxDistance: number (default 500)\n- ignore: Entity[] — skip these entities\n- tag: string — only hit entities with this tag\n\nExample:\n  const hit = Rebur.Workspace.raycast(\n    player.position,\n    { x: 0, y: 0, z: -1 },\n    { maxDistance: 30, ignore: [player] }\n  );\n  if (hit) log(hit.entity.name, hit.distance);",
+    insert: "Rebur.Workspace.raycast(\n\t${1:origin},\n\t${2:direction},\n\t{ maxDistance: ${3:50} }\n)",
     snippet: true,
   },
   {
-    label: "Rebur.Scene.create",
+    label: "Rebur.Workspace.create",
     kind: K.Function,
-    detail: "Rebur.Scene.create(opts) → Entity",
+    detail: "Rebur.Workspace.create(opts) → Entity",
     doc: "Spawn a new entity at runtime. Returns the entity.\n\nOpts:\n- name?: string\n- primitiveType?: 'cube'|'sphere'|'cylinder'|'plane'\n- position?: { x, y, z }\n- rotation?: { x, y, z }\n- scale?: { x, y, z }\n- color?: string\n\nNote: Runtime entities are not saved — they exist only for the current session.",
-    insert: "Rebur.Scene.create({\n\tname: \"${1:Part}\",\n\tprimitiveType: \"${2:cube}\",\n\tposition: { x: ${3:0}, y: ${4:1}, z: ${5:0} },\n\tcolor: \"${6:#88aaff}\",\n})",
+    insert: "Rebur.Workspace.create({\n\tname: \"${1:Part}\",\n\tprimitiveType: \"${2:cube}\",\n\tposition: { x: ${3:0}, y: ${4:1}, z: ${5:0} },\n\tcolor: \"${6:#88aaff}\",\n})",
     snippet: true,
+  },
+
+  // ─── Rebur.Lighting ──────────────────────────────────────────────────────
+  {
+    label: "Rebur.Lighting",
+    kind: K.Variable,
+    detail: "LightingContainer — query lights",
+    doc: "Query API for entities in the Lighting container.\n\nMethods:\n- find(name) — look up a light entity by name\n- get(id) — look up by immutable id\n- all() — all light entities",
+    insert: "Rebur.Lighting",
+  },
+  {
+    label: "Rebur.Lighting.find",
+    kind: K.Function,
+    detail: "Rebur.Lighting.find(name) → Entity | null",
+    doc: "Look up a light entity by name.",
+    insert: "Rebur.Lighting.find(\"${1:Name}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Lighting.all",
+    kind: K.Function,
+    detail: "Rebur.Lighting.all() → Entity[]",
+    doc: "Return all entities in the Lighting container.",
+    insert: "Rebur.Lighting.all()",
+  },
+
+  // ─── Rebur.ReplicatedStorage ──────────────────────────────────────────────
+  {
+    label: "Rebur.ReplicatedStorage",
+    kind: K.Variable,
+    detail: "ReplicatedStorage — shared templates (visible to all)",
+    doc: "Query API for entities in ReplicatedStorage.\n\n⚠️ Do NOT store sensitive server-only data here — this container is visible to all clients, just like Roblox's ReplicatedStorage.\n\nUse Rebur.ServerStorage for data that should stay server-side.\n\nMethods:\n- find(name) — look up a template by name\n- get(id) — look up by immutable id\n- all() — all templates",
+    insert: "Rebur.ReplicatedStorage",
+  },
+  {
+    label: "Rebur.ReplicatedStorage.find",
+    kind: K.Function,
+    detail: "Rebur.ReplicatedStorage.find(name) → Entity | null",
+    doc: "Look up a template entity by name in ReplicatedStorage.\n\n⚠️ Not safe for server-only secrets — use Rebur.ServerStorage instead.",
+    insert: "Rebur.ReplicatedStorage.find(\"${1:Name}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.ReplicatedStorage.all",
+    kind: K.Function,
+    detail: "Rebur.ReplicatedStorage.all() → Entity[]",
+    doc: "Return all entities in ReplicatedStorage.",
+    insert: "Rebur.ReplicatedStorage.all()",
+  },
+
+  // ─── Rebur.ServerStorage ──────────────────────────────────────────────────
+  {
+    label: "Rebur.ServerStorage",
+    kind: K.Variable,
+    detail: "ServerStorage — server-only storage (never replicated)",
+    doc: "Query API for entities in ServerStorage.\n\nSafe for server-only data — never replicated to clients, similar to Roblox's ServerStorage.\n\nMethods:\n- find(name) — look up an object by name\n- get(id) — look up by immutable id\n- all() — all objects in ServerStorage",
+    insert: "Rebur.ServerStorage",
+  },
+  {
+    label: "Rebur.ServerStorage.find",
+    kind: K.Function,
+    detail: "Rebur.ServerStorage.find(name) → Entity | null",
+    doc: "Look up a server-only object by name. Safe for sensitive data — never sent to clients.",
+    insert: "Rebur.ServerStorage.find(\"${1:Name}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.ServerStorage.all",
+    kind: K.Function,
+    detail: "Rebur.ServerStorage.all() → Entity[]",
+    doc: "Return all entities in ServerStorage.",
+    insert: "Rebur.ServerStorage.all()",
   },
 
   // ─── Rebur.Players ───────────────────────────────────────────────────────
@@ -432,7 +504,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "entity.name",
     kind: K.Property,
     detail: "string",
-    doc: "Display name. Used by Rebur.Scene.find(). Can be changed at runtime.",
+    doc: "Display name. Used by Rebur.Workspace.find(). Can be changed at runtime.",
     insert: ".name",
   },
   {

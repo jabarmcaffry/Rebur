@@ -38,7 +38,8 @@ export type ContainerName =
   | "Players"
   | "ServerScriptService"
   | "StarterPlayer"
-  | "ReplicatedStorage";
+  | "ReplicatedStorage"
+  | "ServerStorage";
 
 export type ObjectProperties = {
   anchored: boolean;

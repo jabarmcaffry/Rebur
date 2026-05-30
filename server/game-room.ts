@@ -140,8 +140,9 @@ export class GameRoom {
       const c = o.container ?? "Workspace";
       const isWorkspace = c === "Workspace" || c === "Scene" || c === "";
 
-      // All objects go into scriptObjs so Rebur.Scene / Rebur.Lighting / Rebur.Storage
-      // can query them. Physics statics/dynamics are Workspace-only.
+      // All objects go into scriptObjs so Rebur.Workspace / Rebur.Lighting /
+      // Rebur.ReplicatedStorage / Rebur.ServerStorage can query them.
+      // Physics statics/dynamics are Workspace-only.
       const sx = o.scaleX ?? 1, sy = o.scaleY ?? 1, sz = o.scaleZ ?? 1;
       const px = o.positionX ?? 0, py = o.positionY ?? 0, pz = o.positionZ ?? 0;
       const anchored = o.properties?.anchored !== false;

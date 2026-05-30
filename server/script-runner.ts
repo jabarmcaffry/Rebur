@@ -727,25 +727,29 @@ export class ScriptRunner {
       keys() { return Array.from(runner.dataStore.keys()); },
     };
 
-    // ── Rebur.Scene ────────────────────────────────────────────────────────
-    const reburScene = {
+    // ── Rebur.Workspace ───────────────────────────────────────────────────
+    const isWorkspaceObj = (o: ScriptObjState) => {
+      const c = o.container ?? "Workspace";
+      return c === "Workspace" || c === "Scene" || c === "";
+    };
+    const reburWorkspace = {
       find(name: string) {
         const obj = runner.objects.get(name);
-        return (obj && !obj._destroyed) ? makeEntityProxy(obj) : null;
+        return (obj && !obj._destroyed && isWorkspaceObj(obj)) ? makeEntityProxy(obj) : null;
       },
       get(id: string) {
         for (const obj of runner.objects.values()) {
-          if (obj.id === id && !obj._destroyed) return makeEntityProxy(obj);
+          if (obj.id === id && !obj._destroyed && isWorkspaceObj(obj)) return makeEntityProxy(obj);
         }
         return null;
       },
       all() {
         return Array.from(runner.objects.values())
-          .filter(o => !o._destroyed)
+          .filter(o => !o._destroyed && isWorkspaceObj(o))
           .map(o => makeEntityProxy(o));
       },
       query(filter: any) {
-        let results = Array.from(runner.objects.values()).filter(o => !o._destroyed);
+        let results = Array.from(runner.objects.values()).filter(o => !o._destroyed && isWorkspaceObj(o));
         if (filter?.tag) {
           const names = runner.tagMap.get(filter.tag) ?? new Set();
           results = results.filter(o => names.has(o.name));
@@ -1059,8 +1063,10 @@ export class ScriptRunner {
       },
     };
 
-    // ── Rebur.Storage — query API scoped to ReplicatedStorage container ───
-    const reburStorage = {
+    // ── Rebur.ReplicatedStorage — shared templates visible to all scripts ─
+    // WARNING: Do NOT store secret/server-only data here — it replicates to
+    // all clients, just like Roblox's ReplicatedStorage. Use ServerStorage instead.
+    const reburReplicatedStorage = {
       find(name: string) {
         const obj = runner.objects.get(name);
         return (obj && !obj._destroyed && obj.container === "ReplicatedStorage") ? makeEntityProxy(obj) : null;
@@ -1074,6 +1080,27 @@ export class ScriptRunner {
       all() {
         return Array.from(runner.objects.values())
           .filter(o => !o._destroyed && o.container === "ReplicatedStorage")
+          .map(o => makeEntityProxy(o));
+      },
+    };
+
+    // ── Rebur.ServerStorage — server-only templates/data ──────────────────
+    // Safe for server-only data. Never replicated to clients, similar to
+    // Roblox's ServerStorage. Only accessible from server scripts.
+    const reburServerStorage = {
+      find(name: string) {
+        const obj = runner.objects.get(name);
+        return (obj && !obj._destroyed && obj.container === "ServerStorage") ? makeEntityProxy(obj) : null;
+      },
+      get(id: string) {
+        for (const obj of runner.objects.values()) {
+          if (obj.id === id && !obj._destroyed && obj.container === "ServerStorage") return makeEntityProxy(obj);
+        }
+        return null;
+      },
+      all() {
+        return Array.from(runner.objects.values())
+          .filter(o => !o._destroyed && o.container === "ServerStorage")
           .map(o => makeEntityProxy(o));
       },
     };
@@ -1092,9 +1119,10 @@ export class ScriptRunner {
         runner.globalHandlers.set(key, (runner.globalHandlers.get(key)??[]).filter(h=>h!==fn));
       },
 
-      Scene:      reburScene,
-      Lighting:   reburLighting,
-      Storage:    reburStorage,
+      Workspace:         reburWorkspace,
+      Lighting:          reburLighting,
+      ReplicatedStorage: reburReplicatedStorage,
+      ServerStorage:     reburServerStorage,
       Players:    reburPlayers,
       State:      reburState,
       DataStore:  reburDataStore,

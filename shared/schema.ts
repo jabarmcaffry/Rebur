@@ -85,7 +85,10 @@ export type Game = typeof games.$inferSelect;
 //   - "ServerScriptService" : server-authoritative scripts (run on the host only)
 //   - "StarterPlayer"       : scripts/objects copied into each player on join (LocalScripts)
 //   - "ReplicatedStorage"   : shared templates + ModuleScripts (server <-> all clients,
-//                             also where `spawn("Name")` reads from)
+//                             also where `spawn("Name")` reads from).
+//                             NOT safe for server-only data — replicates to clients.
+//   - "ServerStorage"       : server-only templates + data. Never replicated to clients.
+//                             Safe for sensitive server state (like Roblox's ServerStorage).
 export const gameObjects = pgTable("game_objects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   gameId: varchar("game_id").notNull().references(() => games.id, { onDelete: 'cascade' }),

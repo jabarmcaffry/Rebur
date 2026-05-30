@@ -90,16 +90,18 @@ const PRIMITIVES = [
 //   - Players              : player avatars + per-player non-physical data
 //   - ServerScriptService  : server-authoritative scripts (Script type)
 //   - StarterPlayer        : per-player scripts/objects copied to each client (LocalScript)
-//   - ReplicatedStorage    : shared templates + ModuleScripts (spawn("Name") reads here)
+//   - ReplicatedStorage    : shared templates + ModuleScripts (visible to all — NOT safe for secrets)
+//   - ServerStorage        : server-only templates/data (never replicated to clients)
 // `defaultScriptType` is what gets created when the user clicks "+ script" on
 // the container header.
 const CONTAINERS = [
-  { name: "Workspace",           displayName: "Scene",               icon: Box,      hint: "3D objects in the live world",                  defaultScriptType: "Script" },
-  { name: "Lighting",            displayName: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                   defaultScriptType: "Script" },
-  { name: "Players",             displayName: "Players",             icon: Box,      hint: "Player avatars + per-player data",              defaultScriptType: "LocalScript" },
-  { name: "ServerScriptService", displayName: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",         defaultScriptType: "Script" },
-  { name: "StarterPlayer",       displayName: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",   defaultScriptType: "LocalScript" },
-  { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates + ModuleScripts",              defaultScriptType: "ModuleScript" },
+  { name: "Workspace",           displayName: "Workspace",           icon: Box,      hint: "3D objects in the live world",                         defaultScriptType: "Script" },
+  { name: "Lighting",            displayName: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                          defaultScriptType: "Script" },
+  { name: "Players",             displayName: "Players",             icon: Box,      hint: "Player avatars + per-player data",                     defaultScriptType: "LocalScript" },
+  { name: "ServerScriptService", displayName: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",                defaultScriptType: "Script" },
+  { name: "StarterPlayer",       displayName: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",          defaultScriptType: "LocalScript" },
+  { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates — visible to all, not for secrets",   defaultScriptType: "ModuleScript" },
+  { name: "ServerStorage",       displayName: "ServerStorage",       icon: Archive,  hint: "Server-only storage — never replicated to clients",    defaultScriptType: "Script" },
 ];
 
 // All snippets use the Rebur.* single-global API.
@@ -115,7 +117,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Every frame (tick)",
-    code: `Rebur.on("tick", (dt) => {\n  const cube = Rebur.Scene.find("Cube");\n  if (cube) cube.rotation = { x: 0, y: cube.rotation.y + dt, z: 0 };\n});\n`,
+    code: `Rebur.on("tick", (dt) => {\n  const cube = Rebur.Workspace.find("Cube");\n  if (cube) cube.rotation = { x: 0, y: cube.rotation.y + dt, z: 0 };\n});\n`,
   },
   {
     label: "Repeat every N seconds",
@@ -131,11 +133,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "On entity touched",
-    code: `const cube = Rebur.Scene.find("Cube");\nif (cube) {\n  cube.on("touched", (other) => {\n    log("touched by", other.isPlayer ? other.username : other.name);\n  });\n  cube.on("untouched", (other) => log("no longer touching", other.name));\n}\n`,
+    code: `const cube = Rebur.Workspace.find("Cube");\nif (cube) {\n  cube.on("touched", (other) => {\n    log("touched by", other.isPlayer ? other.username : other.name);\n  });\n  cube.on("untouched", (other) => log("no longer touching", other.name));\n}\n`,
   },
   {
     label: "On entity clicked",
-    code: `const cube = Rebur.Scene.find("Cube");\nif (cube) {\n  cube.on("clicked", (player) => {\n    log(player.username, "clicked the cube");\n    cube.color = "#ff4444";\n  });\n}\n`,
+    code: `const cube = Rebur.Workspace.find("Cube");\nif (cube) {\n  cube.on("clicked", (player) => {\n    log(player.username, "clicked the cube");\n    cube.color = "#ff4444";\n  });\n}\n`,
   },
   {
     label: "On any 3D click (mouse)",
@@ -147,19 +149,19 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Cross-container interaction (explicit)",
-    code: `// Explicit cross-container — no hidden coupling\nconst coin = Rebur.Scene.find("Coin");\nif (coin) {\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
+    code: `// Explicit cross-container — no hidden coupling\nconst coin = Rebur.Workspace.find("Coin");\nif (coin) {\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
   },
   {
     label: "Create an entity",
-    code: `const enemy = Rebur.Scene.create({\n  name: "Goblin",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\nenemy.body.anchored = false;\nenemy.body.mass = 2;\n`,
+    code: `const enemy = Rebur.Workspace.create({\n  name: "Goblin",\n  primitiveType: "sphere",\n  position: { x: 5, y: 1, z: 0 },\n  color: "#ff4444",\n});\nenemy.body.anchored = false;\nenemy.body.mass = 2;\n`,
   },
   {
     label: "Force-based launch (impulse)",
-    code: `const ball = Rebur.Scene.find("Ball");\nif (ball) {\n  ball.body.anchored = false;\n  ball.body.mass = 3;\n  ball.body.restitution = 0.5;\n  ball.body.applyImpulse({ x: 0, y: 15, z: -20 });\n}\n`,
+    code: `const ball = Rebur.Workspace.find("Ball");\nif (ball) {\n  ball.body.anchored = false;\n  ball.body.mass = 3;\n  ball.body.restitution = 0.5;\n  ball.body.applyImpulse({ x: 0, y: 15, z: -20 });\n}\n`,
   },
   {
     label: "Physics cannonball (spawned)",
-    code: `every(3, () => {\n  const ball = Rebur.Scene.create({\n    name: "Ball_" + Date.now(),\n    primitiveType: "sphere",\n    position: { x: 0, y: 5, z: 10 },\n    color: "#222222",\n    scale: { x: 0.5, y: 0.5, z: 0.5 },\n  });\n  ball.body.anchored = false;\n  ball.body.mass = 5;\n  ball.body.applyImpulse({ x: 0, y: 8, z: -25 });\n  after(5, () => { ball.destroy(); });\n});\n`,
+    code: `every(3, () => {\n  const ball = Rebur.Workspace.create({\n    name: "Ball_" + Date.now(),\n    primitiveType: "sphere",\n    position: { x: 0, y: 5, z: 10 },\n    color: "#222222",\n    scale: { x: 0.5, y: 0.5, z: 0.5 },\n  });\n  ball.body.anchored = false;\n  ball.body.mass = 5;\n  ball.body.applyImpulse({ x: 0, y: 8, z: -25 });\n  after(5, () => { ball.destroy(); });\n});\n`,
   },
   {
     label: "Global state (multiplayer-ready)",
@@ -171,7 +173,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Lava damage on touch",
-    code: `const lava = Rebur.Scene.find("Lava");\nif (lava) {\n  lava.on("touched", (other) => {\n    if (other.isPlayer) {\n      other.takeDamage(25);\n      log(other.username, "hit lava! HP:", other.health);\n    }\n  });\n}\n`,
+    code: `const lava = Rebur.Workspace.find("Lava");\nif (lava) {\n  lava.on("touched", (other) => {\n    if (other.isPlayer) {\n      other.takeDamage(25);\n      log(other.username, "hit lava! HP:", other.health);\n    }\n  });\n}\n`,
   },
   {
     label: "GUI: text + button",
@@ -187,15 +189,15 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Inventory: pickup on touch",
-    code: `const coin = Rebur.Scene.find("Coin");\nif (coin) {\n  coin.body.isTrigger = true;\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
+    code: `const coin = Rebur.Workspace.find("Coin");\nif (coin) {\n  coin.body.isTrigger = true;\n  coin.on("touched", (other) => {\n    if (!other.isPlayer) return;\n    const player = Rebur.Players.get(other.id);\n    if (player) {\n      player.inventory.add("Coin", { count: 1 });\n      coin.visible = false;\n      after(3, () => { coin.visible = true; });\n    }\n  });\n}\n`,
   },
   {
     label: "Hold item in hand",
-    code: `const tool = Rebur.Scene.create({\n  name: "Tool",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n});\n\nRebur.Input.on("press", (player, key) => {\n  if (key !== "f") return;\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
+    code: `const tool = Rebur.Workspace.create({\n  name: "Tool",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n});\n\nRebur.Input.on("press", (player, key) => {\n  if (key !== "f") return;\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
   },
   {
     label: "Tween: move entity",
-    code: `const door = Rebur.Scene.find("Door");\nif (door) {\n  Rebur.Input.on("press", (player, key) => {\n    if (key === "e") {\n      Rebur.Tween(door.position, { y: 5 }, 1, "easeOutQuad", () => {\n        log("Door opened!");\n      });\n    }\n  });\n}\n`,
+    code: `const door = Rebur.Workspace.find("Door");\nif (door) {\n  Rebur.Input.on("press", (player, key) => {\n    if (key === "e") {\n      Rebur.Tween(door.position, { y: 5 }, 1, "easeOutQuad", () => {\n        log("Door opened!");\n      });\n    }\n  });\n}\n`,
   },
   {
     label: "Raycast forward",

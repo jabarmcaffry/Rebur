@@ -7,12 +7,12 @@ export const DEFAULT_SCRIPT = `// Scripts run server-side in a secure sandbox.
 let angle = 0;
 Rebur.on("tick", (dt) => {
   angle += dt * 2;
-  const spinner = Rebur.Scene.find("Part");
+  const spinner = Rebur.Workspace.find("Part");
   if (spinner) spinner.rotation = { x: 0, y: angle, z: 0 };
 });
 
 // Example: react when a player touches an entity
-const lava = Rebur.Scene.find("Lava");
+const lava = Rebur.Workspace.find("Lava");
 if (lava) {
   lava.on("touched", (other) => {
     if (other.isPlayer) {
@@ -39,7 +39,7 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 6. [Entity Properties](#entity-properties)
 7. [Entity Physics Body](#entity-physics-body)
 8. [Entity Events](#entity-events)
-9. [Rebur.Scene — Entity Container](#reburscene)
+9. [Rebur.Workspace — Entity Container](#reburworkspace)
 10. [Entity Lifetime & Validity](#entity-lifetime--validity)
 11. [Rebur.Players — Player Entities](#reburplayers)
 12. [Player Entity](#player-entity)
@@ -67,22 +67,23 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 ## Architecture
 
 \`\`\`
-Rebur                   ← single global
-├── Scene               ← 3D entity container + query API
-├── Players             ← player entity container
-├── Lighting            ← lighting entity container
-├── Storage             ← template/module container (not rendered)
-├── State               ← shared session key-value store
-├── DataStore           ← persistent cross-session storage
-├── Gui                 ← shared HUD render layer (all players see)
-├── Sound               ← audio playback
-├── Tween               ← property animation
-├── Camera              ← camera control
-├── Input               ← per-player keyboard/mouse events
-├── Physics             ← global physics settings
-├── RunService          ← game loop phase channels
-├── Network             ← data/event bus (server ↔ clients)
-└── Tags                ← entity labeling (write); query via Scene.query
+Rebur                      ← single global
+├── Workspace              ← live 3D world: rendered + simulated entities
+├── Players                ← player entity container
+├── Lighting               ← lighting entity container (not simulated)
+├── ReplicatedStorage      ← shared templates visible to all scripts (NOT for secrets)
+├── ServerStorage          ← server-only templates/data, never replicated to clients
+├── State                  ← shared session key-value store
+├── DataStore              ← persistent cross-session storage
+├── Gui                    ← shared HUD render layer (all players see)
+├── Sound                  ← audio playback
+├── Tween                  ← property animation
+├── Camera                 ← camera control
+├── Input                  ← per-player keyboard/mouse events
+├── Physics                ← global physics settings
+├── RunService             ← game loop phase channels
+├── Network                ← data/event bus (server ↔ clients)
+└── Tags                   ← entity labeling; query via Workspace.query
 
 player                  ← a PlayerEntity (also an Entity)
 ├── player.gui          ← per-player private HUD render layer
@@ -94,11 +95,11 @@ player                  ← a PlayerEntity (also an Entity)
 \`\`\`
 
 **Key rules:**
-- \`Rebur\` is the **primary** engine global — all subsystems hang off it. No \`Scene\`, \`Players\`, \`gui\`, \`game\`, etc.
+- \`Rebur\` is the **primary** engine global — all subsystems hang off it. No \`Workspace\`, \`Players\`, \`gui\`, \`game\`, etc. as bare globals.
 - A small safe **utility global set** is also exposed: \`after\`, \`every\`, \`wait\`, \`Vector3\`, \`Color3\`, \`log\`, \`warn\`, \`error\`, \`random\`, \`randInt\`, \`pick\`. Everything else requires \`Rebur.\`.
 - All entities (including players) share the same base API — players are entities with \`isPlayer = true\`.
 - Cross-container interaction is **explicit** — there is no hidden magic coupling.
-- Single access pattern everywhere: \`Rebur.Scene.find("name")\`, \`Rebur.Players.get(id)\`.
+- Single access pattern everywhere: \`Rebur.Workspace.find("name")\`, \`Rebur.Players.get(id)\`.
 
 ---
 
@@ -209,7 +210,7 @@ Rebur.on("tick", (dt) => {
 });
 
 // Entity event — must get a reference first
-const coin = Rebur.Scene.find("Coin");
+const coin = Rebur.Workspace.find("Coin");
 if (coin) {
   coin.on("touched", (other) => {
     log("Coin touched by", other.name);
@@ -274,11 +275,11 @@ unsub(); // stop listening
 
 Entities are identified by:
 - **\`id\`** — immutable unique string (use for long-lived references)
-- **\`name\`** — mutable display name (use for lookup by \`Rebur.Scene.find()\`)
+- **\`name\`** — mutable display name (use for lookup by \`Rebur.Workspace.find()\`)
 - **hierarchy** — parent/child relationships
 
 \`\`\`js
-const part = Rebur.Scene.find("Platform");
+const part = Rebur.Workspace.find("Platform");
 if (!part) return; // always guard — entity may not exist
 
 log(part.id);       // "abc-123" (immutable)
@@ -298,7 +299,7 @@ All properties use **lowercase camelCase**. Readable and writable unless noted.
 Transforms (\`position\`, \`rotation\`, \`scale\`) are **mutable proxied objects**. You can mutate individual axes in-place **or** assign a whole new object — both are valid and both replicate to clients.
 
 \`\`\`js
-const e = Rebur.Scene.find("Part");
+const e = Rebur.Workspace.find("Part");
 
 // Read individual axes
 log(e.position.x, e.position.y, e.position.z);
@@ -332,7 +333,7 @@ e.transparency = 0.5;              // 0 = opaque, 1 = invisible
 log(e.id);      // unique id — never changes
 log(e.name);    // display name
 log(e.type);    // "primitive" | "model" | "light" | "audio" | ...
-e.name = "NewName"; // rename (updates Rebur.Scene.find results)
+e.name = "NewName"; // rename (updates Rebur.Workspace.find results)
 \`\`\`
 
 ### isPlayer *(read-only)*
@@ -365,7 +366,7 @@ Physics lives on \`entity.body\`. Direct velocity assignment is gone — use for
 | \`body.velocity\` | \`{x,y,z}\` | Current velocity (read-only) |
 
 \`\`\`js
-const ball = Rebur.Scene.find("Ball");
+const ball = Rebur.Workspace.find("Ball");
 
 ball.body.anchored     = false;
 ball.body.mass         = 2;
@@ -387,7 +388,7 @@ ball.body.applyImpulse({ x: 0, y: 10, z: 0 });
 
 \`\`\`js
 // Launch a cannonball
-const cannon = Rebur.Scene.create({
+const cannon = Rebur.Workspace.create({
   name: "Cannonball",
   primitiveType: "sphere",
   position: { x: 0, y: 3, z: 0 },
@@ -426,7 +427,7 @@ collisionEnded     ✗ never           ✓ physical separation
 
 \`\`\`js
 // Damage zone — trigger, gameplay logic → use touched
-const lava = Rebur.Scene.find("Lava");
+const lava = Rebur.Workspace.find("Lava");
 lava.body.isTrigger = true;
 
 lava.on("touched", (other) => {
@@ -437,7 +438,7 @@ lava.on("untouched", (other) => {
 });
 
 // Breakable crate — solid, impact-dependent → use collisionStarted
-const crate = Rebur.Scene.find("Crate");
+const crate = Rebur.Workspace.find("Crate");
 
 crate.on("collisionStarted", (other, impulse) => {
   if (impulse > 15) {
@@ -468,7 +469,7 @@ unsub(); // stop listening
 
 \`\`\`js
 // Cross-container interaction — explicit, no magic
-const coin = Rebur.Scene.find("Coin");
+const coin = Rebur.Workspace.find("Coin");
 coin.on("touched", (other) => {
   if (other.isPlayer) {
     // explicit reference — no implicit link between containers
@@ -513,74 +514,74 @@ To signal across the network (server → clients or client → server), use \`Re
 
 ---
 
-## Rebur.Scene
+## Rebur.Workspace
 
 The live 3D world container. All rendered, simulated entities live here.
 
-### Rebur.Scene.find(name) → entity | null
+### Rebur.Workspace.find(name) → entity | null
 
 The **one** way to look up an entity by name.
 
 \`\`\`js
-const part = Rebur.Scene.find("Platform");
+const part = Rebur.Workspace.find("Platform");
 if (!part) { log("Platform not found"); return; }
 
 part.position = { x: 0, y: 5, z: 0 };
 \`\`\`
 
-### Rebur.Scene.get(id) → entity | null
+### Rebur.Workspace.get(id) → entity | null
 
 Look up an entity by its immutable id.
 
 \`\`\`js
 const id = entity.id; // store the id
 // ... later ...
-const ref = Rebur.Scene.get(id);
+const ref = Rebur.Workspace.get(id);
 \`\`\`
 
-### Rebur.Scene.all() → entity[]
+### Rebur.Workspace.all() → entity[]
 
 All entities currently in the scene.
 
 \`\`\`js
-const all = Rebur.Scene.all();
+const all = Rebur.Workspace.all();
 log("Scene has", all.length, "entities");
 \`\`\`
 
-### Rebur.Scene.query(filter) → entity[]
+### Rebur.Workspace.query(filter) → entity[]
 
 Filter entities by one or more criteria. More efficient than \`.all().filter()\` for large worlds — only matching entities are returned.
 
 \`\`\`js
 // By tag
-const enemies = Rebur.Scene.query({ tag: "enemy" });
+const enemies = Rebur.Workspace.query({ tag: "enemy" });
 
 // By type
-const lights = Rebur.Scene.query({ type: "light" });
+const lights = Rebur.Workspace.query({ type: "light" });
 
 // By multiple tags (AND — entity must have all)
-const bosses = Rebur.Scene.query({ tags: ["enemy", "boss"] });
+const bosses = Rebur.Workspace.query({ tags: ["enemy", "boss"] });
 
 // By custom predicate
-const heavy = Rebur.Scene.query({ where: (e) => e.body.mass > 10 });
+const heavy = Rebur.Workspace.query({ where: (e) => e.body.mass > 10 });
 
 // Combined
-const activeEnemies = Rebur.Scene.query({
+const activeEnemies = Rebur.Workspace.query({
   tag: "enemy",
   where: (e) => e.visible,
 });
 
 // Limit results
-const firstFive = Rebur.Scene.query({ tag: "coin", limit: 5 });
+const firstFive = Rebur.Workspace.query({ tag: "coin", limit: 5 });
 \`\`\`
 
-### Rebur.Scene.raycast(origin, direction, opts?) → RaycastResult | null
+### Rebur.Workspace.raycast(origin, direction, opts?) → RaycastResult | null
 
 Cast a ray from a point in a direction and return the first entity hit.
 
 \`\`\`js
 // Cast downward from above a point
-const hit = Rebur.Scene.raycast(
+const hit = Rebur.Workspace.raycast(
   { x: 0, y: 20, z: 0 },
   { x: 0, y: -1, z: 0 }
 );
@@ -592,7 +593,7 @@ if (hit) {
 }
 
 // With options
-const hit2 = Rebur.Scene.raycast(
+const hit2 = Rebur.Workspace.raycast(
   player.position,
   { x: 0, y: 0, z: -1 },
   {
@@ -603,12 +604,12 @@ const hit2 = Rebur.Scene.raycast(
 );
 \`\`\`
 
-### Rebur.Scene.create(opts) → entity
+### Rebur.Workspace.create(opts) → entity
 
 Spawn a new entity at runtime.
 
 \`\`\`js
-const bomb = Rebur.Scene.create({
+const bomb = Rebur.Workspace.create({
   name: "Bomb",
   primitiveType: "sphere",     // "cube" | "sphere" | "cylinder" | "plane"
   position: { x: 0, y: 10, z: 0 },
@@ -624,7 +625,7 @@ bomb.body.mass = 3;
 ### entity.destroy()
 
 \`\`\`js
-const wall = Rebur.Scene.find("OldWall");
+const wall = Rebur.Workspace.find("OldWall");
 if (wall) wall.destroy();
 \`\`\`
 
@@ -639,7 +640,7 @@ Entities can be destroyed at any time — by scripts, by collisions, or by the e
 Every entity has a \`destroyed\` property. It is \`false\` while the entity is alive and becomes \`true\` immediately when \`entity.destroy()\` is called or the engine removes it.
 
 \`\`\`js
-const enemy = Rebur.Scene.find("Enemy");
+const enemy = Rebur.Workspace.find("Enemy");
 
 after(5, () => {
   if (enemy && !enemy.destroyed) {
@@ -677,7 +678,7 @@ coin.on("touched", (other) => {
 
 \`\`\`js
 // Pattern 1: guard before use (recommended for long-lived refs)
-const coin = Rebur.Scene.find("Coin");
+const coin = Rebur.Workspace.find("Coin");
 
 every(1, () => {
   if (!coin || coin.destroyed) return; // entity was destroyed, skip
@@ -686,12 +687,12 @@ every(1, () => {
 
 // Pattern 2: re-find each time (safe but slower)
 Rebur.on("tick", (dt) => {
-  const coin = Rebur.Scene.find("Coin"); // null if destroyed
+  const coin = Rebur.Workspace.find("Coin"); // null if destroyed
   if (coin) coin.rotation.y += dt;
 });
 
 // Pattern 3: listen for "destroyed" event to clean up
-const enemy = Rebur.Scene.find("Enemy");
+const enemy = Rebur.Workspace.find("Enemy");
 if (enemy) {
   enemy.on("destroyed", () => {
     log("Enemy was destroyed — cleaning up");
@@ -719,8 +720,8 @@ coin.on("touched", (other) => {
 ### Entity hierarchy
 
 \`\`\`js
-const parent = Rebur.Scene.find("Platform");
-const child  = Rebur.Scene.find("Coin");
+const parent = Rebur.Workspace.find("Platform");
+const child  = Rebur.Workspace.find("Coin");
 
 child.setParent(parent);        // attach to parent
 log(child.parent?.name);        // "Platform"
@@ -846,7 +847,7 @@ When health reaches 0 the engine automatically:
 4. Fires \`Rebur.on("playerRespawned", fn)\`
 
 \`\`\`js
-const trap = Rebur.Scene.find("Trap");
+const trap = Rebur.Workspace.find("Trap");
 trap.on("touched", (other) => {
   if (other.isPlayer) other.health -= 50;
 });
@@ -875,7 +876,7 @@ player.inventory.maxSlots;                 // number
 ### Player Motors (body-slot attachments)
 
 \`\`\`js
-const sword = Rebur.Scene.find("Sword");
+const sword = Rebur.Workspace.find("Sword");
 player.motors.attach("rightHand", sword, { x: 0, y: 0.05, z: 0.25 });
 const held = player.motors.detach("rightHand"); // returns entity
 player.motors.get("rightHand");                 // entity | null
@@ -965,7 +966,7 @@ Rebur.on("playerDied", (player) => {
 
 \`\`\`js
 // Shop UI — private dialogue only this player sees
-const shopTrigger = Rebur.Scene.find("ShopZone");
+const shopTrigger = Rebur.Workspace.find("ShopZone");
 shopTrigger.body.isTrigger = true;
 
 shopTrigger.on("touched", (other) => {
@@ -1059,7 +1060,7 @@ Rebur.on("playerJoined", (player) => {
   player.gui.text("hud_coins", "Coins: " + coins,  { anchor: "tl", x: 20, y: 60 });
 });
 
-const xpZone = Rebur.Scene.find("XpZone");
+const xpZone = Rebur.Workspace.find("XpZone");
 xpZone.on("touched", (other) => {
   if (!other.isPlayer) return;
   const player = Rebur.Players.get(other.id);
@@ -1125,7 +1126,7 @@ Custom animations can be imported as model assets and referenced by filename.
 
 \`\`\`js
 // Trigger an emote on interaction
-const dancepad = Rebur.Scene.find("DancePad");
+const dancepad = Rebur.Workspace.find("DancePad");
 dancepad.on("touched", (other) => {
   if (!other.isPlayer) return;
   const player = Rebur.Players.get(other.id);
@@ -1176,7 +1177,7 @@ Rebur.Gui.bind("scoreLabel", "score", (val) => {
 });
 
 // 3. Game logic ONLY touches State — GUI updates itself
-const coin = Rebur.Scene.find("Coin");
+const coin = Rebur.Workspace.find("Coin");
 coin.on("touched", (other) => {
   if (!other.isPlayer) return;
   Rebur.State.set("score", Rebur.State.get("score") + 1); // ← only line needed
@@ -1582,19 +1583,19 @@ Tags label entities so they can be found as groups. There are two distinct opera
 | Remove a tag | \`Rebur.Tags.remove(entity, "enemy")\` |
 | Check a tag | \`Rebur.Tags.has(entity, "enemy")\` → boolean |
 | List all tags | \`Rebur.Tags.all(entity)\` → string[] |
-| **Find entities by tag** | **\`Rebur.Scene.query({ tag: "enemy" })\`** |
+| **Find entities by tag** | **\`Rebur.Workspace.query({ tag: "enemy" })\`** |
 
-**The rule:** \`Rebur.Tags\` is for labeling individual entities. \`Rebur.Scene.query\` is the single query API for finding groups. Do not use \`Rebur.Tags.get()\` — use \`Scene.query\` instead.
+**The rule:** \`Rebur.Tags\` is for labeling individual entities. \`Rebur.Workspace.query\` is the single query API for finding groups. Do not use \`Rebur.Tags.get()\` — use \`Workspace.query\` instead.
 
 \`\`\`js
 // Label entities at setup time
-const spider = Rebur.Scene.find("Spider");
+const spider = Rebur.Workspace.find("Spider");
 Rebur.Tags.add(spider, "enemy");
 Rebur.Tags.add(spider, "boss");
 
-// Query — always via Scene.query
-const allEnemies = Rebur.Scene.query({ tag: "enemy" });
-const bosses     = Rebur.Scene.query({ tags: ["enemy", "boss"] });
+// Query — always via Workspace.query
+const allEnemies = Rebur.Workspace.query({ tag: "enemy" });
+const bosses     = Rebur.Workspace.query({ tags: ["enemy", "boss"] });
 
 for (const e of bosses) e.health -= 10;
 
@@ -1704,7 +1705,7 @@ entity.color = Color3(1, 0.5, 0);
 let angle = 0;
 Rebur.on("tick", (dt) => {
   angle += dt;
-  const p = Rebur.Scene.find("Platform");
+  const p = Rebur.Workspace.find("Platform");
   if (p) p.rotation = { x: 0, y: angle, z: 0 };
 });
 \`\`\`
@@ -1715,7 +1716,7 @@ Rebur.on("tick", (dt) => {
 let t = 0;
 Rebur.on("tick", (dt) => {
   t += dt;
-  const p = Rebur.Scene.find("Platform");
+  const p = Rebur.Workspace.find("Platform");
   if (p) p.position = { x: Math.sin(t) * 5, y: 1, z: 0 };
 });
 \`\`\`
@@ -1723,7 +1724,7 @@ Rebur.on("tick", (dt) => {
 ### Lava zone — damage on touch
 
 \`\`\`js
-const lava = Rebur.Scene.find("Lava");
+const lava = Rebur.Workspace.find("Lava");
 lava.color = "#ff4400";
 
 lava.on("touched", (other) => {
@@ -1749,7 +1750,7 @@ Rebur.on("playerJoined", (player) => {
   });
 });
 
-const coin = Rebur.Scene.find("Coin");
+const coin = Rebur.Workspace.find("Coin");
 coin.on("touched", (other) => {
   if (!other.isPlayer) return;
   const player = Rebur.Players.get(other.id);
@@ -1766,7 +1767,7 @@ coin.on("touched", (other) => {
 ### Scene query — destroy all enemies
 
 \`\`\`js
-const enemies = Rebur.Scene.query({ tag: "enemy" });
+const enemies = Rebur.Workspace.query({ tag: "enemy" });
 for (const e of enemies) e.destroy();
 log("Cleared", enemies.length, "enemies");
 \`\`\`
@@ -1778,7 +1779,7 @@ Rebur.Input.on("press", (player, key) => {
   if (key !== "f") return;
 
   const forward = { x: 0, y: 0, z: -1 };
-  const hit = Rebur.Scene.raycast(player.position, forward, {
+  const hit = Rebur.Workspace.raycast(player.position, forward, {
     maxDistance: 30,
     ignore: [player],
   });
@@ -1812,7 +1813,7 @@ every(1, () => {
 ### Force-based launch pad
 
 \`\`\`js
-const pad = Rebur.Scene.find("LaunchPad");
+const pad = Rebur.Workspace.find("LaunchPad");
 pad.on("touched", (other) => {
   if (!other.isPlayer) return;
   const prev = other.jumpPower;
@@ -1825,7 +1826,7 @@ pad.on("touched", (other) => {
 
 \`\`\`js
 every(3, () => {
-  const ball = Rebur.Scene.create({
+  const ball = Rebur.Workspace.create({
     name: "Cannonball_" + Date.now(),
     primitiveType: "sphere",
     position: { x: 0, y: 5, z: 10 },
@@ -1864,7 +1865,7 @@ Rebur.on("playerJoined", () => {
 ### Player animator — emote pad
 
 \`\`\`js
-const dancepad = Rebur.Scene.find("DancePad");
+const dancepad = Rebur.Workspace.find("DancePad");
 dancepad.body.isTrigger = true;
 
 dancepad.on("touched", (other) => {
@@ -1914,7 +1915,7 @@ Any entity can act as a gravity source — pulling players and physics bodies to
 ### Scripting
 
 \`\`\`js
-const planet = Rebur.Scene.find("Planet");
+const planet = Rebur.Workspace.find("Planet");
 
 // Enable at runtime
 planet.gravityEnabled = true;
@@ -1932,7 +1933,7 @@ Gravity sources compose — a player standing between two planets is pulled towa
 let radius = 10;
 Rebur.on("tick", (dt) => {
   radius = Math.min(radius + dt * 2, 80);
-  const hole = Rebur.Scene.find("BlackHole");
+  const hole = Rebur.Workspace.find("BlackHole");
   if (hole) {
     hole.gravityRadius = radius;
     hole.gravityStrength = 30;
