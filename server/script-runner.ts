@@ -700,7 +700,7 @@ export class ScriptRunner {
         const obj = runner.objects.get(name);
         return (obj && !obj._destroyed) ? makeEntityProxy(obj) : null;
       },
-      findById(id: string) {
+      get(id: string) {
         for (const obj of runner.objects.values()) {
           if (obj.id === id && !obj._destroyed) return makeEntityProxy(obj);
         }
@@ -987,13 +987,16 @@ export class ScriptRunner {
 
     // ── Rebur.Network ──────────────────────────────────────────────────────
     const reburNetwork = {
-      broadcast(event: string, payload: any) {
+      // Server → all clients
+      send(event: string, payload: any) {
         runner.networkMessages.push({ event, payload });
       },
-      broadcastTo(playerOrId: any, event: string, payload: any) {
+      // Server → specific player
+      sendTo(playerOrId: any, event: string, payload: any) {
         const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
         if (id) runner.networkToPlayer.push({ playerId: id, event, payload });
       },
+      // Server listens for client → server messages
       on(event: string, fn: EventHandler) {
         const arr = runner.networkHandlers.get(event) ?? [];
         arr.push(fn);
@@ -1003,9 +1006,6 @@ export class ScriptRunner {
       off(event: string, fn: EventHandler) {
         runner.networkHandlers.set(event, (runner.networkHandlers.get(event)??[]).filter(h=>h!==fn));
       },
-      // Client-only stubs (future LocalScript context)
-      send(_event: string, _payload: any) {},
-      onMessage(_event: string, _fn: EventHandler) { return () => {}; },
     };
 
     // ── Rebur global ───────────────────────────────────────────────────────

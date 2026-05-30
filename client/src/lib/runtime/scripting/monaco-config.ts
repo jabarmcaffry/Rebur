@@ -157,7 +157,7 @@ interface SceneQueryFilter {
 // ─── Rebur subsystems ─────────────────────────────────────────────────────────
 interface SceneContainer {
   find(name: string): Entity | null;
-  findById(id: string): Entity | null;
+  get(id: string): Entity | null;
   all(): Entity[];
   query(filter: SceneQueryFilter): Entity[];
   raycast(origin: Vec3, direction: Vec3, opts?: { maxDistance?: number; ignore?: Entity[]; tag?: string }): RaycastResult | null;
@@ -253,16 +253,12 @@ interface RunServiceAPI {
 
 interface NetworkAPI {
   /** SERVER — send a message to all connected clients. */
-  broadcast(channel: string, payload: any): void;
-  /** SERVER — send a message to a specific player only. */
-  broadcastTo(player: PlayerEntity, channel: string, payload: any): void;
-  /** SERVER — listen for a message sent up from any client. fn receives (payload, sender). */
-  on(channel: string, fn: (payload: any, sender: PlayerEntity) => void): () => void;
-  off(channel: string, fn: any): void;
-  /** CLIENT (future LocalScript) — send a message up to the server. */
   send(channel: string, payload: any): void;
-  /** CLIENT (future LocalScript) — listen for a message coming down from the server. */
-  onMessage(channel: string, fn: (payload: any) => void): () => void;
+  /** SERVER — send a message to a specific player only. */
+  sendTo(player: PlayerEntity, channel: string, payload: any): void;
+  /** SERVER/CLIENT — listen for incoming messages. Server: fn(payload, sender). Client: fn(payload). */
+  on(channel: string, fn: (payload: any, sender?: PlayerEntity) => void): () => void;
+  off(channel: string, fn: any): void;
 }
 
 interface TweenFn {
@@ -344,23 +340,23 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur.Scene",
     kind: K.Variable,
     detail: "SceneContainer — live 3D world",
-    doc: "The live 3D world container. All rendered and simulated entities live here.\n\nMethods:\n- find(name) — look up entity by name (the one access pattern)\n- findById(id) — look up by immutable id\n- all() — all entities in the scene\n- create(opts) — spawn a new entity at runtime",
+    doc: "The live 3D world container. All rendered and simulated entities live here.\n\nMethods:\n- find(name) — look up entity by name\n- get(id) — look up by immutable id\n- all() — all entities in the scene\n- create(opts) — spawn a new entity at runtime",
     insert: "Rebur.Scene",
   },
   {
     label: "Rebur.Scene.find",
     kind: K.Function,
     detail: "Rebur.Scene.find(name) → Entity | null",
-    doc: "Look up an entity by name. Returns null if not found — always guard the result.\n\nThis is the single access pattern — no bracket notation, no multiple find functions.\n\nExample:\n  const part = Rebur.Scene.find(\"Platform\");\n  if (!part) return;\n  part.position = { x: 0, y: 5, z: 0 };",
+    doc: "Look up an entity by name. Returns null if not found — always guard the result.\n\nExample:\n  const part = Rebur.Scene.find(\"Platform\");\n  if (!part) return;\n  part.position = { x: 0, y: 5, z: 0 };",
     insert: "Rebur.Scene.find(\"${1:Name}\")",
     snippet: true,
   },
   {
-    label: "Rebur.Scene.findById",
+    label: "Rebur.Scene.get",
     kind: K.Function,
-    detail: "Rebur.Scene.findById(id) → Entity | null",
+    detail: "Rebur.Scene.get(id) → Entity | null",
     doc: "Look up an entity by its immutable id. Safer than find() for long-lived references since names can change.",
-    insert: "Rebur.Scene.findById(\"${1:id}\")",
+    insert: "Rebur.Scene.get(\"${1:id}\")",
     snippet: true,
   },
   {
@@ -1174,13 +1170,6 @@ const COMPLETIONS: CompletionDef[] = [
     insert: "Rebur.Camera",
   },
   {
-    label: "Rebur.Camera.mode",
-    kind: K.Property,
-    detail: "'thirdPerson'|'firstPerson'|'scripted'|'free'",
-    doc: "Camera mode. Default 'thirdPerson'.",
-    insert: "Rebur.Camera.mode",
-  },
-  {
     label: "Rebur.Camera.distance",
     kind: K.Property,
     detail: "number",
@@ -1307,43 +1296,35 @@ const COMPLETIONS: CompletionDef[] = [
     insert: "Rebur.Network",
   },
   {
-    label: "Rebur.Network.broadcast",
+    label: "Rebur.Network.send",
     kind: K.Function,
-    detail: "Rebur.Network.broadcast(channel, payload) → void  [SERVER]",
-    doc: "SERVER — Send a message to ALL connected clients.\n\nExample:\nRebur.Network.broadcast('roundOver', { winner: 'Alice', score: 42 });",
-    insert: "Rebur.Network.broadcast(\"${1:channel}\", ${2:payload})",
+    detail: "Rebur.Network.send(event, payload) → void  [SERVER → all clients]",
+    doc: "SERVER — Send a message to ALL connected clients.\n\nExample:\nRebur.Network.send('roundOver', { winner: 'Alice', score: 42 });",
+    insert: "Rebur.Network.send(\"${1:event}\", ${2:payload})",
     snippet: true,
   },
   {
-    label: "Rebur.Network.broadcastTo",
+    label: "Rebur.Network.sendTo",
     kind: K.Function,
-    detail: "Rebur.Network.broadcastTo(player, channel, payload) → void  [SERVER]",
-    doc: "SERVER — Send a message to a specific player only.\n\nExample:\nRebur.Network.broadcastTo(player, 'personalMessage', { text: 'You won!' });",
-    insert: "Rebur.Network.broadcastTo(${1:player}, \"${2:channel}\", ${3:payload})",
+    detail: "Rebur.Network.sendTo(player, event, payload) → void  [SERVER → one player]",
+    doc: "SERVER — Send a message to one specific player.\n\nExample:\nRebur.Network.sendTo(player, 'personalMessage', { text: 'You won!' });",
+    insert: "Rebur.Network.sendTo(${1:player}, \"${2:event}\", ${3:payload})",
     snippet: true,
   },
   {
     label: "Rebur.Network.on",
     kind: K.Function,
-    detail: "Rebur.Network.on(channel, fn) → unsubscribe  [SERVER]",
-    doc: "SERVER — Listen for a message sent up from any client. fn receives (payload, sender: PlayerEntity).\n\nExample:\nRebur.Network.on('action', (payload, sender) => {\n  log(sender.username, 'sent:', payload);\n});",
-    insert: "Rebur.Network.on(\"${1:channel}\", (payload, sender) => {\n\t${2}\n})",
+    detail: "Rebur.Network.on(event, fn) → unsubscribe",
+    doc: "Listen for incoming messages.\n\nServer: fn receives (payload, sender: PlayerEntity) — triggered when a client calls Rebur.Network.send().\nClient (future): fn receives (payload) — triggered when server calls Rebur.Network.send() or sendTo().\n\nExample:\nRebur.Network.on('action', (payload, sender) => {\n  log(sender.username, 'sent:', payload);\n});",
+    insert: "Rebur.Network.on(\"${1:event}\", (payload, sender) => {\n\t${2}\n})",
     snippet: true,
   },
   {
-    label: "Rebur.Network.send",
+    label: "Rebur.Network.off",
     kind: K.Function,
-    detail: "Rebur.Network.send(channel, payload) → void  [CLIENT — future LocalScript]",
-    doc: "CLIENT (future LocalScript) — Send a message up to the server.\n\nNot available in current server scripts.",
-    insert: "Rebur.Network.send(\"${1:channel}\", ${2:payload})",
-    snippet: true,
-  },
-  {
-    label: "Rebur.Network.onMessage",
-    kind: K.Function,
-    detail: "Rebur.Network.onMessage(channel, fn) → unsubscribe  [CLIENT — future LocalScript]",
-    doc: "CLIENT (future LocalScript) — Listen for a message coming down from the server. fn receives (payload).\n\nNot available in current server scripts. Pair with Rebur.Network.broadcast() on the server.",
-    insert: "Rebur.Network.onMessage(\"${1:channel}\", (payload) => {\n\t${2}\n})",
+    detail: "Rebur.Network.off(event, fn) → void",
+    doc: "Remove a listener registered with Rebur.Network.on().",
+    insert: "Rebur.Network.off(\"${1:event}\", ${2:handler})",
     snippet: true,
   },
 

@@ -119,8 +119,8 @@ Some APIs are conceptually **per-player/client** but are currently bridged throu
 |-----|---------|-------------------|
 | \`Rebur.Input\` | Per-player keyboard/mouse | Server receives player input events, forwarded to scripts |
 | \`Rebur.Camera\` | Per-player camera | Server sets camera params, pushed to each client |
-| \`Rebur.Network.send()\` | Client → server message | Callable from server context only in current build |
-| \`Rebur.Network.onMessage()\` | Client receives server message | Server-side listener stub; actual delivery is client-side |
+| \`Rebur.Network.send()\` | Server → all clients / client → server | Symmetric: same method name on both sides |
+| \`Rebur.Network.on()\` | Receive messages | Server: receives from clients. Client (future): receives from server |
 | \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
 
 > **Why this matters:** \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted so you can apply effects correctly.
@@ -505,14 +505,14 @@ if (!part) { log("Platform not found"); return; }
 part.position = { x: 0, y: 5, z: 0 };
 \`\`\`
 
-### Rebur.Scene.findById(id) → entity | null
+### Rebur.Scene.get(id) → entity | null
 
 Look up an entity by its immutable id.
 
 \`\`\`js
 const id = entity.id; // store the id
 // ... later ...
-const ref = Rebur.Scene.findById(id);
+const ref = Rebur.Scene.get(id);
 \`\`\`
 
 ### Rebur.Scene.all() → entity[]
@@ -1353,20 +1353,29 @@ unsub(); // unsubscribe
 
 ## Rebur.Network
 
-The Network API is split by who is sending and who is receiving. Because all current scripts are server-side, **only the server methods are authoritative today**. The client methods (\`send\`, \`onMessage\`) are stubs that will be available in future LocalScript contexts.
+The Network API is symmetrical across server and client — both sides use the same three methods. All current scripts run server-side, so the client-side `send` and `on` apply when LocalScript contexts arrive.
 
-### Server Networking (use this in all current scripts)
+| | Server | Client (future LocalScript) |
+|---|---|---|
+| Send to all | `Rebur.Network.send(event, payload)` | — |
+| Send to one | `Rebur.Network.sendTo(player, event, payload)` | — |
+| Send to server | — | `Rebur.Network.send(event, payload)` |
+| Receive | `Rebur.Network.on(event, fn)` | `Rebur.Network.on(event, fn)` |
 
-The server can broadcast to all clients or to a specific player, and listen for messages that clients send up.
+### Server → Clients
 
 \`\`\`js
-// Broadcast a message to ALL connected clients
-Rebur.Network.broadcast("roundOver", { winner: "Alice", score: 42 });
+// Send to ALL connected clients
+Rebur.Network.send("roundOver", { winner: "Alice", score: 42 });
 
-// Send to a specific player only
-Rebur.Network.broadcastTo(player, "personalMessage", { text: "You won!" });
+// Send to one specific player
+Rebur.Network.sendTo(player, "personalMessage", { text: "You won!" });
+\`\`\`
 
-// Listen for a message sent UP from any client
+### Client → Server (server listens)
+
+\`\`\`js
+// Listen for a message sent up from any client
 Rebur.Network.on("purchaseRequest", (payload, sender) => {
   // sender is the PlayerEntity who sent this
   log(sender.username, "wants to buy:", payload.item);
@@ -1375,41 +1384,30 @@ Rebur.Network.on("purchaseRequest", (payload, sender) => {
   if (coins >= payload.cost) {
     sender.data.set("coins", coins - payload.cost);
     sender.inventory.add(payload.item);
-    Rebur.Network.broadcastTo(sender, "purchaseResult", { success: true, item: payload.item });
+    Rebur.Network.sendTo(sender, "purchaseResult", { success: true, item: payload.item });
   } else {
-    Rebur.Network.broadcastTo(sender, "purchaseResult", { success: false, reason: "Not enough coins" });
+    Rebur.Network.sendTo(sender, "purchaseResult", { success: false, reason: "Not enough coins" });
   }
 });
 \`\`\`
 
 \`\`\`js
-// Broadcast score updates to all clients for a live HUD
+// Push score updates to all clients for a live HUD
 Rebur.State.on("score", (val) => {
-  Rebur.Network.broadcast("scoreUpdate", { score: val });
+  Rebur.Network.send("scoreUpdate", { score: val });
 });
 \`\`\`
 
-#### Server Network methods
-
-| Method | Description |
-|--------|-------------|
-| \`Rebur.Network.broadcast(event, payload)\` | Send to all connected clients |
-| \`Rebur.Network.broadcastTo(player, event, payload)\` | Send to one specific player |
-| \`Rebur.Network.on(event, handler)\` | Listen for a message from any client; handler receives \`(payload, sender: PlayerEntity)\` |
-| \`Rebur.Network.off(event, handler)\` | Remove a listener |
-
-### Client Networking (LocalScript context — future)
-
-These methods will be callable from client scripts once LocalScript contexts are available. They are listed here for completeness and forward planning.
+### Client → Server (client sends, future LocalScript)
 
 \`\`\`js
-// CLIENT SCRIPT (future LocalScript — not available yet)
+// CLIENT SCRIPT (future LocalScript)
 
 // Send a message up to the server
 Rebur.Network.send("purchaseRequest", { item: "Sword", cost: 50 });
 
 // Listen for a message coming down from the server
-Rebur.Network.onMessage("purchaseResult", (payload) => {
+Rebur.Network.on("purchaseResult", (payload) => {
   if (payload.success) {
     Rebur.Gui.text("notice", "Bought " + payload.item + "!", { anchor: "cc" });
   } else {
@@ -1418,18 +1416,11 @@ Rebur.Network.onMessage("purchaseResult", (payload) => {
   after(2, () => Rebur.Gui.clear("notice"));
 });
 
-// Listen for broadcasts from the server
-Rebur.Network.onMessage("scoreUpdate", (payload) => {
+// Listen for a server broadcast
+Rebur.Network.on("scoreUpdate", (payload) => {
   Rebur.Gui.text("score", "Score: " + payload.score, { anchor: "tl", x: 20, y: 20 });
 });
 \`\`\`
-
-#### Client Network methods (future)
-
-| Method | Description |
-|--------|-------------|
-| \`Rebur.Network.send(event, payload)\` | Send a message up to the server |
-| \`Rebur.Network.onMessage(event, handler)\` | Listen for a message from the server; handler receives \`(payload)\` |
 
 ### Security note
 

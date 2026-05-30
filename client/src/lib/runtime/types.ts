@@ -239,17 +239,10 @@ export type RaycastParams = {
 };
 
 export type RuntimeCamera = {
-  mode: "thirdPerson" | "firstPerson" | "fixed" | "follow" | "scripted" | "free";
-  distance: number;
-  minDistance: number;
-  maxDistance: number;
-  offset: Vec3;
-  sensitivity: number;
-  lockYaw: boolean;
-  lockPitch: boolean;
   position: Vec3;
   lookAt: Vec3;
   fov: number;
+  [key: string]: any;
 };
 
 export type GameAPI = {
