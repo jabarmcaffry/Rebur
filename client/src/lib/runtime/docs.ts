@@ -68,24 +68,24 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 
 \`\`\`
 Rebur                   ← single global
-├── Scene               ← 3D entity container (live world)
+├── Scene               ← 3D entity container + query API
 ├── Players             ← player entity container
 ├── Lighting            ← lighting entity container
 ├── Storage             ← template/module container (not rendered)
 ├── State               ← shared session key-value store
 ├── DataStore           ← persistent cross-session storage
-├── Gui                 ← global/shared HUD overlay
+├── Gui                 ← shared HUD render layer (all players see)
 ├── Sound               ← audio playback
 ├── Tween               ← property animation
 ├── Camera              ← camera control
-├── Input               ← keyboard + mouse
+├── Input               ← per-player keyboard/mouse events
 ├── Physics             ← global physics settings
 ├── RunService          ← game loop phase channels
-├── Network             ← multiplayer messaging
-└── Tags                ← entity tag queries
+├── Network             ← data/event bus (server ↔ clients)
+└── Tags                ← entity labeling (write); query via Scene.query
 
 player                  ← a PlayerEntity (also an Entity)
-├── player.gui          ← per-player private HUD
+├── player.gui          ← per-player private HUD render layer
 ├── player.data         ← per-player persistent data store
 ├── player.animator     ← skeletal animation controller
 ├── player.inventory    ← item inventory
@@ -157,15 +157,16 @@ Client prediction writes it    →  overwritten by next server tick ✗ (snaps)
 Future: client owns entity     →  client writes replicate up then to others ✓
 \`\`\`
 
-### Future: Client Scripts (LocalScript)
+### LocalScript (Client-Side)
 
-A future \`LocalScript\` context will run in each player's browser for:
-- **Responsive input** — react to key presses without a round-trip to the server
-- **Camera control** — smooth camera shake, zoom, cutscenes
-- **Client-side prediction** — move the player character locally; reconcile with server
-- **Per-player visual effects** — particles, screen flash, local-only UI animations
+A \`LocalScript\` placed in the **StarterPlayer** container runs in each player's browser. Use it for:
+- **Client → server messaging** — send events up to the server via \`Rebur.Network.send()\`
+- **Server → client reactions** — receive data events from the server via \`Rebur.Network.on()\`
+- **Per-frame client logic** — \`Rebur.on("tick", fn)\` runs at browser frame rate
 
-For now, all creative scripting is server-side. This covers the vast majority of game types cleanly.
+LocalScripts do **not** have authority over game state. All gameplay logic (health, position, inventory, physics) runs on the server. LocalScripts are a communication layer, not a game logic layer.
+
+See the **LocalScript** section at the end of this reference for the full API.
 
 ---
 
@@ -478,7 +479,12 @@ entity.off("touched", onTouch);
 
 ### entity.emit(event, ...args)
 
-Fire a custom event on this entity. Listeners on the same event are called.
+Fire a custom event on **this entity only**. All listeners registered with \`.on()\` on the same entity and same event name are called synchronously.
+
+**Scope: local entity, current server tick only.**
+- Does **not** propagate to other entities (no parent/child bubbling).
+- Does **not** cross the network — other clients do not receive it.
+- Does **not** persist — listeners added after \`emit\` is called will not see past events.
 
 \`\`\`js
 entity.on("Open", (speed) => {
@@ -486,7 +492,11 @@ entity.on("Open", (speed) => {
 });
 
 entity.emit("Open", 2);
+// Only listeners registered on THIS entity's "Open" event are called.
+// No other entity, player, or client sees this signal.
 \`\`\`
+
+To signal across the network (server → clients or client → server), use \`Rebur.Network.send()\` or \`Rebur.Network.sendTo()\`.
 
 ---
 
@@ -1299,15 +1309,27 @@ unsub();
 // or explicitly:
 Rebur.Input.off("press", handler);
 
-// Poll whether a key is currently held (use inside a tick loop)
+// Poll whether a key is currently held — use inside a tick loop
 Rebur.on("tick", (dt) => {
   if (Rebur.Input.isDown("shift")) {
-    // shift is held by at least one connected player
+    // ⚠ SERVER-GLOBAL: true if ANY connected player is holding shift.
+    // This is intentional for single-player games or shared-state checks.
+    // For per-player logic always use the event callback instead (see below).
   }
 });
 \`\`\`
 
 Key names: letters (\`"a"\`–\`"z"\`), \`"space"\`, \`"shift"\`, \`"control"\`, \`"alt"\`, \`"enter"\`, \`"escape"\`, \`"arrowup"\`, \`"arrowdown"\`, \`"arrowleft"\`, \`"arrowright"\`.
+
+### Per-player vs. global input — which to use
+
+| Use case | API |
+|----------|-----|
+| React to a specific player pressing a key | \`Rebur.Input.on("press", (player, key) => {})\` — callback gives you the exact player |
+| React to a specific player clicking in 3D | \`Rebur.Input.on("mouseClick", (player, entity) => {})\` |
+| Detect any-player input in a tick loop | \`Rebur.Input.isDown(key)\` — **global**: true if at least one player holds the key |
+
+In a multiplayer game **always use event callbacks for gameplay-affecting logic** (damage, abilities, purchases). \`isDown\` is only safe when the answer is the same regardless of which player holds the key (e.g. pausing a shared timer).
 
 ---
 
@@ -1383,34 +1405,41 @@ Rebur.Network.on("purchaseRequest", (payload, sender) => {
 });
 \`\`\`
 
+### GUI boundary — what Network is NOT for
+
+Network is a **data and event bus**. It is not a UI system. Do not use \`Rebur.Network.send\` to push UI updates.
+
+| Scenario | Correct API | Why |
+|----------|------------|-----|
+| Update a shared score label | \`Rebur.State.set("score", n)\` + \`Rebur.Gui.text()\` | State replicates; GUI is the render layer |
+| Update a per-player HP bar | \`player.gui.bar("hp", hp, max)\` | Server routes to the right client directly |
+| Notify a player of a purchase | \`Rebur.Network.sendTo(player, "purchaseResult", data)\` | Data event, not UI — the LocalScript or client handles rendering |
+
 \`\`\`js
-// Push score updates to all clients for a live HUD
-Rebur.State.on("score", (val) => {
-  Rebur.Network.send("scoreUpdate", { score: val });
+// ✓ Correct: update state and shared HUD together on the server
+coin.on("touched", (other) => {
+  if (!other.isPlayer) return;
+  const score = (Rebur.State.get("score") ?? 0) + 1;
+  Rebur.State.set("score", score);
+  Rebur.Gui.text("score", "Score: " + score, { anchor: "tl", x: 20, y: 20 });
 });
+
+// ✗ Anti-pattern: using Network as a UI pipe
+// Rebur.State.on("score", (val) => { Rebur.Network.send("scoreUpdate", { score: val }); });
+// ...then in LocalScript: Rebur.Gui.text("score", ...)
+// This creates a redundant layer — the server already controls Rebur.Gui directly.
 \`\`\`
 
-### Client → Server (client sends, future LocalScript)
+### Client → Server (LocalScript sends)
 
 \`\`\`js
-// CLIENT SCRIPT (future LocalScript)
-
-// Send a message up to the server
+// LocalScript — send a data event up to the server
 Rebur.Network.send("purchaseRequest", { item: "Sword", cost: 50 });
 
-// Listen for a message coming down from the server
+// Listen for the server's data response — then update per-player UI
 Rebur.Network.on("purchaseResult", (payload) => {
-  if (payload.success) {
-    Rebur.Gui.text("notice", "Bought " + payload.item + "!", { anchor: "cc" });
-  } else {
-    Rebur.Gui.text("notice", payload.reason, { anchor: "cc", color: "#ef4444" });
-  }
-  after(2, () => Rebur.Gui.clear("notice"));
-});
-
-// Listen for a server broadcast
-Rebur.Network.on("scoreUpdate", (payload) => {
-  Rebur.Gui.text("score", "Score: " + payload.score, { anchor: "tl", x: 20, y: 20 });
+  // payload is data; UI update is the LocalScript's responsibility
+  log(payload.success ? "Bought " + payload.item : "Failed: " + payload.reason);
 });
 \`\`\`
 
@@ -1431,21 +1460,36 @@ Rebur.Network.on("claimScore", (payload, sender) => {
 
 ---
 
-## Rebur.Tags
+## Tags
 
-Group entities with tags and query them.
+Tags label entities so they can be found as groups. There are two distinct operations — **labeling** (write) and **querying** (read) — and each has its own home:
+
+| Operation | API |
+|-----------|-----|
+| Add a tag | \`Rebur.Tags.add(entity, "enemy")\` |
+| Remove a tag | \`Rebur.Tags.remove(entity, "enemy")\` |
+| Check a tag | \`Rebur.Tags.has(entity, "enemy")\` → boolean |
+| List all tags | \`Rebur.Tags.all(entity)\` → string[] |
+| **Find entities by tag** | **\`Rebur.Scene.query({ tag: "enemy" })\`** |
+
+**The rule:** \`Rebur.Tags\` is for labeling individual entities. \`Rebur.Scene.query\` is the single query API for finding groups. Do not use \`Rebur.Tags.get()\` — use \`Scene.query\` instead.
 
 \`\`\`js
-Rebur.Tags.add(entity, "enemy");
-Rebur.Tags.add(entity, "boss");
+// Label entities at setup time
+const spider = Rebur.Scene.find("Spider");
+Rebur.Tags.add(spider, "enemy");
+Rebur.Tags.add(spider, "boss");
 
-Rebur.Tags.has(entity, "enemy");          // boolean
-Rebur.Tags.remove(entity, "enemy");
+// Query — always via Scene.query
+const allEnemies = Rebur.Scene.query({ tag: "enemy" });
+const bosses     = Rebur.Scene.query({ tags: ["enemy", "boss"] });
 
-const enemies = Rebur.Tags.get("enemy");  // entity[]
-for (const e of enemies) e.destroy();
+for (const e of bosses) e.health -= 10;
 
-Rebur.Tags.all(entity);                   // string[] — all tags on entity
+// Check / inspect a specific entity
+Rebur.Tags.has(spider, "boss");   // true
+Rebur.Tags.all(spider);           // ["enemy", "boss"]
+Rebur.Tags.remove(spider, "boss");
 \`\`\`
 
 ---
