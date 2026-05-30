@@ -1,2 +1,1 @@
-- [Animation system design](animation-system.md) — Roblox-style AnimationTrack via WeakMap registry; never use old keyframe-player exports.
-- [Auth architecture](auth-architecture.md) — Bearer tokens in localStorage; sessions in Neon DB; isAuthenticated checks memory then DB fallback.
+- [Rebur API implementation](rebur-api.md) — Rebur.* global is fully implemented in server/script-runner.ts; old game/Scene/Players kept for backward compat.

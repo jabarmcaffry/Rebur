@@ -271,13 +271,13 @@ export class GameRoom {
     p.x = x; p.y = y; p.z = z; p.rotY = rotY;
   }
 
-  /** Fire obj.on("clicked") when a client clicks a 3D object. */
+  /** Fire obj.on("clicked") and Rebur.Input.onMouseClick when a client clicks a 3D object. */
   handleObjectClick(playerId: string, objId: string | null) {
     const player = this.players.get(playerId);
     if (!player || !this.scriptRunner) return;
-    if (!objId) return;
-    const obj = this.allObjs.get(objId);
-    if (obj) this.scriptRunner.fireObjClicked(obj.name, this._makeScriptPlayer(player));
+    const obj = objId ? this.allObjs.get(objId) : null;
+    // fires entity.on("clicked") AND Rebur.Input.onMouseClick(entity, player)
+    this.scriptRunner.fireMouseClick(obj?.name ?? null, this._makeScriptPlayer(player));
   }
 
   /** Forward a GUI button click to scripts. */
@@ -325,10 +325,12 @@ export class GameRoom {
         if (mut.health    !== undefined) p.health    = Math.max(0, Math.min(p.maxHealth, mut.health));
         if (mut.maxHealth !== undefined) p.maxHealth = Math.max(1, mut.maxHealth);
         if (mut.speed     !== undefined) p.speed     = Math.max(0, mut.speed);
+        if (mut.runSpeed  !== undefined) p.speed     = Math.max(0, mut.runSpeed);
         if (mut.jumpPower !== undefined) p.jumpPower = Math.max(0, mut.jumpPower);
         if (mut.shirtColor !== undefined) p.shirtColor = mut.shirtColor;
         if (mut.skinColor  !== undefined) p.skinColor  = mut.skinColor;
         if (mut.pantsColor !== undefined) p.pantsColor = mut.pantsColor;
+        if (mut.spawnPoint) { p.spawnX = mut.spawnPoint.x; p.spawnY = mut.spawnPoint.y + PLAYER_HALF_H; p.spawnZ = mut.spawnPoint.z; }
         if (mut.teleport)  { p.x = mut.teleport.x; p.y = mut.teleport.y + PLAYER_HALF_H; p.z = mut.teleport.z; p.vx=0;p.vy=0;p.vz=0; }
         if (mut.respawn)   { this._respawnPlayer(p); }
         if (p.health <= 0) this._handlePlayerDeath(p);
@@ -507,6 +509,31 @@ export class GameRoom {
       }
     }
 
+    // ── Step 10b: Drain destroyed objects ────────────────────────────────────
+    if (this.scriptRunner) {
+      const destroyed = this.scriptRunner.drainDestroyQueue();
+      for (const name of destroyed) {
+        // Remove from allObjs/dynamics/statics
+        for (const [id, obj] of this.allObjs) {
+          if (obj.name === name) { this.allObjs.delete(id); this.dynamics.delete(id); break; }
+        }
+        this.statics = this.statics.filter(s => s.name !== name);
+        this.scriptObjs.delete(name);
+      }
+    }
+
+    // ── Step 10c: Drain network messages from scripts ────────────────────────
+    if (this.scriptRunner) {
+      for (const msg of this.scriptRunner.drainNetworkMessages()) {
+        this.broadcastFn({ type: "networkMessage", event: msg.event, payload: msg.payload });
+      }
+      if (this.sendToPlayerFn) {
+        for (const msg of this.scriptRunner.drainNetworkToPlayer()) {
+          this.sendToPlayerFn(msg.playerId, { type: "networkMessage", event: msg.event, payload: msg.payload });
+        }
+      }
+    }
+
     // ── Step 11: Player animations ────────────────────────────────────────────
     for (const p of this.players.values()) {
       const hspd = Math.sqrt(p.vx*p.vx + p.vz*p.vz);
@@ -651,8 +678,10 @@ export class GameRoom {
       id: p.id, name: p.name,
       position: { x: p.x, y: p.y, z: p.z },
       health: p.health, maxHealth: p.maxHealth,
-      speed: p.speed, jumpPower: p.jumpPower,
+      speed: p.speed, runSpeed: p.speed * 1.6, jumpPower: p.jumpPower,
+      onGround: p.onGround,
       shirtColor: p.shirtColor, skinColor: p.skinColor, pantsColor: p.pantsColor,
+      spawnX: p.spawnX, spawnY: p.spawnY - PLAYER_HALF_H, spawnZ: p.spawnZ,
     };
   }
 
