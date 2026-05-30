@@ -1,42 +1,48 @@
 ---
 name: Rebur API implementation
-description: How the Rebur.* scripting global is wired in the engine and what is/isn't real.
+description: How the Rebur.* scripting global is built and what is/isn't real yet.
 ---
 
 ## Rule
-`Rebur` is the primary global exposed in the VM sandbox (server/script-runner.ts). All documented APIs are implemented.
+`Rebur` is the ONLY global in the VM sandbox (server/script-runner.ts). No backward compat. No `game`, `workspace`, `Scene`, `Players`, `gui`, `task`, `runService`, legacy uppercase aliases, or `setTimeout`/`setInterval` in the VM context.
 
-## What is real (server-side, actually works)
-- `Rebur.on/off` — global events (tick, playerJoined/playeradded, playerLeft/playerremoving, playerDied, playerRespawned)
-- `Rebur.Scene.find/findById/all/query/create` — entity access and creation
-- `Rebur.Scene.raycast` — stub, always returns null
-- `Rebur.Players.all/find/get` — player access
-- Entity proxy: mutable `position/rotation/scale` proxies (entity.position.x = 5 works), `destroyed`, `body.*`, `on/off/emit`, `destroy()`
-- Player proxy: `username`, `id`, `isPlayer`, `health`, `maxHealth`, `walkSpeed`, `runSpeed`, `jumpPower`, `onGround`, `teleport/respawn/kill/takeDamage/heal`
-- `Rebur.State.set/get/on` — shared session key-value
-- `Rebur.DataStore.get/set/delete/increment` — in-memory per-session (not DB-persisted yet)
-- `Rebur.Gui.text/button/bar/image/clear(id, ...)` — string-ID-based HUD (NEW API)
-- `player.gui.text/button/bar/clear(id, ...)` — per-player string-ID-based GUI
-- `Rebur.Sound.play` — broadcasts to all clients
-- `Rebur.Tween(target, to, duration, easing?, onDone?)` — target-based, works with entity.position proxy
-- `Rebur.Tags.add/remove/has/get/all` — tag system
-- `Rebur.Network.broadcast/broadcastTo/on/off` — server→client messaging
-- `Rebur.RunService.on(phase, fn)` — all phases currently map to tick
-- `Rebur.Input.onPress/onRelease/onMouseClick` — handlers stored at class level (not per-script)
-- `Rebur.Camera` — settable proxy, not yet applied to client
-- `Rebur.Physics` — settable proxy, not yet applied to physics engine
-- `after(s, fn)`, `every(s, fn)`, `wait(s)` — top-level timer helpers; wait() returns Promise
-- `random`, `randInt`, `pick`, `log`, `warn`, `error` — top-level utility globals
-- `Promise` — exposed (not undefined anymore)
+## VM context globals (exactly as documented)
+- `Rebur` — engine global
+- `after(s, fn)` → cancel fn, `every(s, fn)` → stop fn, `wait(s)` → Promise
+- `random`, `randInt`, `pick`, `log`, `warn`, `error`
+- `Vector3`, `Color3`
+- `Math, JSON, String, Number, Boolean, Array, Object, Date, parseInt, parseFloat, isNaN, isFinite, Symbol, Promise`
+- BLOCKED: `process`, `require`, `fetch`, `__filename`, `__dirname`
 
-## Drain queues added to GameRoom
-- `drainDestroyQueue()` — removes objects from allObjs/dynamics/statics/scriptObjs
-- `drainNetworkMessages()` — broadcasts networkMessage events
-- `drainNetworkToPlayer()` — sends targeted networkMessage events
+## Camera
+Plain writable proxy — no preset modes. Users set `position`, `lookAt`, `fov` themselves each tick. Default cameraSettings is `{}` (empty). Docs updated to match.
 
-## GUI anchor mapping
-New short-form anchors (tl/tc/tr/cl/cc/cr/bl/bc/br) are mapped to old full-form in mapGuiOpts().
+## onGround
+Removed from player proxy by user decision. Not in PlayerEntity interface. Not in ScriptPlayerState.
 
-**Why:** The old engine used Roblox-style APIs (game.*, Scene.*, Players.*) and had no Rebur global at all. This caused "Rebur is undefined" errors in all scripts using the documented API.
+## Raycast
+Real AABB slab-method in `Rebur.Scene.raycast()`. Tests all ScriptObjState objects (not players). Returns `{entity, distance, point, normal}` or null. Options: `maxDistance` (default 500), `ignore: Entity[]`, `tag: string`.
 
-**How to apply:** When adding new APIs to docs.ts/monaco-config.ts, always implement them in script-runner.ts first.
+## What is real
+- All Rebur.* subsystems: Scene, Players, State, DataStore, Gui, Sound, Tween, Camera, Input, Physics, RunService, Network, Tags
+- Entity proxy: mutable position/rotation/scale sub-proxies, body with full physics props (anchored/canCollide/isTrigger/isKinematic/mass/friction/restitution/velocity + applyForce/applyImpulse/setVelocity), on/off/emit/destroy, setAttribute/getAttribute
+- Player proxy: read-only position/rotation, health/maxHealth/walkSpeed/runSpeed/jumpPower/spawnPoint/color (r/w), gui/data/animator/inventory/motors, takeDamage/heal/kill/respawn/teleport
+- Rebur.State: reactive key-value with on() subscriptions; keys()/getAll()
+- Rebur.Gui + player.gui: string-ID HUD with text/button/bar/image/clear
+- Rebur.Network: broadcast/broadcastTo/on/off
+- Rebur.Tags: add/remove/has/get/all
+- entityAdded fires from Scene.create(); entityRemoved fires from entity.destroy()
+
+## Core gaps (not yet real)
+1. `collisionStarted`/`collisionEnded` — never fired; only touched/untouched work
+2. `player.body.applyImpulse` — stub; character controller owns velocity each tick
+3. `Rebur.Input.isDown()` — always false; no continuous key state from client
+4. `player.animator` — stub; animation auto-plays from movement, not scriptable
+5. `player.inventory` + `player.motors` — stubs; no item rendering or slot attachment
+6. `player.data` + `Rebur.DataStore` — in-memory only; resets on server restart (no DB)
+7. `Rebur.Camera` — settings stored but NOT applied to the Three.js camera client-side
+8. `entity.setParent()`/`parent`/`children` — stubs; hierarchy not replicated
+9. Raycast doesn't hit players — only tests ScriptObjState (scene objects)
+10. `Rebur.Network.on()` from client — no client LocalScript yet; clients can't send()
+
+**Why backward compat removed:** Explicit user decision on 2026-05-30. All scripts must use the documented Rebur.* API.

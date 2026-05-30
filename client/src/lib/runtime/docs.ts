@@ -749,7 +749,6 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`walkSpeed\` | number | ✓ | ✓ | Walk speed (default 6) |
 | \`runSpeed\` | number | ✓ | ✓ | Run speed when Shift held (default 12) |
 | \`jumpPower\` | number | ✓ | ✓ | Jump force (default 8) |
-| \`onGround\` | boolean | ✓ | — | True while standing on a surface |
 | \`spawnPoint\` | \`{x,y,z}\` | ✓ | ✓ | Respawn position |
 | \`inventory\` | Inventory | ✓ | — | Item inventory |
 | \`gui\` | PlayerGuiAPI | ✓ | — | Private per-player HUD |
@@ -1261,18 +1260,23 @@ Rebur.Tween(entity.position, { y: 10 }, 3, "easeInOut", () => {
 
 ## Rebur.Camera
 
-> **Client-bound API (currently server-proxied).** Camera settings are pushed from the server to all clients each tick. In the current model, setting \`Rebur.Camera.mode\` applies to every connected player simultaneously. When per-player LocalScripts arrive, each player will have their own camera scope.
+> **Client-bound API (currently server-proxied).** Camera settings are pushed from the server to all clients each tick. When per-player LocalScripts arrive, each player will have their own camera scope.
+
+\`Rebur.Camera\` is a plain writable object — set any property and it is pushed to clients. There are no built-in camera modes. If you want a follow camera, orbit camera, or cutscene, you write the logic yourself in a tick handler.
 
 \`\`\`js
-Rebur.Camera.mode     = "thirdPerson"; // "thirdPerson"|"firstPerson"|"scripted"|"free"
-Rebur.Camera.distance = 8;
-Rebur.Camera.fov      = 70;            // degrees
-Rebur.Camera.offset   = { x: 0, y: 1.5, z: 0 };
+// Manual scripted camera — set position and look target each tick
+Rebur.on("tick", () => {
+  const player = Rebur.Players.all()[0];
+  if (!player) return;
+  Rebur.Camera.position = { x: player.position.x, y: player.position.y + 10, z: player.position.z + 12 };
+  Rebur.Camera.lookAt   = { x: player.position.x, y: player.position.y, z: player.position.z };
+});
 
-// Scripted mode — full manual control (affects all players)
-Rebur.Camera.mode = "scripted";
-Rebur.Camera.position = { x: 0, y: 30, z: 30 };
+// Static overhead camera
+Rebur.Camera.position = { x: 0, y: 40, z: 0 };
 Rebur.Camera.lookAt   = { x: 0, y: 0, z: 0 };
+Rebur.Camera.fov      = 70; // degrees (optional)
 \`\`\`
 
 ---

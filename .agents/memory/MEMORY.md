@@ -1,1 +1,1 @@
-- [Rebur API implementation](rebur-api.md) — Rebur.* global is fully implemented in server/script-runner.ts; old game/Scene/Players kept for backward compat.
+- [Rebur API implementation](rebur-api.md) — Rebur.* is the ONLY global; no backward compat; real AABB raycast; camera is plain proxy; no onGround.

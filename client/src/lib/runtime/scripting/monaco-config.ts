@@ -77,7 +77,6 @@ interface PlayerEntity extends Entity {
   walkSpeed: number;
   runSpeed: number;
   jumpPower: number;
-  readonly onGround: boolean;
   spawnPoint: Vec3;
   readonly inventory: Inventory;
   readonly gui: PlayerGuiAPI;
@@ -229,13 +228,10 @@ interface DataStoreAPI {
 interface PhysicsAPI { gravity: number; airDrag: number; }
 
 interface CameraAPI {
-  mode: 'thirdPerson' | 'firstPerson' | 'scripted' | 'free';
-  distance: number;
-  fov: number;
-  sensitivity: number;
-  offset: Vec3;
   position: Vec3;
   lookAt: Vec3;
+  fov: number;
+  [key: string]: any;
 }
 
 interface InputAPI {
@@ -273,8 +269,6 @@ interface TweenFn {
 interface ReburAPI {
   readonly Scene: SceneContainer;
   readonly Players: PlayersContainer;
-  readonly Lighting: SceneContainer;
-  readonly Storage: SceneContainer;
   readonly State: StateAPI;
   readonly DataStore: DataStoreAPI;
   readonly Gui: GuiAPI;
