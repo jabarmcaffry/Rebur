@@ -107,11 +107,11 @@ const CONTAINERS = [
 const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   {
     label: "On key press",
-    code: `Rebur.Input.onPress("e", () => {\n  log("E was pressed!");\n});\n`,
+    code: `Rebur.Input.on("press", (player, key) => {\n  if (key === "e") log(player.username, "pressed E");\n});\n`,
   },
   {
     label: "On key release",
-    code: `Rebur.Input.onRelease("e", () => {\n  log("E was released");\n});\n`,
+    code: `Rebur.Input.on("release", (player, key) => {\n  if (key === "e") log(player.username, "released E");\n});\n`,
   },
   {
     label: "Every frame (tick)",
@@ -139,7 +139,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "On any 3D click (mouse)",
-    code: `Rebur.Input.onMouseClick((entity) => {\n  if (entity) log("clicked", entity.name);\n  else log("clicked the sky");\n});\n`,
+    code: `Rebur.Input.on("mouseClick", (player, entity) => {\n  if (entity) log(player.username, "clicked", entity.name);\n  else log(player.username, "clicked the sky");\n});\n`,
   },
   {
     label: "Global lifecycle events",
@@ -163,11 +163,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Global state (multiplayer-ready)",
-    code: `Rebur.State.set("phase", "Lobby");\nRebur.State.on("phase", (next) => log("phase →", next));\n\nRebur.Input.onPress("p", () => Rebur.State.set("phase", "Playing"));\n`,
+    code: `Rebur.State.set("phase", "Lobby");\nRebur.State.on("phase", (next) => log("phase →", next));\n\nRebur.Input.on("press", (player, key) => {\n  if (key === "p") Rebur.State.set("phase", "Playing");\n});\n`,
   },
   {
     label: "Super-jump for 5 seconds",
-    code: `Rebur.Input.onPress("j", () => {\n  const players = Rebur.Players.all();\n  for (const p of players) {\n    p.jumpPower = 30;\n    after(5, () => { p.jumpPower = 8; });\n  }\n});\n`,
+    code: `Rebur.Input.on("press", (player, key) => {\n  if (key !== "j") return;\n  const players = Rebur.Players.all();\n  for (const p of players) {\n    p.jumpPower = 30;\n    after(5, () => { p.jumpPower = 8; });\n  }\n});\n`,
   },
   {
     label: "Lava damage on touch",
@@ -191,11 +191,11 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Hold item in hand",
-    code: `const tool = Rebur.Scene.create({\n  name: "Tool",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n});\n\nRebur.Input.onPress("f", () => {\n  for (const p of Rebur.Players.all()) {\n    const held = p.motors.detach("rightHand");\n    if (held) p.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n  }\n});\n`,
+    code: `const tool = Rebur.Scene.create({\n  name: "Tool",\n  primitiveType: "cube",\n  scale: { x: 0.25, y: 0.25, z: 1.1 },\n  color: "#cbd5e1",\n});\n\nRebur.on("playerJoined", (player) => {\n  player.motors.attach("rightHand", tool, { x: 0, y: 0.05, z: 0.25 });\n});\n\nRebur.Input.on("press", (player, key) => {\n  if (key !== "f") return;\n  const held = player.motors.detach("rightHand");\n  if (held) player.motors.attach("leftHand", held, { x: 0, y: 0.05, z: 0.25 });\n});\n`,
   },
   {
     label: "Tween: move entity",
-    code: `const door = Rebur.Scene.find("Door");\nif (door) {\n  Rebur.Input.onPress("e", () => {\n    Rebur.Tween(door.position, { y: 5 }, 1, "easeOutQuad", () => {\n      log("Door opened!");\n    });\n  });\n}\n`,
+    code: `const door = Rebur.Scene.find("Door");\nif (door) {\n  Rebur.Input.on("press", (player, key) => {\n    if (key === "e") {\n      Rebur.Tween(door.position, { y: 5 }, 1, "easeOutQuad", () => {\n        log("Door opened!");\n      });\n    }\n  });\n}\n`,
   },
   {
     label: "Raycast forward",

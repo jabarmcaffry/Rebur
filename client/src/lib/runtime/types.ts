@@ -10,14 +10,10 @@ export type EventChannel<T extends any[]> = {
 };
 export type EventsAPI = Record<string, (...args: any[]) => void>;
 
-export type KeyboardAPI = {
-  onPress: (key: string, fn: () => void) => () => void;
-  onRelease: (key: string, fn: () => void) => () => void;
+export type InputAPI = {
+  on: (event: 'press' | 'release' | 'mouseClick', fn: (...args: any[]) => void) => () => void;
+  off: (event: string, fn: any) => void;
   isDown: (key: string) => boolean;
-};
-
-export type MouseAPI = {
-  onClick: (fn: (hit: RuntimeObject | null) => void) => () => void;
 };
 
 export type WorldAPI = {
@@ -268,8 +264,6 @@ export type GameAPI = {
   input: RuntimeInput;
   physics: RuntimePhysics;
   state: RuntimeState;
-  keyboard: KeyboardAPI;
-  mouse: MouseAPI;
   world: WorldAPI;
   runService: RunServiceAPI;
   camera: RuntimeCamera;

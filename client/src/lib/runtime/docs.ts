@@ -123,7 +123,7 @@ Some APIs are conceptually **per-player/client** but are currently bridged throu
 | \`Rebur.Network.onMessage()\` | Client receives server message | Server-side listener stub; actual delivery is client-side |
 | \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
 
-> **Why this matters:** \`Rebur.Input.onPress("e", fn)\` fires once globally on the server when **any** player presses E. When client scripts arrive, each player's input will be isolated. For now, always check which player acted before applying effects.
+> **Why this matters:** \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted so you can apply effects correctly.
 
 ### Replication Rules (what syncs automatically)
 
@@ -1283,32 +1283,35 @@ Rebur.Camera.fov      = 70; // degrees (optional)
 
 ## Rebur.Input
 
-> **Client-bound API (currently server-proxied).** In the current build, \`Rebur.Input\` is a server-global listener — \`onPress("e", fn)\` fires when **any** player presses E, not a specific one. The callback does not tell you which player pressed the key. Always cross-reference \`Rebur.Players.all()\` or \`Rebur.Players.find()\` to identify the acting player.
->
-> When per-player LocalScripts arrive, each player's input will be scoped to their own context and the correct player will be implicit.
+Unified event API for keyboard and mouse input. All callbacks receive the **player** who triggered the event so you know exactly who acted.
 
 \`\`\`js
-// Key press / release
-Rebur.Input.onPress("e", () => {
-  // ⚠ fires for ANY player pressing E
-  // You must determine which player acted from context
-  log("E pressed by someone");
-});
-Rebur.Input.onRelease("e", () => {
-  log("E released");
+// Key press — fn(player, key)
+const unsub = Rebur.Input.on("press", (player, key) => {
+  if (key === "e") log(player.username, "pressed E");
 });
 
-// Poll state inside update loop
-Rebur.on("tick", (dt) => {
-  if (Rebur.Input.isDown("shift")) {
-    // ⚠ shift is down for at least one player — unclear which
-  }
+// Key release — fn(player, key)
+Rebur.Input.on("release", (player, key) => {
+  if (key === "e") log(player.username, "released E");
 });
 
-// 3D viewport click — returns the entity hit and the player who clicked
-Rebur.Input.onMouseClick((entity, player) => {
+// 3D viewport click — fn(player, entity | null)
+Rebur.Input.on("mouseClick", (player, entity) => {
   if (entity) log(player.username, "clicked", entity.name);
   else log(player.username, "clicked sky");
+});
+
+// Remove a listener — use the returned unsubscribe function (preferred)
+unsub();
+// or explicitly:
+Rebur.Input.off("press", handler);
+
+// Poll whether a key is currently held (use inside a tick loop)
+Rebur.on("tick", (dt) => {
+  if (Rebur.Input.isDown("shift")) {
+    // shift is held by at least one connected player
+  }
 });
 \`\`\`
 
@@ -1632,9 +1635,8 @@ log("Cleared", enemies.length, "enemies");
 ### Raycast — shoot to hit
 
 \`\`\`js
-Rebur.Input.onPress("f", () => {
-  const player = Rebur.Players.all()[0];
-  if (!player) return;
+Rebur.Input.on("press", (player, key) => {
+  if (key !== "f") return;
 
   const forward = { x: 0, y: 0, z: -1 };
   const hit = Rebur.Scene.raycast(player.position, forward, {

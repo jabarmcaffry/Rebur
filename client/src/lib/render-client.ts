@@ -65,6 +65,8 @@ export class RenderClient {
   onDisconnected?: () => void;
   /** Called when a reconnect attempt begins. arg = attempt number (1-based). */
   onReconnecting?: (attempt: number) => void;
+  /** Called when the server broadcasts a network message via Rebur.Network.broadcast(). */
+  onNetworkMessage?: (event: string, payload: any) => void;
 
   // Interpolation state
   private prevState: RenderState | null = null;
@@ -302,6 +304,11 @@ export class RenderClient {
         this.onError?.({ code: msg.code, message: msg.message });
         break;
       }
+
+      case "networkMessage": {
+        this.onNetworkMessage?.(msg.event, msg.payload);
+        break;
+      }
     }
   }
 
@@ -428,15 +435,28 @@ export class RenderClient {
     this._send({ type: "click3d", objectId });
   }
 
+  // ── Key Events (for Rebur.Input.on("press"/"release")) ──────────────────────
+
+  /** Fire Rebur.Input.on("press") for this key on the server. */
+  sendKeyDown(key: string) {
+    this._send({ type: "keyDown", key });
+  }
+
+  /** Fire Rebur.Input.on("release") for this key on the server. */
+  sendKeyUp(key: string) {
+    this._send({ type: "keyUp", key });
+  }
+
+  // ── Network (client→server custom events for Rebur.Network.on) ──────────────
+
+  /** Fire Rebur.Network.on(event) handlers on the server. */
+  sendNetworkMessage(event: string, payload?: any) {
+    this._send({ type: "networkSend", event, payload });
+  }
+
   // ── Chat ────────────────────────────────────────────────────────────────────
 
   sendChat(text: string) {
     this._send({ type: "chat", text });
-  }
-
-  // ── Custom Actions ──────────────────────────────────────────────────────────
-
-  sendAction(actionId: string, data?: any) {
-    this._send({ type: "action", actionId, data });
   }
 }

@@ -87,9 +87,12 @@ export class GameRoom {
   private interval: ReturnType<typeof setInterval> | null = null;
   private lastTick   = Date.now();
   private touchedPairs = new Set<string>();
+  private collisionPairs = new Set<string>(); // solid object-object pairs
   private tickNumber = 0;
   private spawnPoint = { x: 0, y: 1.5, z: 0 };
   private objIdCounter = 0;
+  // Per-player held keys (key: playerId, value: Set of held key strings)
+  private playerHeldKeys = new Map<string, Set<string>>();
 
   constructor(
     private readonly broadcastFn: (msg: object) => void,
@@ -242,6 +245,7 @@ export class GameRoom {
       this.scriptRunner?.clearPlayerGui(id);
     }
     this.players.delete(id);
+    this.playerHeldKeys.delete(id);
     for (const key of this.touchedPairs) {
       if (key.startsWith(id + ":")) this.touchedPairs.delete(key);
     }
@@ -285,6 +289,43 @@ export class GameRoom {
     const player = this.players.get(playerId);
     if (!player || !this.scriptRunner) return;
     this.scriptRunner.fireGuiClick(elementId, this._makeScriptPlayer(player));
+  }
+
+  /** Fire Rebur.Input.on("press") when client sends a keyDown message. */
+  handleKeyDown(playerId: string, key: string) {
+    const player = this.players.get(playerId);
+    if (!player || !this.scriptRunner) return;
+    const k = key.toLowerCase();
+    if (!this.playerHeldKeys.has(playerId)) this.playerHeldKeys.set(playerId, new Set());
+    this.playerHeldKeys.get(playerId)!.add(k);
+    this._rebuildHeldKeys();
+    this.scriptRunner.fireInputPress(k, this._makeScriptPlayer(player));
+  }
+
+  /** Fire Rebur.Input.on("release") when client sends a keyUp message. */
+  handleKeyUp(playerId: string, key: string) {
+    const player = this.players.get(playerId);
+    if (!player || !this.scriptRunner) return;
+    const k = key.toLowerCase();
+    this.playerHeldKeys.get(playerId)?.delete(k);
+    this._rebuildHeldKeys();
+    this.scriptRunner.fireInputRelease(k, this._makeScriptPlayer(player));
+  }
+
+  /** Fire Rebur.Network.on() when client sends a networkSend message. */
+  handleNetworkMessage(playerId: string, event: string, payload: any) {
+    const player = this.players.get(playerId);
+    if (!player || !this.scriptRunner) return;
+    this.scriptRunner.fireNetworkMessage(event, payload, this._makeScriptPlayer(player));
+  }
+
+  /** Rebuild the union of all players' held keys and push to scriptRunner. */
+  private _rebuildHeldKeys() {
+    const union = new Set<string>();
+    for (const keys of this.playerHeldKeys.values()) {
+      for (const k of keys) union.add(k);
+    }
+    this.scriptRunner?.updateHeldKeys(union);
   }
 
   // ── Main tick ─────────────────────────────────────────────────────────────────
@@ -333,6 +374,10 @@ export class GameRoom {
         if (mut.spawnPoint) { p.spawnX = mut.spawnPoint.x; p.spawnY = mut.spawnPoint.y + PLAYER_HALF_H; p.spawnZ = mut.spawnPoint.z; }
         if (mut.teleport)  { p.x = mut.teleport.x; p.y = mut.teleport.y + PLAYER_HALF_H; p.z = mut.teleport.z; p.vx=0;p.vy=0;p.vz=0; }
         if (mut.respawn)   { this._respawnPlayer(p); }
+        // Apply impulse from player.body.applyImpulse()
+        if (mut.impulseX !== undefined) p.vx += mut.impulseX;
+        if (mut.impulseY !== undefined) p.vy += mut.impulseY;
+        if (mut.impulseZ !== undefined) p.vz += mut.impulseZ;
         if (p.health <= 0) this._handlePlayerDeath(p);
       }
     }
@@ -509,6 +554,84 @@ export class GameRoom {
       }
     }
 
+    // ── Step 9b: Dynamic-object collision detection (collisionStarted/Ended) ─
+    if (this.scriptRunner) {
+      const nowColliding = new Set<string>();
+
+      // Player ↔ dynamic object solid collisions
+      for (const p of this.players.values()) {
+        const pp = this._makeScriptPlayer(p);
+        for (const obj of this.dynamics.values()) {
+          const so = this.scriptObjs.get(obj.name);
+          if (!so || so.isTrigger || so.canCollide === false) continue;
+          const hx = obj.sx/2, hy = obj.sy/2, hz = obj.sz/2;
+          const ox = Math.min(p.x+PLAYER_RADIUS, obj.x+hx) - Math.max(p.x-PLAYER_RADIUS, obj.x-hx);
+          const oy = Math.min(p.y+PLAYER_HALF_H, obj.y+hy) - Math.max(p.y-PLAYER_HALF_H, obj.y-hy);
+          const oz = Math.min(p.z+PLAYER_RADIUS, obj.z+hz) - Math.max(p.z-PLAYER_RADIUS, obj.z-hz);
+          if (ox > 0 && oy > 0 && oz > 0) {
+            const pairKey = `p:${p.id}:${obj.id}`;
+            nowColliding.add(pairKey);
+            if (!this.collisionPairs.has(pairKey)) {
+              const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy + p.vz*p.vz);
+              const impulse = { x: p.vx * speed, y: p.vy * speed, z: p.vz * speed };
+              this.scriptRunner.fireCollisionStarted(obj.name, this.scriptRunner.makePlayerProxyPublic(pp), impulse);
+            }
+          }
+        }
+      }
+
+      // Dynamic ↔ dynamic solid collisions
+      const dynArr = Array.from(this.dynamics.values());
+      for (let i = 0; i < dynArr.length; i++) {
+        const a = dynArr[i];
+        const soA = this.scriptObjs.get(a.name);
+        if (!soA || soA.isTrigger || soA.canCollide === false) continue;
+        for (let j = i + 1; j < dynArr.length; j++) {
+          const b = dynArr[j];
+          const soB = this.scriptObjs.get(b.name);
+          if (!soB || soB.isTrigger || soB.canCollide === false) continue;
+          const ox = Math.min(a.x+a.sx/2, b.x+b.sx/2) - Math.max(a.x-a.sx/2, b.x-b.sx/2);
+          const oy = Math.min(a.y+a.sy/2, b.y+b.sy/2) - Math.max(a.y-a.sy/2, b.y-b.sy/2);
+          const oz = Math.min(a.z+a.sz/2, b.z+b.sz/2) - Math.max(a.z-a.sz/2, b.z-b.sz/2);
+          if (ox > 0 && oy > 0 && oz > 0) {
+            const pairKey = `d:${a.id}:${b.id}`;
+            nowColliding.add(pairKey);
+            if (!this.collisionPairs.has(pairKey)) {
+              const dvx = a.vx - b.vx, dvy = a.vy - b.vy, dvz = a.vz - b.vz;
+              const speed = Math.sqrt(dvx*dvx + dvy*dvy + dvz*dvz);
+              const impulse = { x: dvx * speed, y: dvy * speed, z: dvz * speed };
+              const epB = this.scriptRunner.makeEntityProxyPublic(b.name);
+              const epA = this.scriptRunner.makeEntityProxyPublic(a.name);
+              if (epA) this.scriptRunner.fireCollisionStarted(a.name, epB, impulse);
+              if (epB) this.scriptRunner.fireCollisionStarted(b.name, epA, { x: -impulse.x, y: -impulse.y, z: -impulse.z });
+            }
+          }
+        }
+      }
+
+      // Fire collisionEnded for pairs that stopped overlapping
+      for (const pairKey of this.collisionPairs) {
+        if (!nowColliding.has(pairKey)) {
+          const parts = pairKey.split(":");
+          if (pairKey.startsWith("p:")) {
+            const objId = parts[2];
+            const obj = this.allObjs.get(objId);
+            if (obj) this.scriptRunner.fireCollisionEnded(obj.name, null);
+          } else {
+            const aName = this.allObjs.get(parts[1])?.name;
+            const bName = this.allObjs.get(parts[2])?.name;
+            if (aName && bName) {
+              const epB = this.scriptRunner.makeEntityProxyPublic(bName);
+              const epA = this.scriptRunner.makeEntityProxyPublic(aName);
+              if (epA) this.scriptRunner.fireCollisionEnded(aName, epB);
+              if (epB) this.scriptRunner.fireCollisionEnded(bName, epA);
+            }
+          }
+        }
+      }
+      this.collisionPairs = nowColliding;
+    }
+
     // ── Step 10b: Drain destroyed objects ────────────────────────────────────
     if (this.scriptRunner) {
       const destroyed = this.scriptRunner.drainDestroyQueue();
@@ -566,6 +689,15 @@ export class GameRoom {
       visible: g.visible !== false, clickable: g.clickable,
     });
 
+    const camSettings = this.scriptRunner?.getCameraSettings() ?? {};
+    const cameraState = Object.keys(camSettings).length > 0 ? {
+      mode: camSettings.mode ?? "thirdPerson",
+      position: camSettings.position,
+      lookAt: camSettings.lookAt,
+      fov: camSettings.fov,
+      distance: camSettings.distance,
+    } : undefined;
+
     if (this.sendToPlayerFn) {
       // Per-player worldState: each player gets global gui + their own gui
       for (const p of this.players.values()) {
@@ -576,6 +708,7 @@ export class GameRoom {
           players: renderPlayers,
           gui: playerGui.map(toRenderGui),
           localPlayerId: p.id,
+          camera: cameraState,
         };
         this.sendToPlayerFn(p.id, { type: "worldState", state });
       }
@@ -588,6 +721,7 @@ export class GameRoom {
         players: renderPlayers,
         gui: guiElements.map(toRenderGui),
         localPlayerId: null,
+        camera: cameraState,
       };
       this.broadcastFn({ type: "worldState", state });
     }

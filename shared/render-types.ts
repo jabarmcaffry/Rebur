@@ -71,10 +71,9 @@ export interface RenderGuiElement {
   fontSize: number;
   backgroundColor?: string;
   imageUrl?: string;
-  value?: number;      // For progress bars
+  value?: number;
   maxValue?: number;
   visible: boolean;
-  // Button callbacks are handled server-side, client just sends click events
   clickable?: boolean;
 }
 
@@ -92,6 +91,7 @@ export interface RenderState {
     position?: Vec3;
     lookAt?: Vec3;
     fov?: number;
+    distance?: number;
   };
   lighting?: {
     ambientColor: string;
@@ -119,16 +119,19 @@ export type ServerMessage =
   | { type: "chat"; playerId: string; playerName: string; text: string }
   | { type: "scriptLog"; logs: string[] }
   | { type: "sound"; soundId: string; options?: { volume?: number; loop?: boolean; position?: Vec3 } }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "networkMessage"; event: string; payload: any };
 
 // Client → Server
 export type ClientMessage =
   | { type: "join"; sessionId: string; gameId: string; playerName: string; colors?: Record<string, string>; userId?: string }
   | { type: "input"; moveX: number; moveZ: number; jump: boolean; camY: number; sprint?: boolean }
+  | { type: "keyDown"; key: string }
+  | { type: "keyUp"; key: string }
   | { type: "guiClick"; elementId: string }
   | { type: "click3d"; objectId: string | null }
   | { type: "chat"; text: string }
-  | { type: "action"; actionId: string; data?: any };
+  | { type: "networkSend"; event: string; payload?: any };
 
 // ── Asset Request/Response ────────────────────────────────────────────────────
 
@@ -138,6 +141,6 @@ export interface AssetRequest {
 }
 
 export interface AssetResponse {
-  url: string;           // Temporary signed URL
-  expiresAt: number;     // Unix timestamp
+  url: string;
+  expiresAt: number;
 }

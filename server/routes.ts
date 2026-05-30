@@ -725,6 +725,45 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             }
             break;
           }
+
+          // ── KEY DOWN → Rebur.Input.on("press") ────────────────────────────
+          case 'keyDown': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            if (typeof message.key === 'string') {
+              room.handleKeyDown(client.playerId, message.key);
+            }
+            break;
+          }
+
+          // ── KEY UP → Rebur.Input.on("release") ───────────────────────────
+          case 'keyUp': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            if (typeof message.key === 'string') {
+              room.handleKeyUp(client.playerId, message.key);
+            }
+            break;
+          }
+
+          // ── NETWORK SEND → Rebur.Network.on() ────────────────────────────
+          case 'networkSend': {
+            if (!clientId) break;
+            const client = clients.get(clientId);
+            if (!client) break;
+            const room = gameRooms.get(client.sessionId);
+            if (!room) break;
+            if (typeof message.event === 'string') {
+              room.handleNetworkMessage(client.playerId, message.event, message.payload ?? null);
+            }
+            break;
+          }
         }
       } catch (error) {
         console.error('WebSocket message error:', error);

@@ -255,11 +255,18 @@ export default function PlayMode({
         setShowLeaderboard((v) => !v);
         e.preventDefault();
       }
+      // Forward key press to server for Rebur.Input.on("press") (deduplicated)
+      if (!wasDown) {
+        renderClient.sendKeyDown(key);
+      }
       computeMove();
     };
 
     const onUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
+      const key = e.key.toLowerCase();
+      keysRef.current[key] = false;
+      // Forward key release to server for Rebur.Input.on("release")
+      renderClient.sendKeyUp(key);
       computeMove();
     };
 
@@ -403,7 +410,8 @@ export default function PlayMode({
             ))}
             <ChaseCameraRig 
               player={player} 
-              shiftLock={shiftLock} 
+              shiftLock={shiftLock}
+              serverCamera={renderClient.camera}
               onCameraYawChange={(yaw) => { cameraYawRef.current = yaw; }}
             />
           </Canvas>

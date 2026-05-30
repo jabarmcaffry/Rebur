@@ -2,19 +2,22 @@ import { useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import type { RenderPlayer } from "@shared/render-types";
+import type { RenderPlayer, RenderState } from "@shared/render-types";
 
 /**
  * Camera rig that follows the player using OrbitControls.
- * Supports third-person chase camera and shift-lock mode.
+ * Supports third-person chase camera, shift-lock mode, and
+ * server-driven camera settings from Rebur.Camera.
  */
 export default function ChaseCameraRig({
   player,
   shiftLock = false,
+  serverCamera,
   onCameraYawChange,
 }: {
   player: RenderPlayer;
   shiftLock?: boolean;
+  serverCamera?: RenderState["camera"];
   onCameraYawChange?: (yaw: number) => void;
 }) {
   const { camera } = useThree();
@@ -22,14 +25,60 @@ export default function ChaseCameraRig({
   const lastPlayerPos = useRef(new THREE.Vector3());
   const initialized = useRef(false);
 
-  // Camera configuration
-  const distance = 6;
+  // Default camera configuration (overridden by serverCamera when set)
+  const defaultDistance = 6;
   const minDistance = 2;
   const maxDistance = 20;
   const offset = { x: 0, y: 1.95, z: 0 };
-  const fov = 60;
+  const defaultFov = 60;
 
   useFrame(() => {
+    const mode = serverCamera?.mode ?? "thirdPerson";
+    const fov = serverCamera?.fov ?? defaultFov;
+
+    if ((camera as any).fov !== fov) {
+      (camera as any).fov = fov;
+      (camera as any).updateProjectionMatrix?.();
+    }
+
+    // "fixed" or "scripted" mode: camera positioned directly by script
+    if ((mode === "fixed" || mode === "scripted") && serverCamera?.position) {
+      const pos = serverCamera.position;
+      camera.position.set(pos.x, pos.y, pos.z);
+      if (serverCamera.lookAt) {
+        camera.lookAt(serverCamera.lookAt.x, serverCamera.lookAt.y, serverCamera.lookAt.z);
+      }
+      if (controlsRef.current) {
+        controlsRef.current.enabled = false;
+      }
+      return;
+    }
+
+    // "firstPerson" mode
+    if (mode === "firstPerson") {
+      const head = new THREE.Vector3(
+        player.position.x + offset.x,
+        player.position.y + offset.y + 0.3,
+        player.position.z + offset.z,
+      );
+      camera.position.copy(head);
+      if (controlsRef.current) {
+        controlsRef.current.target.set(head.x, head.y, head.z);
+        controlsRef.current.minDistance = 0;
+        controlsRef.current.maxDistance = 0;
+        controlsRef.current.enabled = true;
+        controlsRef.current.update();
+      }
+      if (onCameraYawChange) {
+        const fwd = new THREE.Vector3();
+        camera.getWorldDirection(fwd);
+        onCameraYawChange(Math.atan2(fwd.x, fwd.z));
+      }
+      return;
+    }
+
+    // Default: third-person chase camera
+    const distance = serverCamera?.distance ?? defaultDistance;
     const head = new THREE.Vector3(
       player.position.x + offset.x,
       player.position.y + offset.y,
@@ -40,11 +89,6 @@ export default function ChaseCameraRig({
     if (!initialized.current) {
       lastPlayerPos.current.copy(head);
       initialized.current = true;
-    }
-
-    if ((camera as any).fov !== fov) {
-      (camera as any).fov = fov;
-      (camera as any).updateProjectionMatrix?.();
     }
 
     // Chase camera: translate by player movement delta
@@ -58,7 +102,7 @@ export default function ChaseCameraRig({
       const ctl = controlsRef.current;
       ctl.target.set(head.x, head.y, head.z);
       ctl.minDistance = minDistance;
-      ctl.maxDistance = maxDistance;
+      ctl.maxDistance = Math.max(distance * 1.5, maxDistance);
       ctl.enableRotate = !shiftLock;
       ctl.enabled = true;
       ctl.update();

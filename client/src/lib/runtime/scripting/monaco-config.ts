@@ -235,11 +235,15 @@ interface CameraAPI {
 }
 
 interface InputAPI {
-  onPress(key: string, fn: () => void): () => void;
-  onRelease(key: string, fn: () => void): () => void;
+  /** Subscribe to key / mouse events. Events: "press", "release", "mouseClick".
+   *  - "press"      → fn(player, key)
+   *  - "release"    → fn(player, key)
+   *  - "mouseClick" → fn(player, entity | null)
+   */
+  on(event: 'press' | 'release' | 'mouseClick', fn: (...args: any[]) => void): () => void;
+  off(event: string, fn: any): void;
+  /** Returns true while the key is held by any player in this session. */
   isDown(key: string): boolean;
-  /** 3D viewport click. Currently server-proxied — fires for any player. fn receives (entity | null, player). */
-  onMouseClick(fn: (entity: Entity | null, player: PlayerEntity) => void): () => void;
 }
 
 interface RunServiceAPI {
@@ -1210,39 +1214,47 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur.Input",
     kind: K.Variable,
     detail: "InputAPI — keyboard & mouse",
-    doc: "Keyboard and mouse input.\n\nMethods:\n- onPress(key, fn) — fire once on key down\n- onRelease(key, fn) — fire once on key up\n- isDown(key) — poll inside a tick loop\n- onMouseClick(fn) — 3D viewport click",
+    doc: "Keyboard and mouse input.\n\nMethods:\n- .on('press', fn)      — fn(player, key) fires on key down\n- .on('release', fn)    — fn(player, key) fires on key up\n- .on('mouseClick', fn) — fn(player, entity|null) fires on 3D click\n- .off(event, fn)       — remove a listener\n- .isDown(key)          — poll whether a key is currently held",
     insert: "Rebur.Input",
   },
   {
-    label: "Rebur.Input.onPress",
+    label: "Rebur.Input.on(press)",
     kind: K.Function,
-    detail: "Rebur.Input.onPress(key, fn) → unsubscribe",
-    doc: "Fire fn once each time the key is pressed.\nKey names: 'a'–'z', 'space', 'shift', 'control', 'alt', 'enter', 'escape', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'.",
-    insert: "Rebur.Input.onPress(\"${1:e}\", () => {\n\t${2}\n})",
+    detail: "Rebur.Input.on('press', fn) → unsubscribe",
+    doc: "Fire fn(player, key) once each time any player presses a key.\nKey names: 'a'–'z', 'space', 'shift', 'control', 'alt', 'enter', 'escape', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'.",
+    insert: "Rebur.Input.on(\"press\", (player, key) => {\n\tif (key === \"${1:e}\") {\n\t\t${2}\n\t}\n})",
     snippet: true,
   },
   {
-    label: "Rebur.Input.onRelease",
+    label: "Rebur.Input.on(release)",
     kind: K.Function,
-    detail: "Rebur.Input.onRelease(key, fn) → unsubscribe",
-    doc: "Fire fn once each time the key is released.",
-    insert: "Rebur.Input.onRelease(\"${1:e}\", () => {\n\t${2}\n})",
+    detail: "Rebur.Input.on('release', fn) → unsubscribe",
+    doc: "Fire fn(player, key) once each time any player releases a key.",
+    insert: "Rebur.Input.on(\"release\", (player, key) => {\n\tif (key === \"${1:e}\") {\n\t\t${2}\n\t}\n})",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Input.on(mouseClick)",
+    kind: K.Function,
+    detail: "Rebur.Input.on('mouseClick', fn) → unsubscribe",
+    doc: "Called on every 3D viewport click. Callback receives (player, entity | null).\nfires for the player who clicked. entity is null if the click hit empty space.\n\nExample:\nRebur.Input.on('mouseClick', (player, entity) => {\n  if (entity) log(player.username, 'clicked', entity.name);\n});",
+    insert: "Rebur.Input.on(\"mouseClick\", (player, entity) => {\n\tif (entity) {\n\t\t${1}\n\t}\n})",
     snippet: true,
   },
   {
     label: "Rebur.Input.isDown",
     kind: K.Function,
     detail: "Rebur.Input.isDown(key) → boolean",
-    doc: "Poll whether a key is currently held. Use inside a tick loop.",
+    doc: "Poll whether a key is currently held by any player. Use inside a tick loop.",
     insert: "Rebur.Input.isDown(\"${1:w}\")",
     snippet: true,
   },
   {
-    label: "Rebur.Input.onMouseClick",
+    label: "Rebur.Input.off",
     kind: K.Function,
-    detail: "Rebur.Input.onMouseClick(fn) → unsubscribe",
-    doc: "Called on every 3D viewport click. Callback receives (entity | null, player).\n\nCurrently server-proxied: fires for any player's click. Check player to know who clicked.\n\nExample:\nRebur.Input.onMouseClick((entity, player) => {\n  if (entity) log(player.username, 'clicked', entity.name);\n});",
-    insert: "Rebur.Input.onMouseClick((entity, player) => {\n\tif (entity) {\n\t\t${1}\n\t}\n})",
+    detail: "Rebur.Input.off(event, fn)",
+    doc: "Remove a previously registered listener. Prefer the unsubscribe function returned by .on() instead.",
+    insert: "Rebur.Input.off(\"${1:press}\", ${2:handler})",
     snippet: true,
   },
 

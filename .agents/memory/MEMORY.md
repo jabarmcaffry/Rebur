@@ -1,1 +1,2 @@
 - [Rebur API implementation](rebur-api.md) — Rebur.* is the ONLY global; no backward compat; real AABB raycast; camera is plain proxy; no onGround.
+- [Rebur.Input unified API](rebur-input-api.md) — Input uses .on()/.off()/isDown() only; callbacks always receive (player, key|entity); keyDown/keyUp forwarded via WS; no old onPress/onRelease/onMouseClick.

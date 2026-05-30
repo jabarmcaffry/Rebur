@@ -51,6 +51,7 @@ export interface ScriptPlayerState {
   skinColor: string;
   pantsColor: string;
   spawnX?: number; spawnY?: number; spawnZ?: number;
+  onGround?: boolean;
 }
 
 export interface ScriptPlayerMutation {
@@ -62,7 +63,10 @@ export interface ScriptPlayerMutation {
   teleport?: { x: number; y: number; z: number };
   respawn?: true;
   shirtColor?: string;
+  skinColor?: string;
+  pantsColor?: string;
   spawnPoint?: { x: number; y: number; z: number };
+  impulseX?: number; impulseY?: number; impulseZ?: number;
 }
 
 export interface ScriptCreatedObject {
@@ -201,10 +205,10 @@ export class ScriptRunner {
   private tagMap                           = new Map<string, Set<string>>();
   private entityTags                       = new Map<string, Set<string>>();
 
-  // Input — class-level so all loaded scripts share one handler set
-  private inputPressHandlers   = new Map<string, EventHandler[]>();
-  private inputReleaseHandlers = new Map<string, EventHandler[]>();
-  private mouseClickHandlers: EventHandler[] = [];
+  // Input — unified event map keyed by "press" | "release" | "mouseclick"
+  private inputHandlers = new Map<string, EventHandler[]>();
+  // Keys currently held by any player in this room
+  private heldKeys = new Set<string>();
 
   // Camera is a plain writable store — no preset modes
   private cameraSettings: Record<string, any> = {};
@@ -284,6 +288,14 @@ export class ScriptRunner {
       (r=0,g=0,b=0) => `rgb(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)})`,
       { fromRGB:(r=0,g=0,b=0)=>`rgb(${r},${g},${b})`, fromHex:(h:string)=>h }
     );
+
+    // ── Internal engine events (scripts cannot emit these) ────────────────
+    const INTERNAL_ENTITY_EVENTS = new Set([
+      "touched", "untouched", "touchstarted", "touchended",
+      "clicked", "destroyed", "woke", "slept",
+      "collisionstarted", "collisionended",
+      "propertychanged", "changed",
+    ]);
 
     // ── Entity proxy ──────────────────────────────────────────────────────
     const makeEntityProxy = (obj: ScriptObjState): any => {
@@ -447,7 +459,12 @@ export class ScriptRunner {
             warn(`emit() called on destroyed entity "${obj.name}"`);
             return false;
           }
-          runner._fireObj(obj.name, event.toLowerCase(), ...args);
+          const evtLower = event.toLowerCase();
+          if (INTERNAL_ENTITY_EVENTS.has(evtLower)) {
+            warn(`Cannot emit internal event "${event}" on "${obj.name}" — engine fires these automatically. Use a custom event name instead.`);
+            return false;
+          }
+          runner._fireObj(obj.name, evtLower, ...args);
           return true;
         },
         setAttribute(key: string, value: any) {
@@ -543,9 +560,14 @@ export class ScriptRunner {
         get(_slot: string): any { return null; },
       };
 
-      // Player body — supports applyImpulse as documented
+      // Player body — applyImpulse adds to mutation so GameRoom applies it
       const playerBody = {
-        applyImpulse(f: any) { mut().teleport; /* no-op stub — future: wire to player physics */ },
+        applyImpulse(f: any) {
+          const m = mut();
+          m.impulseX = (m.impulseX ?? 0) + +(f?.x ?? 0);
+          m.impulseY = (m.impulseY ?? 0) + +(f?.y ?? 0);
+          m.impulseZ = (m.impulseZ ?? 0) + +(f?.z ?? 0);
+        },
         applyForce(_f: any)  {},
         setVelocity(_v: any) {},
       };
@@ -924,27 +946,22 @@ export class ScriptRunner {
     });
 
     // ── Rebur.Input ────────────────────────────────────────────────────────
+    // Consistent .on() pattern:
+    //   Rebur.Input.on("press",      (player, key)    => {})
+    //   Rebur.Input.on("release",    (player, key)    => {})
+    //   Rebur.Input.on("mouseClick", (player, entity) => {})
     const reburInput = {
-      onPress(key: string, fn: EventHandler) {
-        const k = key.toLowerCase();
-        if (!runner.inputPressHandlers.has(k)) runner.inputPressHandlers.set(k, []);
-        runner.inputPressHandlers.get(k)!.push(fn);
-        return () => runner.inputPressHandlers.set(k, (runner.inputPressHandlers.get(k)??[]).filter(h=>h!==fn));
+      on(event: string, fn: EventHandler) {
+        const k = event.toLowerCase();
+        if (!runner.inputHandlers.has(k)) runner.inputHandlers.set(k, []);
+        runner.inputHandlers.get(k)!.push(fn);
+        return () => runner.inputHandlers.set(k, (runner.inputHandlers.get(k)??[]).filter(h=>h!==fn));
       },
-      onRelease(key: string, fn: EventHandler) {
-        const k = key.toLowerCase();
-        if (!runner.inputReleaseHandlers.has(k)) runner.inputReleaseHandlers.set(k, []);
-        runner.inputReleaseHandlers.get(k)!.push(fn);
-        return () => runner.inputReleaseHandlers.set(k, (runner.inputReleaseHandlers.get(k)??[]).filter(h=>h!==fn));
+      off(event: string, fn: EventHandler) {
+        const k = event.toLowerCase();
+        runner.inputHandlers.set(k, (runner.inputHandlers.get(k)??[]).filter(h=>h!==fn));
       },
-      isDown(_key: string) { return false; /* stub — requires client state polling */ },
-      onMouseClick(fn: EventHandler) {
-        runner.mouseClickHandlers.push(fn);
-        return () => {
-          const i = runner.mouseClickHandlers.indexOf(fn);
-          if (i >= 0) runner.mouseClickHandlers.splice(i, 1);
-        };
-      },
+      isDown(key: string) { return runner.heldKeys.has(key.toLowerCase()); },
     };
 
     // ── Rebur.Physics ──────────────────────────────────────────────────────
@@ -1102,28 +1119,40 @@ export class ScriptRunner {
   fireMouseClick(entityName: string | null, player: ScriptPlayerState) {
     const pp = this._makePlayerProxy(player);
     const ep = entityName ? this._makeEntityProxyByName(entityName) : null;
-    for (const h of this.mouseClickHandlers) {
-      try { h(ep, pp); } catch { /* isolate */ }
+    for (const h of this.inputHandlers.get("mouseclick") ?? []) {
+      try { h(pp, ep); } catch { /* isolate */ }
     }
     if (entityName) this._fireObj(entityName, "clicked", pp);
   }
   fireInputPress(key: string, player: ScriptPlayerState) {
+    this.heldKeys.add(key.toLowerCase());
     const pp = this._makePlayerProxy(player);
-    for (const h of this.inputPressHandlers.get(key.toLowerCase()) ?? []) {
-      try { h(pp); } catch { /* isolate */ }
+    for (const h of this.inputHandlers.get("press") ?? []) {
+      try { h(pp, key); } catch { /* isolate */ }
     }
   }
   fireInputRelease(key: string, player: ScriptPlayerState) {
+    this.heldKeys.delete(key.toLowerCase());
     const pp = this._makePlayerProxy(player);
-    for (const h of this.inputReleaseHandlers.get(key.toLowerCase()) ?? []) {
-      try { h(pp); } catch { /* isolate */ }
+    for (const h of this.inputHandlers.get("release") ?? []) {
+      try { h(pp, key); } catch { /* isolate */ }
     }
+  }
+  fireCollisionStarted(objName: string, other: any, impulse: { x: number; y: number; z: number }) {
+    this._fireObj(objName, "collisionstarted", other, impulse);
+  }
+  fireCollisionEnded(objName: string, other: any) {
+    this._fireObj(objName, "collisionended", other);
   }
   fireNetworkMessage(event: string, payload: any, sender: ScriptPlayerState) {
     const pp = this._makePlayerProxy(sender);
     for (const h of this.networkHandlers.get(event) ?? []) {
       try { h(payload, pp); } catch { /* isolate */ }
     }
+  }
+  /** Update the set of keys currently held by any player — called by GameRoom each tick. */
+  updateHeldKeys(keys: Set<string>) {
+    this.heldKeys = keys;
   }
 
   // ── Logs & GUI ──────────────────────────────────────────────────────────────
@@ -1273,5 +1302,15 @@ export class ScriptRunner {
     const obj = this.objects.get(name);
     if (!obj || obj._destroyed) return null;
     return { name: obj.name, id: obj.id, destroyed: false };
+  }
+
+  /** Public accessor so GameRoom can build a player proxy for collision events. */
+  makePlayerProxyPublic(p: ScriptPlayerState): any {
+    return this._makePlayerProxy(p);
+  }
+
+  /** Public accessor so GameRoom can build an entity proxy for collision events. */
+  makeEntityProxyPublic(name: string): any {
+    return this._makeEntityProxyByName(name);
   }
 }
