@@ -78,16 +78,13 @@ interface PlayerEntity extends Entity {
   runSpeed: number;
   jumpPower: number;
   spawnPoint: Vec3;
+  /** Set to true to trigger immediate respawn to spawnPoint. */
+  respawn: boolean;
   readonly inventory: Inventory;
   readonly gui: PlayerGuiAPI;
   readonly data: PlayerDataAPI;
   readonly animator: AnimatorAPI;
   motors: MotorAPI;
-  takeDamage(n: number): void;
-  heal(n: number): void;
-  kill(): void;
-  respawn(): void;
-  teleport(x: number, y: number, z: number): void;
 }
 
 interface Inventory {
@@ -418,7 +415,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur.Players.get",
     kind: K.Function,
     detail: "Rebur.Players.get(id) → PlayerEntity | null",
-    doc: "Find a player by their immutable session id. Preferred for cross-container references:\n\n  entity.on(\"touched\", (other) => {\n    if (other.isPlayer) {\n      const player = Rebur.Players.get(other.id);\n      if (player) player.takeDamage(10);\n    }\n  });",
+    doc: "Find a player by their immutable session id. Preferred for cross-container references:\n\n  entity.on(\"touched\", (other) => {\n    if (other.isPlayer) {\n      const player = Rebur.Players.get(other.id);\n      if (player) player.health -= 10;\n    }\n  });",
     insert: "Rebur.Players.get(${1:id})",
     snippet: true,
   },
@@ -449,7 +446,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "entity.isPlayer",
     kind: K.Property,
     detail: "boolean (read-only)",
-    doc: "True if this entity is a player. Use this to branch on player vs non-player inside touched/collision handlers.\n\n  entity.on(\"touched\", (other) => {\n    if (other.isPlayer) {\n      other.takeDamage(10);\n    }\n  });",
+    doc: "True if this entity is a player. Use this to branch on player vs non-player inside touched/collision handlers.\n\n  entity.on(\"touched\", (other) => {\n    if (other.isPlayer) {\n      other.health -= 10;\n    }\n  });",
     insert: ".isPlayer",
   },
   {
@@ -753,42 +750,18 @@ const COMPLETIONS: CompletionDef[] = [
     insert: ".spawnPoint",
   },
   {
-    label: "player.takeDamage",
-    kind: K.Function,
-    detail: "player.takeDamage(amount: number) → void",
-    doc: "Deal damage. Health decreases by amount. At 0: playerDied fires then respawn.",
-    insert: ".takeDamage(${1:10})",
-    snippet: true,
-  },
-  {
-    label: "player.heal",
-    kind: K.Function,
-    detail: "player.heal(amount: number) → void",
-    doc: "Restore health, capped at maxHealth.",
-    insert: ".heal(${1:20})",
-    snippet: true,
-  },
-  {
-    label: "player.kill",
-    kind: K.Function,
-    detail: "player.kill() → void",
-    doc: "Instantly set health to 0. Triggers death and respawn.",
-    insert: ".kill()",
+    label: "player.position",
+    kind: K.Property,
+    detail: "Vec3 (writable)",
+    doc: "World position. Write to instantly move the player:\n\n  player.position = { x: 0, y: 10, z: 0 };\n\nReading always returns the current server-authoritative position.",
+    insert: ".position",
   },
   {
     label: "player.respawn",
-    kind: K.Function,
-    detail: "player.respawn() → void",
-    doc: "Teleport to spawnPoint and restore full health.",
-    insert: ".respawn()",
-  },
-  {
-    label: "player.teleport",
-    kind: K.Function,
-    detail: "player.teleport(x, y, z) → void",
-    doc: "Instantly move the player to an absolute world position.",
-    insert: ".teleport(${1:0}, ${2:5}, ${3:0})",
-    snippet: true,
+    kind: K.Property,
+    detail: "boolean (set to true to respawn)",
+    doc: "Set to true to teleport the player to their spawnPoint and restore full health.\n\n  player.respawn = true;\n\n  // Change spawn first:\n  player.spawnPoint = { x: 50, y: 5, z: 0 };\n  player.respawn = true;",
+    insert: ".respawn = true",
   },
   {
     label: "player.inventory",

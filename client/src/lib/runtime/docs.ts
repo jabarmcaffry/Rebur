@@ -16,7 +16,7 @@ const lava = Rebur.Scene.find("Lava");
 if (lava) {
   lava.on("touched", (other) => {
     if (other.isPlayer) {
-      other.takeDamage(25);
+      other.health -= 25;
       log(other.username, "hit lava! HP:", other.health);
     }
   });
@@ -314,7 +314,7 @@ e.name = "NewName"; // rename (updates Rebur.Scene.find results)
 \`\`\`js
 entity.on("touched", (other) => {
   if (other.isPlayer) {
-    other.takeDamage(10); // player-specific method
+    other.health -= 10;
   }
 });
 \`\`\`
@@ -416,7 +416,7 @@ const lava = Rebur.Scene.find("Lava");
 lava.body.isTrigger = true;
 
 lava.on("touched", (other) => {
-  if (other.isPlayer) other.takeDamage(25);
+  if (other.isPlayer) other.health -= 25;
 });
 lava.on("untouched", (other) => {
   // player left the lava zone — stop damage
@@ -447,7 +447,7 @@ crate.on("collisionStarted", (other, impulse) => {
 
 \`\`\`js
 const unsub = entity.on("touched", (other) => {
-  if (other.isPlayer) other.takeDamage(25);
+  if (other.isPlayer) other.health -= 25;
 });
 unsub(); // stop listening
 \`\`\`
@@ -630,7 +630,7 @@ after(5, () => {
 Calling any method or reading/writing any property on a destroyed entity is **a no-op** — it does not throw. The engine logs a warning in the console so you can trace it:
 
 \`\`\`
-[warn] Attempted to call .takeDamage() on destroyed entity "Enemy"
+[warn] Attempted to write property on destroyed entity "Enemy"
 \`\`\`
 
 This is intentional: it keeps scripts from crashing if two events race to destroy the same entity. But it means **silent failures are possible** — always check \`entity.destroyed\` when holding long-lived references.
@@ -713,7 +713,7 @@ for (const p of players) {
 
 \`\`\`js
 const alice = Rebur.Players.find("Alice");
-if (alice) alice.takeDamage(10);
+if (alice) alice.health -= 10;
 \`\`\`
 
 ### Rebur.Players.get(id) → player | null
@@ -724,7 +724,7 @@ Look up by immutable id — safest for cross-container references.
 entity.on("touched", (other) => {
   if (other.isPlayer) {
     const player = Rebur.Players.get(other.id);
-    if (player) player.heal(20);
+    if (player) player.health = Math.min(player.health + 20, player.maxHealth);
   }
 });
 \`\`\`
@@ -742,8 +742,9 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`id\` | string | ✓ | — | Immutable session id |
 | \`username\` | string | ✓ | — | Display name |
 | \`isPlayer\` | boolean | ✓ | — | Always \`true\` |
-| \`position\` | \`{x,y,z}\` | ✓ | — | World position |
+| \`position\` | \`{x,y,z}\` | ✓ | ✓ | World position (write teleports immediately) |
 | \`rotation\` | \`{x,y,z}\` | ✓ | — | Rotation (radians) |
+| \`respawn\` | boolean | — | ✓ | Set \`true\` to respawn to spawnPoint |
 | \`health\` | number | ✓ | ✓ | Current HP (0–maxHealth) |
 | \`maxHealth\` | number | ✓ | ✓ | Max HP (default 100) |
 | \`walkSpeed\` | number | ✓ | ✓ | Walk speed (default 6) |
@@ -757,56 +758,47 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`motors\` | MotorAPI | ✓ | — | Body-slot attachment |
 | \`color\` | string | ✓ | ✓ | Shirt color |
 
-### Player Transform Restrictions
+### Player Transform
 
-Player \`position\` and \`rotation\` are **read-only from scripts**. The character controller (movement system) owns them. Attempting to assign them directly is silently ignored:
+Player \`position\` is **writable** — assigning it instantly moves the player:
 
 \`\`\`js
-// ✗ These do nothing — player.position is read-only
-player.position = { x: 0, y: 0, z: 0 };
-player.position.y = 10;
-player.rotation.y = Math.PI;
+// ✓ Move player to a specific location
+player.position = { x: 0, y: 10, z: 0 };
+
+// ✓ Read current position at any time
+log(player.position.x, player.position.y, player.position.z);
 \`\`\`
 
-**Why?** The physics character controller runs at every tick and resets player position based on its own simulation. Any direct write gets immediately overwritten.
-
-**Use the correct APIs instead:**
+Movement parameters update the controller and take effect immediately:
 
 \`\`\`js
-// ✓ Instant teleport — bypasses the controller for one frame
-player.teleport(0, 10, 0);
-
-// ✓ Movement parameters — controller reads these each tick
 player.walkSpeed = 12;
 player.runSpeed  = 24;
 player.jumpPower = 15;
-
-// ✓ Respawn to a designated point
-player.spawnPoint = { x: 50, y: 5, z: 0 };
-player.respawn();
-
-// ✓ Apply a force/impulse to the player's physics body
-player.body.applyImpulse({ x: 0, y: 20, z: 0 }); // knock upward
 \`\`\`
 
-> **Reading** player.position is always valid — it reflects the current server-authoritative position:
->
-> \`\`\`js
-> log(player.position.x, player.position.y, player.position.z);
-> const distFromOrigin = Vector3(player.position.x, player.position.y, player.position.z).magnitude;
-> \`\`\`
+### Respawn
 
-### Player Methods
+Set \`player.respawn = true\` to teleport the player to their \`spawnPoint\` and restore full health:
 
 \`\`\`js
-player.takeDamage(25)        // reduce health; death at 0
-player.heal(20)              // restore health (capped at maxHealth)
-player.kill()                // instant death → respawn
-player.respawn()             // teleport to spawnPoint, restore health
-player.teleport(x, y, z)    // instant move (bypasses controller for one frame)
+// Change spawn location first (optional)
+player.spawnPoint = { x: 50, y: 5, z: 0 };
+// Trigger the respawn
+player.respawn = true;
 \`\`\`
 
 ### Health system
+
+Set \`player.health\` directly:
+
+\`\`\`js
+player.health -= 25;          // deal 25 damage
+player.health += 20;          // restore 20 HP (won't exceed maxHealth automatically — clamp yourself if needed)
+player.health = 0;            // instant death
+player.health = player.maxHealth;  // full heal
+\`\`\`
 
 When health reaches 0 the engine automatically:
 1. Fires \`Rebur.on("playerDied", fn)\`
@@ -817,7 +809,7 @@ When health reaches 0 the engine automatically:
 \`\`\`js
 const trap = Rebur.Scene.find("Trap");
 trap.on("touched", (other) => {
-  if (other.isPlayer) other.takeDamage(50);
+  if (other.isPlayer) other.health -= 50;
 });
 
 Rebur.on("playerDied", (player) => {
@@ -1170,7 +1162,7 @@ Rebur.Gui.button("restart", "Restart", {
   color: "#ffffff",
   bg: "#3b82f6",
 }, () => {
-  for (const p of Rebur.Players.all()) p.respawn();
+  for (const p of Rebur.Players.all()) p.respawn = true;
 });
 \`\`\`
 
@@ -1353,14 +1345,14 @@ unsub(); // unsubscribe
 
 ## Rebur.Network
 
-The Network API is symmetrical across server and client — both sides use the same three methods. All current scripts run server-side, so the client-side `send` and `on` apply when LocalScript contexts arrive.
+The Network API is symmetrical across server and client — both sides use the same three methods. Server Scripts and LocalScripts share the same \`Rebur.Network\` interface.
 
-| | Server | Client (future LocalScript) |
+| | Server | Client (LocalScript) |
 |---|---|---|
-| Send to all | `Rebur.Network.send(event, payload)` | — |
-| Send to one | `Rebur.Network.sendTo(player, event, payload)` | — |
-| Send to server | — | `Rebur.Network.send(event, payload)` |
-| Receive | `Rebur.Network.on(event, fn)` | `Rebur.Network.on(event, fn)` |
+| Send to all | \`Rebur.Network.send(event, payload)\` | — |
+| Send to one | \`Rebur.Network.sendTo(player, event, payload)\` | — |
+| Send to server | — | \`Rebur.Network.send(event, payload)\` |
+| Receive | \`Rebur.Network.on(event, fn)\` | \`Rebur.Network.on(event, fn)\` |
 
 ### Server → Clients
 
@@ -1580,7 +1572,7 @@ lava.color = "#ff4400";
 
 lava.on("touched", (other) => {
   if (other.isPlayer) {
-    other.takeDamage(25);
+    other.health -= 25;
     log(other.username, "hit lava! HP:", other.health);
   }
 });
@@ -1748,4 +1740,91 @@ Available exactly as in a browser:
 \`parseInt\`, \`parseFloat\`, \`isNaN\`, \`isFinite\`, \`Symbol\`, \`Promise\`
 
 **Blocked** for security: \`process\`, \`require\`, \`fetch\`, \`__filename\`, \`__dirname\`
+
+---
+
+## Gravity Sources
+
+Any entity can act as a gravity source — pulling players and physics bodies toward its center like a planet. Configure via the property panel or in scripts.
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| \`gravityEnabled\` | boolean | Turn this entity into a gravity source |
+| \`gravityStrength\` | number | Pull force in units/s² (default 9.81) |
+| \`gravityRadius\` | number | Sphere of influence in units (default 30) |
+
+### Scripting
+
+\`\`\`js
+const planet = Rebur.Scene.find("Planet");
+
+// Enable at runtime
+planet.gravityEnabled = true;
+planet.gravityStrength = 20;
+planet.gravityRadius = 50;
+
+// Temporarily disable
+planet.gravityEnabled = false;
+\`\`\`
+
+Gravity sources compose — a player standing between two planets is pulled toward both based on each source's strength and distance. The player is only affected if they are within \`gravityRadius\` units of the source.
+
+\`\`\`js
+// Shrinking black hole — radius grows over time
+let radius = 10;
+Rebur.on("tick", (dt) => {
+  radius = Math.min(radius + dt * 2, 80);
+  const hole = Rebur.Scene.find("BlackHole");
+  if (hole) {
+    hole.gravityRadius = radius;
+    hole.gravityStrength = 30;
+  }
+});
+\`\`\`
+
+---
+
+## LocalScript (Client-Side)
+
+Scripts placed in the **StarterPlayer** container with type **LocalScript** run in the player's browser, not on the server.
+
+LocalScripts have access to a smaller API focused on client ↔ server messaging:
+
+| API | Description |
+|-----|-------------|
+| \`Rebur.Network.send(event, payload)\` | Send a message to the server |
+| \`Rebur.Network.on(event, fn)\` | Receive messages from the server |
+| \`Rebur.Network.off(event, fn)\` | Remove a listener |
+| \`Rebur.on("tick", fn)\` | Per-frame callback (browser RAF) |
+
+\`\`\`js
+// LocalScript — runs in the player's browser
+
+// Send a message to the server when the script starts
+Rebur.Network.send("clientReady", { time: Date.now() });
+
+// Listen for server messages
+Rebur.Network.on("showAlert", (payload) => {
+  log("Server says:", payload.message);
+});
+
+// Per-frame tick
+Rebur.on("tick", (dt) => {
+  // dt = seconds since last frame
+});
+\`\`\`
+
+Server-side Script to pair:
+
+\`\`\`js
+// Script (server-side) — receives from LocalScript
+Rebur.Network.on("clientReady", (player, data) => {
+  log(player.username, "is ready at", data.time);
+  Rebur.Network.sendTo(player, "showAlert", { message: "Welcome!" });
+});
+\`\`\`
+
+> LocalScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send\`.
 `;

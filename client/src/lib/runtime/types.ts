@@ -141,7 +141,8 @@ export type PlayerInventory = {
 export type PlayerEventName = "changed" | string;
 
 export type RuntimePlayer = {
-  username: string;
+  readonly id: string;
+  readonly username: string;
   color: string;
   position: Vec3;
   rotation: Vec3;
@@ -155,6 +156,8 @@ export type RuntimePlayer = {
   jumpPower: number;
   size: number;
   spawnPoint: Vec3;
+  /** Set to true to trigger an immediate respawn to spawnPoint. */
+  respawn: boolean;
   up: Vec3;
   collisionRadius: number;
   collisionHalfHeight: number;
@@ -168,12 +171,6 @@ export type RuntimePlayer = {
   autoFaceMovement: boolean;
   ragdoll: boolean;
   killY: number;
-  takeDamage: (n: number) => void;
-  heal: (n: number) => void;
-  kill: () => void;
-  teleport: (x: number, y: number, z: number) => void;
-  respawn: () => void;
-  // Event methods - same pattern as RuntimeObject
   on: (event: PlayerEventName, fn: (...args: any[]) => void) => () => void;
   off: (event: PlayerEventName, fn: (...args: any[]) => void) => void;
   emit: (event: string, ...args: any[]) => boolean;

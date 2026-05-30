@@ -1792,6 +1792,16 @@ export default function EditorPage() {
                 : selectedScript.container}
             </div>
           </div>
+          <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1.5">
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${selectedScript.scriptType === "LocalScript" ? "bg-blue-400" : "bg-green-400"}`} />
+            <span className="text-[11px] text-muted-foreground">
+              {selectedScript.scriptType === "LocalScript"
+                ? "Runs client-side in the player's browser"
+                : selectedScript.scriptType === "ModuleScript"
+                ? "Shared module — required by other scripts"
+                : "Runs server-side in the secure sandbox"}
+            </span>
+          </div>
           <Separator />
           <Button
             variant="destructive"

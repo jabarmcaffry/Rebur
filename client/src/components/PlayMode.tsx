@@ -17,6 +17,7 @@ import Primitive from "@/components/play/Primitive";
 import Avatar from "@/components/play/Avatar";
 import ChaseCameraRig from "@/components/play/ChaseCameraRig";
 import { RenderClient } from "@/lib/render-client";
+import { ClientScriptRunner } from "@/lib/runtime/client-script-runner";
 import type { RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
 
 interface ChatMessage {
@@ -168,10 +169,20 @@ export default function PlayMode({
 
     renderClient.connect();
 
+    const localScripts = scripts.filter(
+      (s) => s.scriptType === "LocalScript" && s.container === "StarterPlayer" && s.enabled !== false
+    );
+    let clientRunner: ClientScriptRunner | null = null;
+    if (localScripts.length > 0) {
+      clientRunner = new ClientScriptRunner(renderClient);
+      clientRunner.runScripts(localScripts);
+    }
+
     return () => {
+      clientRunner?.destroy();
       renderClient.disconnect();
     };
-  }, [renderClient]);
+  }, [renderClient, scripts]);
 
   // Game loop - send inputs and update state
   useEffect(() => {

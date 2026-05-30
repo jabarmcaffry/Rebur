@@ -580,11 +580,10 @@ export class ScriptRunner {
         get destroyed()  { return false; },
         get type()       { return "player"; },
 
-        // position and rotation are READ-ONLY for players
         get position()   { return { x: p.position.x, y: p.position.y, z: p.position.z }; },
-        set position(_v) { warn("player.position is read-only — use player.teleport(x,y,z)"); },
+        set position(v: any) { mut().teleport = { x: +(v?.x??0), y: +(v?.y??0), z: +(v?.z??0) }; },
         get rotation()   { return { x: 0, y: 0, z: 0 }; },
-        set rotation(_v) { warn("player.rotation is read-only"); },
+        set rotation(_v) {},
 
         get health()        { return p.health; },
         set health(v: any)  { const n=Math.max(0,+v); p.health=n; mut().health=n; },
@@ -604,18 +603,15 @@ export class ScriptRunner {
           mut().spawnPoint = { x: p.spawnX, y: p.spawnY, z: p.spawnZ };
         },
 
+        get respawn()    { return false; },
+        set respawn(v: any) { if (v) mut().respawn = true; },
+
         get gui()       { return gui; },
         get data()      { return data; },
         get animator()  { return animator; },
         get inventory() { return inventory; },
         get motors()    { return motors; },
         get body()      { return playerBody; },
-
-        takeDamage(n: number) { const h=Math.max(0,p.health-n); p.health=h; mut().health=h; },
-        heal(n: number)       { const h=Math.min(p.maxHealth,p.health+n); p.health=h; mut().health=h; },
-        kill()                { p.health=0; mut().health=0; },
-        respawn()             { mut().respawn=true; },
-        teleport(x: number, y: number, z: number) { mut().teleport={x,y,z}; },
 
         on(event: string, fn: EventHandler) {
           const key = `player::${p.id}::${event.toLowerCase()}`;
@@ -1231,7 +1227,9 @@ export class ScriptRunner {
       get destroyed() { return false; },
       get type()      { return "player"; },
       get position()  { return { x: p.position.x, y: p.position.y, z: p.position.z }; },
+      set position(v: any) { mut().teleport = { x: +(v?.x??0), y: +(v?.y??0), z: +(v?.z??0) }; },
       get rotation()  { return { x: 0, y: 0, z: 0 }; },
+      set rotation(_v: any) {},
       get health()           { return p.health; },
       set health(v: any)     { const n=Math.max(0,+v); p.health=n; mut().health=n; },
       get maxHealth()        { return p.maxHealth; },
@@ -1249,11 +1247,8 @@ export class ScriptRunner {
         p.spawnX=+(v?.x??0); p.spawnY=+(v?.y??0); p.spawnZ=+(v?.z??0);
         mut().spawnPoint = { x: p.spawnX, y: p.spawnY, z: p.spawnZ };
       },
-      takeDamage(n: number) { const h=Math.max(0,p.health-n); p.health=h; mut().health=h; },
-      heal(n: number)       { const h=Math.min(p.maxHealth,p.health+n); p.health=h; mut().health=h; },
-      kill()                { p.health=0; mut().health=0; },
-      respawn()             { mut().respawn=true; },
-      teleport(x: number, y: number, z: number) { mut().teleport={x,y,z}; },
+      get respawn()    { return false; },
+      set respawn(v: any) { if (v) mut().respawn = true; },
       on(event: string, fn: EventHandler) {
         const key = `player::${p.id}::${event.toLowerCase()}`;
         const arr = self.objHandlers.get(key) ?? [];
