@@ -1,27 +1,20 @@
 ---
 name: Rebur.Input unified API
-description: The Input API uses .on()/.off()/isDown() only — matching every other Rebur API. Old onPress/onRelease/onMouseClick are removed.
+description: Global input event API shape — what exists, what was removed, and why.
 ---
 
 ## Rule
-`Rebur.Input` exposes exactly three methods:
-- `.on(event, fn)` → returns unsubscribe
-- `.off(event, fn)`
-- `.isDown(key)` → boolean
+`Rebur.Input` exposes only `.on(event, fn)` and `.off(event, fn)`. There is NO `isDown()` or `isDownAny()` — those were removed. Callbacks always receive `(player, key|entity)`.
 
 Events: `"press"`, `"release"`, `"mouseClick"`.
 
-## Callback signatures
-- `"press"` / `"release"` → `fn(player, key: string)`
-- `"mouseClick"` → `fn(player, entity | null)`
+**Why:** isDown/isDownAny had no per-player scope, causing multiplayer logic bugs (any player's held key would affect all players).
 
-Callbacks always receive the **player** who triggered the event — no need to cross-reference Players.all().
-
-**Why:** Old API (`onPress`, `onRelease`, `onMouseClick`) was inconsistent with every other Rebur API that uses `.on()`. The new API is uniform and gives you the acting player directly, which was the main pain point.
+## Per-player held state
+Use `player.input.key(keyName)` for per-player polling. Use `player.input.on("press"|"release", fn)` for per-player edge events. See player-input-api.md.
 
 ## How to apply
-- Key down/up WS messages flow: browser keydown → `renderClient.sendKeyDown(key)` → server `keyDown` WS handler → `game-room.handleKeyDown()` → updates `playerHeldKeys` Map → `_rebuildHeldKeys()` updates `heldKeys` Set in script-runner → `fireInputPress()` calls all `"press"` handlers.
-- `isDown(key)` reads from the `heldKeys` Set which is rebuilt every time any player's held-key state changes.
-- `collisionStarted/collisionEnded` events: tracked in `collisionPairs` Set in game-room, emitted with `(other, impulse)`.
-- `player.body.applyImpulse({x,y,z})` adds to `ScriptPlayerMutation.impulseX/Y/Z`; game-room applies it to player velocity each step.
-- `ChaseCameraRig` accepts `serverCamera?: RenderState["camera"]` and applies mode/fov/position from server scripts.
+- Global any-player reactions: `Rebur.Input.on("press", (player, key) => {})` — fn receives the triggering player.
+- Per-player polling in tick: `player.input.key("shift")` inside a `Rebur.on("tick")` loop.
+- mouseClick events: `Rebur.Input.on("mouseClick", (player, entity) => {})` — entity is null for sky clicks.
+- Key down/up WS messages: browser keydown → server `keyDown` WS handler → `game-room.handleKeyDown()` → updates `playerHeldKeys` Map → `_rebuildHeldKeys()` updates per-player held keys in script-runner.

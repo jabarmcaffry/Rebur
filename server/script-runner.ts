@@ -210,7 +210,9 @@ export class ScriptRunner {
   // Input — unified event map keyed by "press" | "release" | "mouseclick"
   private inputHandlers = new Map<string, EventHandler[]>();
   // Keys currently held by any player in this room
-  private heldKeys = new Set<string>();
+  private heldKeys                = new Set<string>();
+  private perPlayerHeldKeys       = new Map<string, Set<string>>();
+  private perPlayerInputHandlers  = new Map<string, Map<string, EventHandler[]>>();
 
   // Camera is a plain writable store — no preset modes
   private cameraSettings: Record<string, any> = {};
@@ -361,7 +363,6 @@ export class ScriptRunner {
         get restitution()   { return obj.restitution ?? 0; },
         set restitution(v)  { obj.restitution = Math.max(0, Math.min(1, +v)); },
         get velocity()      { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
-        get angularVelocity() { return { x: 0, y: 0, z: 0 }; },
         applyForce(f: any) {
           obj.forceX = (obj.forceX ?? 0) + (+(f?.x ?? 0));
           obj.forceY = (obj.forceY ?? 0) + (+(f?.y ?? 0));
@@ -372,9 +373,6 @@ export class ScriptRunner {
           obj.impulseY = (obj.impulseY ?? 0) + (+(f?.y ?? 0));
           obj.impulseZ = (obj.impulseZ ?? 0) + (+(f?.z ?? 0));
         },
-        applyTorque(_t: any) { /* stub */ },
-        setVelocity(v: any)  { obj.velX = +(v?.x??0); obj.velY = +(v?.y??0); obj.velZ = +(v?.z??0); },
-        setAngularVelocity(_v: any) { /* stub */ },
       };
 
       const ep: any = {
@@ -569,16 +567,22 @@ export class ScriptRunner {
         get(_slot: string): any { return null; },
       };
 
-      // Player body — applyImpulse adds to mutation so GameRoom applies it
-      const playerBody = {
-        applyImpulse(f: any) {
-          const m = mut();
-          m.impulseX = (m.impulseX ?? 0) + +(f?.x ?? 0);
-          m.impulseY = (m.impulseY ?? 0) + +(f?.y ?? 0);
-          m.impulseZ = (m.impulseZ ?? 0) + +(f?.z ?? 0);
+      const input = {
+        key: (k: string) => runner.perPlayerHeldKeys.get(p.id)?.has(k.toLowerCase()) ?? false,
+        on: (event: string, fn: EventHandler) => {
+          const k = event.toLowerCase();
+          if (!runner.perPlayerInputHandlers.has(p.id)) runner.perPlayerInputHandlers.set(p.id, new Map());
+          const evtMap = runner.perPlayerInputHandlers.get(p.id)!;
+          const arr = evtMap.get(k) ?? [];
+          arr.push(fn);
+          evtMap.set(k, arr);
+          return () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
         },
-        applyForce(_f: any)  {},
-        setVelocity(_v: any) {},
+        off: (event: string, fn: EventHandler) => {
+          const k = event.toLowerCase();
+          const evtMap = runner.perPlayerInputHandlers.get(p.id);
+          if (evtMap) evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+        },
       };
 
       return {
@@ -620,7 +624,7 @@ export class ScriptRunner {
         get animator()  { return animator; },
         get inventory() { return inventory; },
         get motors()    { return motors; },
-        get body()      { return playerBody; },
+        get input()     { return input; },
 
         on(event: string, fn: EventHandler) {
           const key = `player::${p.id}::${event.toLowerCase()}`;
@@ -646,32 +650,41 @@ export class ScriptRunner {
     };
 
     // ── Rebur.Gui (shared HUD) ─────────────────────────────────────────────
+    const guiBoundIds = new Set<string>();
     const reburGui = {
       text(id: string, text: string, opts?: any) {
+        if (guiBoundIds.has(id)) { const m = `Gui.text("${id}") called on a State-bound element — update Rebur.State instead of calling Gui directly`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"text", text, ...mapGuiOpts(opts), visible:true });
       },
       button(id: string, text: string, opts?: any, onClick?: EventHandler) {
+        if (guiBoundIds.has(id)) { const m = `Gui.button("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"button", text, width:160, height:36, ...mapGuiOpts(opts), visible:true, clickable:true });
         if (onClick) runner.guiClickHandlers.set(id, onClick);
       },
       bar(id: string, value: number, maxValue: number, opts?: any) {
+        if (guiBoundIds.has(id)) { const m = `Gui.bar("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"bar", value, maxValue, width:200, height:14, ...mapGuiOpts(opts), visible:true });
       },
       image(id: string, url: string, opts?: any) {
+        if (guiBoundIds.has(id)) { const m = `Gui.image("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"image", imageUrl:url, width:64, height:64, ...mapGuiOpts(opts), visible:true });
       },
       clear(id?: string) {
-        if (id !== undefined) { runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); }
-        else { runner.guiElements.clear(); runner.guiClickHandlers.clear(); }
+        if (id !== undefined) { guiBoundIds.delete(id); runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); }
+        else { guiBoundIds.clear(); runner.guiElements.clear(); runner.guiClickHandlers.clear(); }
       },
       bind(id: string, stateKey: string, renderFn: (val: any) => void) {
+        guiBoundIds.add(id);
         const run = (val: any) => { try { renderFn(val); } catch { /* isolate */ } };
         const arr = runner.stateHandlers.get(stateKey) ?? [];
         arr.push(run);
         runner.stateHandlers.set(stateKey, arr);
         const current = runner.gameState.get(stateKey);
         if (current !== undefined) run(current);
-        return () => runner.stateHandlers.set(stateKey, (runner.stateHandlers.get(stateKey) ?? []).filter(h => h !== run));
+        return () => {
+          guiBoundIds.delete(id);
+          runner.stateHandlers.set(stateKey, (runner.stateHandlers.get(stateKey) ?? []).filter(h => h !== run));
+        };
       },
     };
 
@@ -975,8 +988,6 @@ export class ScriptRunner {
         const k = event.toLowerCase();
         runner.inputHandlers.set(k, (runner.inputHandlers.get(k)??[]).filter(h=>h!==fn));
       },
-      isDown(key: string)    { return runner.heldKeys.has(key.toLowerCase()); },
-      isDownAny(key: string) { return runner.heldKeys.has(key.toLowerCase()); },
     };
 
     // ── Rebur.Physics ──────────────────────────────────────────────────────
@@ -1145,12 +1156,18 @@ export class ScriptRunner {
     for (const h of this.inputHandlers.get("press") ?? []) {
       try { h(pp, key); } catch { /* isolate */ }
     }
+    for (const h of this.perPlayerInputHandlers.get(player.id)?.get("press") ?? []) {
+      try { h(key); } catch { /* isolate */ }
+    }
   }
   fireInputRelease(key: string, player: ScriptPlayerState) {
     this.heldKeys.delete(key.toLowerCase());
     const pp = this._makePlayerProxy(player);
     for (const h of this.inputHandlers.get("release") ?? []) {
       try { h(pp, key); } catch { /* isolate */ }
+    }
+    for (const h of this.perPlayerInputHandlers.get(player.id)?.get("release") ?? []) {
+      try { h(key); } catch { /* isolate */ }
     }
   }
   fireCollisionStarted(objName: string, other: any, impulse: { x: number; y: number; z: number }) {
@@ -1168,6 +1185,16 @@ export class ScriptRunner {
   /** Update the set of keys currently held by any player — called by GameRoom each tick. */
   updateHeldKeys(keys: Set<string>) {
     this.heldKeys = keys;
+  }
+  /** Update per-player held keys — called by GameRoom after each keyDown/keyUp. */
+  updatePlayerHeldKeys(playerId: string, keys: Set<string>) {
+    if (keys.size === 0) this.perPlayerHeldKeys.delete(playerId);
+    else this.perPlayerHeldKeys.set(playerId, new Set(keys));
+  }
+  /** Remove all input state for a disconnected player. */
+  clearPlayerHeldKeys(playerId: string) {
+    this.perPlayerHeldKeys.delete(playerId);
+    this.perPlayerInputHandlers.delete(playerId);
   }
 
   // ── Logs & GUI ──────────────────────────────────────────────────────────────
@@ -1309,6 +1336,23 @@ export class ScriptRunner {
       animator: { current:null, playing:false, play(){}, stop(){}, on(){ return ()=>{}; } },
       inventory: { items:[], maxSlots:36, equipped:null, add(){return null;}, remove(){return 0;}, has(){return false;}, get(){return null;}, equip(){return false;}, drop(){return null;}, clear(){} },
       motors: { attach(){}, detach(){ return null; }, get(){ return null; } },
+      input: {
+        key: (k: string) => self.perPlayerHeldKeys.get(p.id)?.has(k.toLowerCase()) ?? false,
+        on: (event: string, fn: EventHandler) => {
+          const k = event.toLowerCase();
+          if (!self.perPlayerInputHandlers.has(p.id)) self.perPlayerInputHandlers.set(p.id, new Map());
+          const evtMap = self.perPlayerInputHandlers.get(p.id)!;
+          const arr = evtMap.get(k) ?? [];
+          arr.push(fn);
+          evtMap.set(k, arr);
+          return () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+        },
+        off: (event: string, fn: EventHandler) => {
+          const k = event.toLowerCase();
+          const evtMap = self.perPlayerInputHandlers.get(p.id);
+          if (evtMap) evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+        },
+      },
     };
   }
 

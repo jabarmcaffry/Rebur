@@ -89,7 +89,8 @@ player                  ← a PlayerEntity (also an Entity)
 ├── player.data         ← per-player persistent data store
 ├── player.animator     ← skeletal animation controller
 ├── player.inventory    ← item inventory
-└── player.motors       ← body-slot attachments
+├── player.motors       ← body-slot attachments
+└── player.input        ← per-player key held state + edge events
 \`\`\`
 
 **Key rules:**
@@ -362,7 +363,6 @@ Physics lives on \`entity.body\`. Direct velocity assignment is gone — use for
 | \`body.isKinematic\` | boolean | Script-moved; not affected by forces |
 | \`body.isTrigger\` | boolean | Detects overlaps but no collision response |
 | \`body.velocity\` | \`{x,y,z}\` | Current velocity (read-only) |
-| \`body.angularVelocity\` | \`{x,y,z}\` | Current angular velocity (read-only) |
 
 \`\`\`js
 const ball = Rebur.Scene.find("Ball");
@@ -375,7 +375,7 @@ ball.body.isKinematic  = false;
 ball.body.isTrigger    = false;  // solid collision
 \`\`\`
 
-### body methods — force-based physics (recommended)
+### body methods
 
 \`\`\`js
 // Continuous force (applied each frame, good for constant pushes)
@@ -383,26 +383,6 @@ ball.body.applyForce({ x: 0, y: 50, z: 0 });
 
 // Instant impulse (one-shot velocity change, good for launches)
 ball.body.applyImpulse({ x: 0, y: 10, z: 0 });
-
-// Torque (spin force)
-ball.body.applyTorque({ x: 0, y: 5, z: 0 });
-\`\`\`
-
-### body methods — direct override (⚠ unsafe)
-
-\`\`\`js
-// ⚠ UNSAFE OVERRIDE — bypasses the physics simulation.
-// Mixing these with applyForce/applyImpulse in the same frame causes
-// undefined behaviour: forces applied this tick are silently discarded.
-// Only use these when you own the motion entirely (kinematic entities,
-// scripted cutscenes) and do NOT also call force/impulse APIs on the same body.
-ball.body.setVelocity({ x: 5, y: 0, z: -5 });
-ball.body.setAngularVelocity({ x: 0, y: Math.PI, z: 0 });
-
-// ⚠ Safe use: stopping a kinematic body (no forces are in play)
-ball.body.isKinematic = true;
-ball.body.setVelocity({ x: 0, y: 0, z: 0 });
-ball.body.setAngularVelocity({ x: 0, y: 0, z: 0 });
 \`\`\`
 
 \`\`\`js
@@ -674,7 +654,7 @@ The behaviour depends on the environment:
 
 | Environment | On destroyed entity access | Why |
 |-------------|---------------------------|-----|
-| **Development** (`NODE_ENV !== "production"`) | **Throws an error** | Catches bugs immediately — no silent failures |
+| **Development** (\`NODE_ENV !== "production"\`) | **Throws an error** | Catches bugs immediately — no silent failures |
 | **Production** | Warn + no-op | Prevents crashes from race conditions in live games |
 
 **Development error example:**
@@ -814,6 +794,7 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`data\` | PlayerDataAPI | ✓ | — | Persistent per-player storage |
 | \`animator\` | AnimatorAPI | ✓ | — | Animation controller |
 | \`motors\` | MotorAPI | ✓ | — | Body-slot attachment |
+| \`input\` | PlayerInputAPI | ✓ | — | Per-player held keys + edge events |
 | \`color\` | string | ✓ | ✓ | Shirt color |
 
 ### Player Transform
@@ -900,6 +881,55 @@ const held = player.motors.detach("rightHand"); // returns entity
 player.motors.get("rightHand");                 // entity | null
 // Slots: "rightHand" | "leftHand" | "head" | "back" | "chest"
 \`\`\`
+
+---
+
+## Player Input
+
+**\`player.input\`** — query held keys and listen for edge events for this specific player. This is the correct API for per-player gameplay logic.
+
+### player.input.key(keyName) → boolean
+
+Returns \`true\` if this player is currently holding the given key. Use inside a \`Rebur.on("tick")\` loop for continuous effects.
+
+\`\`\`js
+Rebur.on("tick", (dt) => {
+  for (const player of Rebur.Players.all()) {
+    if (player.input.key("shift")) {
+      // Only runs for players actually holding Shift
+      player.health -= 0.5 * dt;
+    }
+  }
+});
+\`\`\`
+
+### player.input.on(event, fn) → unsubscribe
+
+Listen for a key edge event from this specific player. \`fn\` receives the key name as its only argument — the player is already bound by closure.
+
+\`\`\`js
+Rebur.on("playerJoined", (player) => {
+  player.input.on("press", (key) => {
+    if (key === "e") {
+      log(player.username, "pressed E");
+    }
+  });
+
+  player.input.on("release", (key) => {
+    if (key === "shift") {
+      log(player.username, "stopped sprinting");
+    }
+  });
+});
+\`\`\`
+
+### player.input vs Rebur.Input
+
+| Use case | API |
+|----------|-----|
+| Held-key poll, single player | \`player.input.key("shift")\` — exactly this player |
+| Edge event, single player | \`player.input.on("press", fn)\` — fn(key) |
+| Edge event, any player | \`Rebur.Input.on("press", (player, key) => {})\` — fn(player, key) |
 
 ---
 
@@ -1155,7 +1185,7 @@ coin.on("touched", (other) => {
 });
 \`\`\`
 
-**Why this matters:** if you call \`Rebur.Gui.text("scoreLabel", ...)\` directly in game logic AND have a \`State.on("score")\` binding, you get two updates per event — one from the handler, one from your manual call. This causes drift, double-renders, and race conditions in complex games.
+**Why this matters:** if you call \`Rebur.Gui.text("scoreLabel", ...)\` directly in game logic AND have a \`Gui.bind("scoreLabel", ...)\` binding, you get two updates per event. In dev mode the engine throws immediately to catch this; in production it warns and no-ops the direct call. The binding is the only way to keep the element updated.
 
 **Exception — one-shot messages:** Use \`Rebur.Gui.text()\` directly for transient, stateless messages that don't need to survive a state change (countdown announcements, kill feed, etc.):
 
@@ -1376,71 +1406,42 @@ Rebur.Camera.fov      = 70; // degrees (optional)
 
 ## Rebur.Input
 
-Unified event API for keyboard and mouse input. All callbacks receive the **player** who triggered the event so you know exactly who acted.
+Global input event API. Callbacks receive the **player** who triggered the event. Use this when you want to react to input from **any** player without filtering by who.
+
+For per-player held-key polling and per-player edge events, use **\`player.input\`** instead.
 
 \`\`\`js
-// Key press — fn(player, key)
+// Any player pressed a key — fn(player, key)
 const unsub = Rebur.Input.on("press", (player, key) => {
-  if (key === "e") log(player.username, "pressed E");
+  if (key === "e") log(player.username, "interacted");
 });
 
-// Key release — fn(player, key)
+// Any player released a key — fn(player, key)
 Rebur.Input.on("release", (player, key) => {
-  if (key === "e") log(player.username, "released E");
+  if (key === "e") log(player.username, "stopped interacting");
 });
 
-// 3D viewport click — fn(player, entity | null)
+// Any player clicked in the 3D viewport — fn(player, entity | null)
 Rebur.Input.on("mouseClick", (player, entity) => {
   if (entity) log(player.username, "clicked", entity.name);
   else log(player.username, "clicked sky");
 });
 
-// Remove a listener — use the returned unsubscribe function (preferred)
+// Unsubscribe
 unsub();
-// or explicitly:
 Rebur.Input.off("press", handler);
-
-// Poll whether any player is holding a key — use inside a tick loop.
-// Prefer isDownAny() — the name makes the "any player" scope explicit.
-Rebur.on("tick", (dt) => {
-  if (Rebur.Input.isDownAny("shift")) {
-    // true if AT LEAST ONE connected player is holding shift.
-    // Only safe when the answer is the same regardless of which player
-    // holds the key (e.g. pausing a shared timer, toggling a debug view).
-  }
-});
-
-// isDown() is an alias for isDownAny() — same behaviour, less obvious name.
-// Rebur.Input.isDown("shift") — avoid in new code; prefer isDownAny().
-\`\`\`
-
-**Never use \`isDownAny\` for per-player gameplay logic** (damage, abilities, purchases). If you write \`if (isDownAny("e")) player.health -= 10\` in a multiplayer game, ANY player holding E will damage every player — because \`isDownAny\` has no concept of "which player".
-
-\`\`\`js
-// ✓ CORRECT — per-player damage, via event callback
-Rebur.Input.on("press", (player, key) => {
-  if (key === "e") player.health -= 10;  // only the player who pressed E
-});
-
-// ✗ WRONG — all players get damaged when anyone holds E
-Rebur.on("tick", () => {
-  if (Rebur.Input.isDownAny("e")) {
-    for (const p of Rebur.Players.all()) p.health -= 1;
-  }
-});
 \`\`\`
 
 Key names: letters (\`"a"\`–\`"z"\`), \`"space"\`, \`"shift"\`, \`"control"\`, \`"alt"\`, \`"enter"\`, \`"escape"\`, \`"arrowup"\`, \`"arrowdown"\`, \`"arrowleft"\`, \`"arrowright"\`.
 
-### Per-player vs. global input — which to use
+### Rebur.Input vs player.input
 
-| Use case | API |
-|----------|-----|
-| React to a specific player pressing a key | \`Rebur.Input.on("press", (player, key) => {})\` — callback gives you the exact player |
-| React to a specific player clicking in 3D | \`Rebur.Input.on("mouseClick", (player, entity) => {})\` |
-| Detect any-player input in a tick loop | \`Rebur.Input.isDownAny(key)\` — **global**: true if at least one player holds the key |
-
-In a multiplayer game **always use event callbacks for gameplay-affecting logic** (damage, abilities, purchases). \`isDownAny\` is only safe when the answer is the same regardless of which player holds the key (e.g. pausing a shared timer).
+| Need | API |
+|------|-----|
+| React to any player pressing E | \`Rebur.Input.on("press", (player, key) => {})\` |
+| React to one specific player pressing E | \`player.input.on("press", (key) => {})\` inside \`playerJoined\` |
+| Check if a specific player holds Shift right now | \`player.input.key("shift")\` |
+| 3D viewport click (any player) | \`Rebur.Input.on("mouseClick", (player, entity) => {})\` |
 
 ---
 

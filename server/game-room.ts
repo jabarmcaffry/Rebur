@@ -243,6 +243,7 @@ export class GameRoom {
       this.scriptRunner?.firePlayerRemoving(this._makeScriptPlayer(p));
       (this.scriptRunner as any)?.players?.delete(id);
       this.scriptRunner?.clearPlayerGui(id);
+      this.scriptRunner?.clearPlayerHeldKeys(id);
     }
     this.players.delete(id);
     this.playerHeldKeys.delete(id);
@@ -322,8 +323,9 @@ export class GameRoom {
   /** Rebuild the union of all players' held keys and push to scriptRunner. */
   private _rebuildHeldKeys() {
     const union = new Set<string>();
-    for (const keys of this.playerHeldKeys.values()) {
+    for (const [pid, keys] of this.playerHeldKeys) {
       for (const k of keys) union.add(k);
+      this.scriptRunner?.updatePlayerHeldKeys(pid, keys);
     }
     this.scriptRunner?.updateHeldKeys(union);
   }

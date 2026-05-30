@@ -1,2 +1,4 @@
 - [Rebur API implementation](rebur-api.md) — Rebur.* is the ONLY global; no backward compat; real AABB raycast; camera is plain proxy; no onGround.
-- [Rebur.Input unified API](rebur-input-api.md) — Input uses .on()/.off()/isDown() only; callbacks always receive (player, key|entity); keyDown/keyUp forwarded via WS; no old onPress/onRelease/onMouseClick.
+- [Rebur.Input unified API](rebur-input-api.md) — Input uses .on()/.off() only; callbacks always receive (player, key|entity); no isDown/isDownAny; per-player held state is player.input.key().
+- [player.input API](player-input-api.md) — per-player key polling + edge events; both makePlayerProxy and _makePlayerProxy must stay in sync; backed by perPlayerHeldKeys map in game-room.ts.
+- [Gui.bind enforcement](gui-bind-enforcement.md) — calling Gui.text/bar/image/button on a bound ID throws in dev, warns in prod; guiBoundIds is closure-scoped inside run() in script-runner.ts.
