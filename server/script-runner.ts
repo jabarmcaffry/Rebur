@@ -19,6 +19,7 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 export interface ScriptObjState {
   id: string;
   name: string;
+  container?: string;
   positionX: number; positionY: number; positionZ: number;
   rotationX: number; rotationY: number; rotationZ: number;
   scaleX: number;    scaleY: number;    scaleZ: number;
@@ -213,6 +214,8 @@ export class ScriptRunner {
   private heldKeys                = new Set<string>();
   private perPlayerHeldKeys       = new Map<string, Set<string>>();
   private perPlayerInputHandlers  = new Map<string, Map<string, EventHandler[]>>();
+  // Auto-cleanup: all unsubscribe fns returned by player.input.on(), keyed by player id
+  private perPlayerInputUnsubs    = new Map<string, Array<() => void>>();
 
   // Camera is a plain writable store — no preset modes
   private cameraSettings: Record<string, any> = {};
@@ -576,7 +579,10 @@ export class ScriptRunner {
           const arr = evtMap.get(k) ?? [];
           arr.push(fn);
           evtMap.set(k, arr);
-          return () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+          const unsub = () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+          if (!runner.perPlayerInputUnsubs.has(p.id)) runner.perPlayerInputUnsubs.set(p.id, []);
+          runner.perPlayerInputUnsubs.get(p.id)!.push(unsub);
+          return unsub;
         },
         off: (event: string, fn: EventHandler) => {
           const k = event.toLowerCase();
@@ -1034,6 +1040,44 @@ export class ScriptRunner {
       },
     };
 
+    // ── Rebur.Lighting — query API scoped to the Lighting container ────────
+    const reburLighting = {
+      find(name: string) {
+        const obj = runner.objects.get(name);
+        return (obj && !obj._destroyed && obj.container === "Lighting") ? makeEntityProxy(obj) : null;
+      },
+      get(id: string) {
+        for (const obj of runner.objects.values()) {
+          if (obj.id === id && !obj._destroyed && obj.container === "Lighting") return makeEntityProxy(obj);
+        }
+        return null;
+      },
+      all() {
+        return Array.from(runner.objects.values())
+          .filter(o => !o._destroyed && o.container === "Lighting")
+          .map(o => makeEntityProxy(o));
+      },
+    };
+
+    // ── Rebur.Storage — query API scoped to ReplicatedStorage container ───
+    const reburStorage = {
+      find(name: string) {
+        const obj = runner.objects.get(name);
+        return (obj && !obj._destroyed && obj.container === "ReplicatedStorage") ? makeEntityProxy(obj) : null;
+      },
+      get(id: string) {
+        for (const obj of runner.objects.values()) {
+          if (obj.id === id && !obj._destroyed && obj.container === "ReplicatedStorage") return makeEntityProxy(obj);
+        }
+        return null;
+      },
+      all() {
+        return Array.from(runner.objects.values())
+          .filter(o => !o._destroyed && o.container === "ReplicatedStorage")
+          .map(o => makeEntityProxy(o));
+      },
+    };
+
     // ── Rebur global ───────────────────────────────────────────────────────
     const Rebur = {
       on(event: string, fn: EventHandler) {
@@ -1049,6 +1093,8 @@ export class ScriptRunner {
       },
 
       Scene:      reburScene,
+      Lighting:   reburLighting,
+      Storage:    reburStorage,
       Players:    reburPlayers,
       State:      reburState,
       DataStore:  reburDataStore,
@@ -1191,8 +1237,14 @@ export class ScriptRunner {
     if (keys.size === 0) this.perPlayerHeldKeys.delete(playerId);
     else this.perPlayerHeldKeys.set(playerId, new Set(keys));
   }
-  /** Remove all input state for a disconnected player. */
+  /** Remove all input state for a disconnected player.
+   *  Auto-invokes every unsubscribe returned by player.input.on() so scripts
+   *  don't need a manual playerLeft bookkeeping step. */
   clearPlayerHeldKeys(playerId: string) {
+    for (const unsub of this.perPlayerInputUnsubs.get(playerId) ?? []) {
+      try { unsub(); } catch { /* isolate */ }
+    }
+    this.perPlayerInputUnsubs.delete(playerId);
     this.perPlayerHeldKeys.delete(playerId);
     this.perPlayerInputHandlers.delete(playerId);
   }
@@ -1345,7 +1397,10 @@ export class ScriptRunner {
           const arr = evtMap.get(k) ?? [];
           arr.push(fn);
           evtMap.set(k, arr);
-          return () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+          const unsub = () => evtMap.set(k, (evtMap.get(k) ?? []).filter(h => h !== fn));
+          if (!self.perPlayerInputUnsubs.has(p.id)) self.perPlayerInputUnsubs.set(p.id, []);
+          self.perPlayerInputUnsubs.get(p.id)!.push(unsub);
+          return unsub;
         },
         off: (event: string, fn: EventHandler) => {
           const k = event.toLowerCase();

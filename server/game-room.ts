@@ -138,12 +138,29 @@ export class GameRoom {
 
     for (const o of objects) {
       const c = o.container ?? "Workspace";
-      if (c !== "Workspace" && c !== "Scene" && c !== "") continue;
-      if (o.type === "light" || o.type === "folder") continue;
+      const isWorkspace = c === "Workspace" || c === "Scene" || c === "";
 
-      const anchored = o.properties?.anchored !== false;
+      // All objects go into scriptObjs so Rebur.Scene / Rebur.Lighting / Rebur.Storage
+      // can query them. Physics statics/dynamics are Workspace-only.
       const sx = o.scaleX ?? 1, sy = o.scaleY ?? 1, sz = o.scaleZ ?? 1;
       const px = o.positionX ?? 0, py = o.positionY ?? 0, pz = o.positionZ ?? 0;
+      const anchored = o.properties?.anchored !== false;
+
+      this.scriptObjs.set(o.name ?? o.id, {
+        id: o.id, name: o.name ?? "Part",
+        container: c,
+        positionX: px, positionY: py, positionZ: pz,
+        rotationX: o.rotationX ?? 0, rotationY: o.rotationY ?? 0, rotationZ: o.rotationZ ?? 0,
+        scaleX: sx, scaleY: sy, scaleZ: sz,
+        color: o.color ?? "#888888", visible: true, anchored,
+        velX: 0, velY: 0, velZ: 0,
+        transparency: o.properties?.transparency ?? 0,
+        canCollide: o.properties?.canCollide !== false,
+      });
+
+      // Physics simulation only for Workspace objects that aren't logical-only types
+      if (!isWorkspace) continue;
+      if (o.type === "light" || o.type === "folder") continue;
 
       const gravProp = o.properties?.gravity;
 
@@ -169,16 +186,6 @@ export class GameRoom {
         gravityRadius: gravProp?.radius ?? 20,
       };
       this.allObjs.set(o.id, dobj);
-      this.scriptObjs.set(o.name ?? o.id, {
-        id: o.id, name: o.name ?? "Part",
-        positionX: px, positionY: py, positionZ: pz,
-        rotationX: dobj.rotX, rotationY: dobj.rotY, rotationZ: dobj.rotZ,
-        scaleX: sx, scaleY: sy, scaleZ: sz,
-        color: dobj.color, visible: true, anchored,
-        velX: 0, velY: 0, velZ: 0,
-        transparency: dobj.transparency,
-        canCollide: o.properties?.canCollide !== false,
-      });
 
       const isLogicalOnly = o.type === "audio" || o.type === "folder";
       if (!isLogicalOnly && anchored) {
