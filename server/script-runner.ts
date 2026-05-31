@@ -41,6 +41,7 @@ export interface ScriptObjState {
   _destroyed?: boolean;
   _tags?: Set<string>;
   _attrs?: Map<string, any>;
+  _parentName?: string;     // entity hierarchy — name of parent entity
 }
 
 export interface ScriptPlayerState {
@@ -88,6 +89,28 @@ export interface ScriptCreatedObject {
   canCollide: boolean;
   transparency: number;
   isTrigger?: boolean;
+  container?: string;
+}
+
+// ── Sub-system types ───────────────────────────────────────────────────────────
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  count: number;
+  data: Record<string, any>;
+}
+
+interface InventoryData {
+  items: InventoryItem[];
+  equipped: string | null;
+  maxSlots: number;
+}
+
+interface AnimatorData {
+  current: string | null;
+  playing: boolean;
+  doneHandlers: Array<(name: string) => void>;
 }
 
 export interface ScriptSoundEvent {
@@ -225,6 +248,11 @@ export class ScriptRunner {
   // Camera is a plain writable store — no preset modes
   private cameraSettings: Record<string, any> = {};
   private physicsSettings = { gravity: 9.81, airDrag: 0 };
+
+  // Per-player sub-systems
+  private playerInventory = new Map<string, InventoryData>();
+  private playerMotors    = new Map<string, Map<string, ScriptObjState>>();
+  private playerAnimators = new Map<string, AnimatorData>();
 
   constructor(
     private readonly objects: Map<string, ScriptObjState>,
@@ -370,8 +398,7 @@ export class ScriptRunner {
         set friction(v)     { obj.friction = Math.max(0, +v); },
         get restitution()   { return obj.restitution ?? 0; },
         set restitution(v)  { obj.restitution = Math.max(0, Math.min(1, +v)); },
-        get velocity()            { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
-        get angularVelocity()     { return { x: 0, y: 0, z: 0 }; }, // no angular sim yet
+        get velocity()       { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
         applyForce(f: any) {
           obj.forceX = (obj.forceX ?? 0) + (+(f?.x ?? 0));
           obj.forceY = (obj.forceY ?? 0) + (+(f?.y ?? 0));
@@ -386,9 +413,6 @@ export class ScriptRunner {
           obj.velX = +(v?.x ?? 0);
           obj.velY = +(v?.y ?? 0);
           obj.velZ = +(v?.z ?? 0);
-        },
-        applyTorque(_t: any) {
-          warn("body.applyTorque() is not yet simulated — angular physics is not supported.");
         },
       };
 
@@ -443,11 +467,33 @@ export class ScriptRunner {
         set transparency(v){ if (obj._destroyed) { const m = `transparency write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.transparency = Math.max(0, Math.min(1, +v)); },
 
         get body()     { return body; },
-        get parent()   { return null; },
-        get children() { return []; },
-
-        find(_n: string) { return null; },
-        setParent(_p: any) { /* stub */ },
+        get parent() {
+          if (!obj._parentName) return null;
+          const par = runner.objects.get(obj._parentName);
+          return par && !par._destroyed ? makeEntityProxy(par) : null;
+        },
+        get children() {
+          return Array.from(runner.objects.values())
+            .filter(o => !o._destroyed && o._parentName === obj.name)
+            .map(o => makeEntityProxy(o));
+        },
+        find(childName: string): any {
+          const search = (parentName: string): any => {
+            for (const o of runner.objects.values()) {
+              if (o._destroyed || o._parentName !== parentName) continue;
+              if (o.name === childName) return makeEntityProxy(o);
+              const found = search(o.name);
+              if (found) return found;
+            }
+            return null;
+          };
+          return search(obj.name);
+        },
+        setParent(parentEntity: any) {
+          if (!parentEntity) { obj._parentName = undefined; return; }
+          const pname = typeof parentEntity === "string" ? parentEntity : parentEntity.name;
+          if (pname && runner.objects.has(pname)) obj._parentName = pname;
+        },
 
         destroy() {
           if (obj._destroyed) return;
@@ -559,30 +605,134 @@ export class ScriptRunner {
       };
 
       const animator = {
-        current: null as string | null,
-        playing: false,
-        play(_name: string, _opts?: any) {},
-        stop() {},
-        on(_ev: string, _fn: any) { return () => {}; },
+        get current() { return runner._getAnimator(p.id).current; },
+        get playing() { return runner._getAnimator(p.id).playing; },
+        play(name: string, _opts?: any) {
+          const anim = runner._getAnimator(p.id);
+          anim.current = name;
+          anim.playing = true;
+          // Fixed-duration animations — fire "done" after their natural length
+          const durations: Record<string, number> = {
+            Jump: 600, Land: 400, Wave: 2000, Dance: 4000,
+          };
+          const dur = durations[name];
+          if (dur) {
+            _setTimeout(() => {
+              const a = runner._getAnimator(p.id);
+              if (a.current === name && a.playing) {
+                a.playing = false;
+                for (const h of [...a.doneHandlers]) { try { h(name); } catch { /**/ } }
+              }
+            }, dur);
+          }
+        },
+        stop() {
+          runner._getAnimator(p.id).playing = false;
+        },
+        on(ev: string, fn: any) {
+          if (ev === "done") {
+            const anim = runner._getAnimator(p.id);
+            anim.doneHandlers.push(fn);
+            return () => {
+              const a = runner._getAnimator(p.id);
+              a.doneHandlers = a.doneHandlers.filter(h => h !== fn);
+            };
+          }
+          return () => {};
+        },
       };
 
       const inventory = {
-        items: [] as any[],
-        maxSlots: 36,
-        equipped: null as any,
-        add(_name: string, _opts?: any) { return null; },
-        remove(_name: string, _count?: number) { return 0; },
-        has(_name: string, _count?: number) { return false; },
-        get(_name: string) { return null; },
-        equip(_name: string | null) { return false; },
-        drop(_name: string, _count?: number) { return null; },
-        clear() {},
+        get items() { return [...runner._getInventory(p.id).items]; },
+        get maxSlots() { return runner._getInventory(p.id).maxSlots; },
+        get equipped() {
+          const eq = runner._getInventory(p.id).equipped;
+          if (!eq) return null;
+          return runner._getInventory(p.id).items.find(i => i.name === eq) ?? null;
+        },
+        add(name: string, opts?: any): InventoryItem | null {
+          const store = runner._getInventory(p.id);
+          if (store.items.length >= store.maxSlots) return null;
+          const count = opts?.count ?? 1;
+          const existing = store.items.find(i => i.name === name);
+          if (existing) { existing.count += count; return { ...existing }; }
+          const item: InventoryItem = { id: Math.random().toString(36).slice(2), name, count, data: opts?.data ?? {} };
+          store.items.push(item);
+          return { ...item };
+        },
+        remove(name: string, count = 1): number {
+          const store = runner._getInventory(p.id);
+          const idx = store.items.findIndex(i => i.name === name);
+          if (idx === -1) return 0;
+          const item = store.items[idx];
+          const removed = Math.min(count, item.count);
+          item.count -= removed;
+          if (item.count <= 0) { store.items.splice(idx, 1); if (store.equipped === name) store.equipped = null; }
+          return removed;
+        },
+        has(name: string, count = 1): boolean {
+          return (runner._getInventory(p.id).items.find(i => i.name === name)?.count ?? 0) >= count;
+        },
+        get(name: string): InventoryItem | null {
+          const item = runner._getInventory(p.id).items.find(i => i.name === name);
+          return item ? { ...item } : null;
+        },
+        equip(nameOrNull: string | null): boolean {
+          const store = runner._getInventory(p.id);
+          if (nameOrNull === null) { store.equipped = null; return true; }
+          if (!store.items.find(i => i.name === nameOrNull)) return false;
+          store.equipped = nameOrNull;
+          return true;
+        },
+        drop(name: string, count = 1): any {
+          const store = runner._getInventory(p.id);
+          const idx = store.items.findIndex(i => i.name === name);
+          if (idx === -1) return null;
+          const item = store.items[idx];
+          const removed = Math.min(count, item.count);
+          item.count -= removed;
+          if (item.count <= 0) { store.items.splice(idx, 1); if (store.equipped === name) store.equipped = null; }
+          // Spawn the dropped entity in Workspace near the player
+          const dropName = `Drop_${name}_${Date.now()}`;
+          const pos = p.position;
+          const placeholder: ScriptObjState = {
+            id: dropName, name: dropName, container: "Workspace",
+            type: "primitive", primitiveType: "cube",
+            positionX: pos.x, positionY: pos.y + 0.6, positionZ: pos.z,
+            rotationX: 0, rotationY: 0, rotationZ: 0,
+            scaleX: 0.4, scaleY: 0.4, scaleZ: 0.4,
+            color: "#aaaaaa", visible: true, anchored: false,
+            velX: 0, velY: 0, velZ: 0, transparency: 0, canCollide: true,
+          };
+          runner.objects.set(dropName, placeholder);
+          runner.createdObjects.push({
+            name: dropName, primitiveType: "cube",
+            positionX: pos.x, positionY: pos.y + 0.6, positionZ: pos.z,
+            rotationX: 0, rotationY: 0, rotationZ: 0,
+            scaleX: 0.4, scaleY: 0.4, scaleZ: 0.4,
+            color: "#aaaaaa", anchored: false, canCollide: true, transparency: 0, container: "Workspace",
+          });
+          return makeEntityProxy(placeholder);
+        },
+        clear() { const store = runner._getInventory(p.id); store.items = []; store.equipped = null; },
       };
 
       const motors = {
-        attach(_slot: string, _entity: any, _offset?: any) {},
-        detach(_slot: string): any { return null; },
-        get(_slot: string): any { return null; },
+        attach(slot: string, entity: any, _offset?: any) {
+          const obj = entity?._scriptObj as ScriptObjState | undefined
+            ?? (entity?.name ? runner.objects.get(entity.name) : undefined);
+          if (obj) runner._getMotors(p.id).set(slot.toLowerCase(), obj);
+        },
+        detach(slot: string): any {
+          const m = runner._getMotors(p.id);
+          const obj = m.get(slot.toLowerCase());
+          m.delete(slot.toLowerCase());
+          return obj ? makeEntityProxy(obj) : null;
+        },
+        get(slot: string): any {
+          const obj = runner._getMotors(p.id).get(slot.toLowerCase());
+          return obj ? makeEntityProxy(obj) : null;
+        },
       };
 
       const input = {
@@ -1428,9 +1578,77 @@ export class ScriptRunner {
         increment: (key: string, amount = 1) => { const d=getPlayerData(); const n=(d.get(key)??0)+amount; d.set(key,n); return n; },
         getAll:    () => Object.fromEntries(getPlayerData()),
       },
-      animator: { current:null, playing:false, play(){}, stop(){}, on(){ return ()=>{}; } },
-      inventory: { items:[], maxSlots:36, equipped:null, add(){return null;}, remove(){return 0;}, has(){return false;}, get(){return null;}, equip(){return false;}, drop(){return null;}, clear(){} },
-      motors: { attach(){}, detach(){ return null; }, get(){ return null; } },
+      animator: {
+        get current() { return self._getAnimator(p.id).current; },
+        get playing() { return self._getAnimator(p.id).playing; },
+        play(name: string, _opts?: any) {
+          const anim = self._getAnimator(p.id);
+          anim.current = name; anim.playing = true;
+        },
+        stop() { self._getAnimator(p.id).playing = false; },
+        on(ev: string, fn: any) {
+          if (ev === "done") {
+            const anim = self._getAnimator(p.id);
+            anim.doneHandlers.push(fn);
+            return () => { const a = self._getAnimator(p.id); a.doneHandlers = a.doneHandlers.filter(h => h !== fn); };
+          }
+          return () => {};
+        },
+      },
+      inventory: {
+        get items() { return [...self._getInventory(p.id).items]; },
+        get maxSlots() { return self._getInventory(p.id).maxSlots; },
+        get equipped() { const eq = self._getInventory(p.id).equipped; return eq ? (self._getInventory(p.id).items.find(i => i.name === eq) ?? null) : null; },
+        add(name: string, opts?: any): InventoryItem | null {
+          const store = self._getInventory(p.id);
+          if (store.items.length >= store.maxSlots) return null;
+          const count = opts?.count ?? 1;
+          const existing = store.items.find(i => i.name === name);
+          if (existing) { existing.count += count; return { ...existing }; }
+          const item: InventoryItem = { id: Math.random().toString(36).slice(2), name, count, data: opts?.data ?? {} };
+          store.items.push(item); return { ...item };
+        },
+        remove(name: string, count = 1): number {
+          const store = self._getInventory(p.id);
+          const idx = store.items.findIndex(i => i.name === name);
+          if (idx === -1) return 0;
+          const item = store.items[idx];
+          const removed = Math.min(count, item.count);
+          item.count -= removed;
+          if (item.count <= 0) { store.items.splice(idx, 1); if (store.equipped === name) store.equipped = null; }
+          return removed;
+        },
+        has(name: string, count = 1): boolean {
+          return (self._getInventory(p.id).items.find(i => i.name === name)?.count ?? 0) >= count;
+        },
+        get(name: string): InventoryItem | null {
+          const item = self._getInventory(p.id).items.find(i => i.name === name);
+          return item ? { ...item } : null;
+        },
+        equip(nameOrNull: string | null): boolean {
+          const store = self._getInventory(p.id);
+          if (nameOrNull === null) { store.equipped = null; return true; }
+          if (!store.items.find(i => i.name === nameOrNull)) return false;
+          store.equipped = nameOrNull; return true;
+        },
+        drop(_name: string, _count = 1): null { return null; }, // spawning needs loadScript context
+        clear() { const store = self._getInventory(p.id); store.items = []; store.equipped = null; },
+      },
+      motors: {
+        attach(slot: string, entity: any) {
+          const obj = entity?.name ? self.objects.get(entity.name) : undefined;
+          if (obj) self._getMotors(p.id).set(slot.toLowerCase(), obj);
+        },
+        detach(slot: string): any {
+          const m = self._getMotors(p.id);
+          const obj = m.get(slot.toLowerCase()); m.delete(slot.toLowerCase());
+          return obj ? self._makeEntityProxyByName(obj.name) : null;
+        },
+        get(slot: string): any {
+          const obj = self._getMotors(p.id).get(slot.toLowerCase());
+          return obj ? self._makeEntityProxyByName(obj.name) : null;
+        },
+      },
       input: {
         key: (k: string) => self.perPlayerHeldKeys.get(p.id)?.has(k.toLowerCase()) ?? false,
         on: (event: string, fn: EventHandler) => {
@@ -1452,6 +1670,22 @@ export class ScriptRunner {
         },
       },
     };
+  }
+
+  // ── Sub-system helpers ────────────────────────────────────────────────────
+  private _getInventory(pid: string): InventoryData {
+    if (!this.playerInventory.has(pid))
+      this.playerInventory.set(pid, { items: [], equipped: null, maxSlots: 36 });
+    return this.playerInventory.get(pid)!;
+  }
+  private _getAnimator(pid: string): AnimatorData {
+    if (!this.playerAnimators.has(pid))
+      this.playerAnimators.set(pid, { current: null, playing: false, doneHandlers: [] });
+    return this.playerAnimators.get(pid)!;
+  }
+  private _getMotors(pid: string): Map<string, ScriptObjState> {
+    if (!this.playerMotors.has(pid)) this.playerMotors.set(pid, new Map());
+    return this.playerMotors.get(pid)!;
   }
 
   private _makeEntityProxyByName(name: string): any {

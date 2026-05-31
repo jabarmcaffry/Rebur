@@ -33,12 +33,9 @@ interface EntityBody {
   isKinematic: boolean;
   isTrigger: boolean;
   readonly velocity: Vec3;
-  readonly angularVelocity: Vec3;
   applyForce(force: Vec3): void;
   applyImpulse(impulse: Vec3): void;
-  applyTorque(torque: Vec3): void;
   setVelocity(v: Vec3): void;
-  setAngularVelocity(v: Vec3): void;
 }
 
 // ─── Base entity ──────────────────────────────────────────────────────────────
@@ -239,8 +236,6 @@ interface InputAPI {
    */
   on(event: 'press' | 'release' | 'mouseClick', fn: (...args: any[]) => void): () => void;
   off(event: string, fn: any): void;
-  /** Returns true while the key is held by any player in this session. */
-  isDown(key: string): boolean;
 }
 
 interface RunServiceAPI {
@@ -657,7 +652,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "entity.body",
     kind: K.Property,
     detail: "EntityBody — physics simulation",
-    doc: "Physics body for this entity. Force-based — use applyForce/applyImpulse for realistic physics that scales to vehicles and complex simulations.\n\nProperties:\n- body.anchored — static collider\n- body.canCollide — participates in collision\n- body.mass — kg (default 1)\n- body.friction — (default 0.5)\n- body.restitution — bounciness 0–1\n- body.isKinematic — script-moved, not force-driven\n- body.isTrigger — overlap only, no collision response\n- body.velocity — current velocity (read-only)\n- body.angularVelocity — current angular velocity (read-only)",
+    doc: "Physics body for this entity. Force-based — use applyForce/applyImpulse for realistic physics.\n\nProperties:\n- body.anchored — static collider\n- body.canCollide — participates in collision\n- body.mass — kg (default 1)\n- body.friction — (default 0.5)\n- body.restitution — bounciness 0–1\n- body.isKinematic — script-moved, not force-driven\n- body.isTrigger — overlap only, no collision response\n- body.velocity — current velocity (read-only)",
     insert: ".body",
   },
   {
@@ -733,27 +728,11 @@ const COMPLETIONS: CompletionDef[] = [
     snippet: true,
   },
   {
-    label: "entity.body.applyTorque",
-    kind: K.Function,
-    detail: "entity.body.applyTorque(torque: Vec3) → void",
-    doc: "Apply a rotational force. Best for spinning objects.",
-    insert: ".body.applyTorque({ x: ${1:0}, y: ${2:5}, z: ${3:0} })",
-    snippet: true,
-  },
-  {
     label: "entity.body.setVelocity",
     kind: K.Function,
     detail: "entity.body.setVelocity(v: Vec3) → void",
     doc: "Directly override the linear velocity. Use sparingly — breaks physical realism. Prefer applyImpulse for launchers.",
     insert: ".body.setVelocity({ x: ${1:0}, y: ${2:0}, z: ${3:0} })",
-    snippet: true,
-  },
-  {
-    label: "entity.body.setAngularVelocity",
-    kind: K.Function,
-    detail: "entity.body.setAngularVelocity(v: Vec3) → void",
-    doc: "Directly override the angular velocity.",
-    insert: ".body.setAngularVelocity({ x: ${1:0}, y: ${2:0}, z: ${3:0} })",
     snippet: true,
   },
 
