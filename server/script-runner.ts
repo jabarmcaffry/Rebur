@@ -1322,6 +1322,7 @@ export class ScriptRunner {
       "setInterval", "setTimeout", "clearInterval", "clearTimeout",
     ];
 
+<<<<<<< HEAD
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const AsyncFunc = Object.getPrototypeOf(async function(){}).constructor as any;
 
@@ -1342,6 +1343,23 @@ export class ScriptRunner {
       ).catch((err: any) => {
         error(`Unhandled async error: ${err?.message ?? err}`);
       });
+=======
+      after, every, wait,
+      random, randInt, pick,
+      log, warn, error,
+
+      Vector3, Color3,
+      Math, JSON, String, Number, Boolean, Array, Object, Date,
+      parseInt, parseFloat, isNaN, isFinite, Symbol, Promise,
+
+      // Blocked for security
+      process: undefined, require: undefined, fetch: undefined,
+      __filename: undefined, __dirname: undefined,
+    });
+
+    try {
+      new Script(code, { filename: fileName }).runInContext(ctx, { timeout: 2000 });
+>>>>>>> parent of df3f398 (Ensure all script APIs are consistently available during execution)
     } catch (err: any) {
       log(`Runtime error: ${err?.message ?? err}`);
     }
