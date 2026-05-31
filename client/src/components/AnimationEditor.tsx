@@ -2,9 +2,12 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { GameObject } from "@shared/schema";
 import type { AnimationDef, Keyframe, JointDef } from "@/lib/runtime/animation/keyframe-player";
+import { loadGLTFAsync } from "@/lib/gltf-loader";
+import * as THREE from "three";
 import {
   Plus, Trash2, Play, Square, RotateCcw, Copy, Link,
-  ChevronDown, ChevronRight, Unlink, Pause,
+  ChevronDown, ChevronRight, Unlink, Pause, Film, Download,
+  Zap, AlertCircle,
 } from "lucide-react";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -53,6 +56,47 @@ function sampleAnim(anim: AnimationDef, t: number): Partial<Record<keyof Keyfram
   return {};
 }
 
+/** Sample a THREE.AnimationClip into flat Keyframe[] for the AnimationEditor. */
+function clipToKeyframes(clip: THREE.AnimationClip): Keyframe[] {
+  const kfs: Record<number, Keyframe> = {};
+  const ensure = (t: number) => {
+    if (!kfs[t]) kfs[t] = { id: nanoid(), time: t };
+    return kfs[t];
+  };
+
+  for (const track of clip.tracks) {
+    const name = track.name.toLowerCase();
+    // Only handle position/quaternion/scale tracks on root bone/node
+    const times = (track as any).times as Float32Array;
+    const values = (track as any).values as Float32Array;
+
+    if (name.includes(".position")) {
+      for (let i = 0; i < times.length; i++) {
+        const kf = ensure(parseFloat(times[i].toFixed(3)));
+        kf.px = values[i * 3];
+        kf.py = values[i * 3 + 1];
+        kf.pz = values[i * 3 + 2];
+      }
+    } else if (name.includes(".scale")) {
+      for (let i = 0; i < times.length; i++) {
+        const kf = ensure(parseFloat(times[i].toFixed(3)));
+        kf.sx = values[i * 3];
+        kf.sy = values[i * 3 + 1];
+        kf.sz = values[i * 3 + 2];
+      }
+    } else if (name.includes(".euler")) {
+      for (let i = 0; i < times.length; i++) {
+        const kf = ensure(parseFloat(times[i].toFixed(3)));
+        kf.rx = values[i * 3] * (180 / Math.PI);
+        kf.ry = values[i * 3 + 1] * (180 / Math.PI);
+        kf.rz = values[i * 3 + 2] * (180 / Math.PI);
+      }
+    }
+  }
+
+  return Object.values(kfs).sort((a, b) => a.time - b.time);
+}
+
 // ─── sub-components ──────────────────────────────────────────────────────────
 
 function ScrubBar({
@@ -72,7 +116,6 @@ function ScrubBar({
     return Math.max(0, Math.min(duration, ((x - rect.left) / rect.width) * duration));
   };
   const xForT = (t: number) => `${(t / duration) * 100}%`;
-
   const kfsOnTrack = keyframes.filter(k => (k as any)[trackKey] !== undefined);
 
   return (
@@ -82,26 +125,191 @@ function ScrubBar({
       onClick={e => onSeek(tForX(e.clientX))}
       onDoubleClick={e => { e.stopPropagation(); onAddKeyframe(tForX(e.clientX)); }}
     >
-      {/* grid lines every 10% */}
       {[1,2,3,4,5,6,7,8,9].map(i => (
         <div key={i} className="absolute top-0 bottom-0 w-px bg-[#222]" style={{ left: `${i * 10}%` }} />
       ))}
-      {/* keyframe diamonds */}
       {kfsOnTrack.map(kf => (
         <button
           key={kf.id}
-          title={`t=${kf.time.toFixed(2)}s  value=${((kf as any)[trackKey] as number)?.toFixed(3)}\nDouble-click track to add • Right-click to delete`}
+          title={`t=${kf.time.toFixed(2)}s  value=${((kf as any)[trackKey] as number)?.toFixed(3)}\nDouble-click track to add · Right-click to delete`}
           style={{ left: xForT(kf.time), backgroundColor: color }}
           className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rotate-45 rounded-sm z-10 hover:scale-125 transition-transform"
           onClick={e => { e.stopPropagation(); }}
           onContextMenu={e => { e.preventDefault(); onDeleteKeyframe(kf.id); }}
         />
       ))}
-      {/* scrubber */}
       <div
         className="absolute top-0 bottom-0 w-0.5 bg-white/80 z-20 pointer-events-none"
         style={{ left: xForT(currentTime) }}
       />
+    </div>
+  );
+}
+
+// ─── GLTF Clips panel ─────────────────────────────────────────────────────────
+
+interface GLTFClipInfo {
+  name: string;
+  duration: number;
+  tracks: number;
+}
+
+function GltfClipsPanel({
+  selectedObject,
+  onImportClip,
+}: {
+  selectedObject: GameObject;
+  onImportClip: (def: AnimationDef) => void;
+}) {
+  const [clips, setClips] = useState<GLTFClipInfo[]>([]);
+  const [rawClips, setRawClips] = useState<THREE.AnimationClip[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [previewingClip, setPreviewingClip] = useState<string | null>(null);
+  const [importedNames, setImportedNames] = useState<Set<string>>(new Set());
+
+  const modelUrl = (selectedObject.properties as any)?.fileUrl as string | undefined;
+
+  useEffect(() => {
+    if (!modelUrl) return;
+    setLoading(true);
+    setError(null);
+    loadGLTFAsync(modelUrl)
+      .then(({ animations }) => {
+        setRawClips(animations);
+        setClips(animations.map(c => ({
+          name: c.name || "Unnamed",
+          duration: parseFloat(c.duration.toFixed(2)),
+          tracks: c.tracks.length,
+        })));
+      })
+      .catch(e => setError(e?.message ?? "Failed to load model"))
+      .finally(() => setLoading(false));
+  }, [modelUrl]);
+
+  const handleImport = (clip: THREE.AnimationClip) => {
+    const keyframes = clipToKeyframes(clip);
+    const def: AnimationDef = {
+      id: nanoid(),
+      name: clip.name || "Imported Clip",
+      duration: parseFloat(clip.duration.toFixed(2)),
+      loop: true,
+      autoPlay: false,
+      keyframes,
+    };
+    onImportClip(def);
+    setImportedNames(prev => new Set(prev).add(clip.name));
+  };
+
+  if (!modelUrl) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 px-6 text-center gap-3">
+        <Film className="w-8 h-8 text-gray-700" />
+        <p className="text-xs text-muted-foreground">
+          This object has no model attached. GLTF clips come from uploaded .glb files.
+        </p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-10 gap-2 text-xs text-gray-500">
+        <div className="w-4 h-4 border-2 border-violet-500/40 border-t-violet-500 rounded-full animate-spin" />
+        Loading clips…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 gap-2 px-6 text-center">
+        <AlertCircle className="w-6 h-6 text-red-500" />
+        <p className="text-xs text-red-400">{error}</p>
+      </div>
+    );
+  }
+
+  if (clips.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 px-6 text-center gap-3">
+        <Film className="w-8 h-8 text-gray-700" />
+        <p className="text-xs text-muted-foreground">
+          No animation clips found in this model.
+          Export your model from Blender/Maya with embedded actions to see them here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-3 py-2 border-b border-border bg-[#111] shrink-0">
+        <p className="text-[10px] text-gray-500">
+          {clips.length} clip{clips.length !== 1 ? "s" : ""} embedded in model · Import to edit in the timeline
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto divide-y divide-[#1a1a1a]">
+        {clips.map((clip, i) => {
+          const rawClip = rawClips[i];
+          const isImported = importedNames.has(clip.name);
+          const isPreviewing = previewingClip === clip.name;
+          return (
+            <div key={clip.name + i} className="px-3 py-2.5 hover:bg-[#111] transition-colors">
+              <div className="flex items-center gap-2">
+                <Film className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-white font-medium truncate">{clip.name}</p>
+                  <p className="text-[10px] text-gray-500">
+                    {clip.duration}s · {clip.tracks} track{clip.tracks !== 1 ? "s" : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    title={isPreviewing ? "Stop preview" : "Preview clip"}
+                    onClick={() => setPreviewingClip(isPreviewing ? null : clip.name)}
+                    className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${
+                      isPreviewing ? "bg-violet-600 text-white" : "hover:bg-[#222] text-gray-500 hover:text-white"
+                    }`}
+                  >
+                    {isPreviewing ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                  </button>
+                  <button
+                    title={isImported ? "Already imported" : "Import to timeline"}
+                    onClick={() => rawClip && handleImport(rawClip)}
+                    disabled={isImported}
+                    className={`w-6 h-6 rounded flex items-center justify-center transition-colors ${
+                      isImported
+                        ? "text-green-500 cursor-default"
+                        : "hover:bg-[#222] text-gray-500 hover:text-violet-400"
+                    }`}
+                  >
+                    <Download className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+              {isPreviewing && (
+                <div className="mt-2 px-1">
+                  <div className="h-1 bg-[#222] rounded overflow-hidden">
+                    <div
+                      className="h-full bg-violet-500 rounded animate-pulse"
+                      style={{ width: "60%" }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-violet-400 mt-1">
+                    Preview active — set <code className="bg-[#1a1a1a] px-1 rounded">playingClip: "{clip.name}"</code> in Properties to use in-game
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-3 py-2 border-t border-[#1a1a1a] bg-[#0a0a0a] shrink-0">
+        <p className="text-[10px] text-gray-600">
+          Tip: In a script use <code className="text-gray-400">obj.animator.playClip("name")</code> to play any clip.
+        </p>
+      </div>
     </div>
   );
 }
@@ -115,7 +323,10 @@ interface Props {
   onObjectUpdate?: (obj: GameObject) => void;
 }
 
-type EditorTab = "animations" | "joints";
+type EditorTab = "animations" | "gltf-clips" | "joints";
+
+const isModelObject = (obj: GameObject | null) =>
+  obj?.type === "model" && !!(obj?.properties as any)?.fileUrl;
 
 export default function AnimationEditor({ selectedObject, allObjects, gameId, onObjectUpdate }: Props) {
   const [tab, setTab] = useState<EditorTab>("animations");
@@ -126,7 +337,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number>(0);
 
-  // Joint state
   const [addJointOpen, setAddJointOpen] = useState(false);
   const [newJointTarget, setNewJointTarget] = useState("");
   const [newJointType, setNewJointType] = useState<JointDef["type"]>("fixed");
@@ -134,7 +344,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
   const props = (selectedObject?.properties ?? {}) as Record<string, any>;
   const animations: AnimationDef[] = props.animations ?? [];
   const joints: JointDef[] = props.joints ?? [];
-
   const selectedAnim = animations.find(a => a.id === selectedAnimId) ?? null;
 
   // ── persistence ──────────────────────────────────────────────────────────
@@ -180,8 +389,7 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
     const anim: AnimationDef = {
       id, name: `Animation ${animations.length + 1}`, duration: 2, loop: true, autoPlay: false, keyframes: [],
     };
-    const next = [...animations, anim];
-    saveProps({ animations: next });
+    saveProps({ animations: [...animations, anim] });
     setSelectedAnimId(id);
     setCurrentTime(0);
   };
@@ -197,12 +405,17 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
     saveProps({ animations: next });
   };
 
+  const importClip = useCallback((def: AnimationDef) => {
+    const next = [...animations, def];
+    saveProps({ animations: next });
+    setSelectedAnimId(def.id);
+    setTab("animations");
+  }, [animations, saveProps]);
+
   // ── keyframe CRUD ─────────────────────────────────────────────────────────
   const addKeyframe = (trackKey: keyof Keyframe, time: number) => {
     if (!selectedAnim || !selectedObject) return;
     const t = Math.max(0, Math.min(selectedAnim.duration, time));
-
-    // Get current value from object at this time (sample anim or object default)
     const sample = sampleAnim(selectedAnim, t);
     let defaultVal: number;
     switch (trackKey) {
@@ -217,7 +430,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
       case "sz": defaultVal = (sample.sz as number) ?? (selectedObject.scaleZ ?? 1); break;
       default: defaultVal = 0;
     }
-
     const existing = selectedAnim.keyframes.find(k => Math.abs(k.time - t) < 0.01);
     let newKfs: Keyframe[];
     if (existing) {
@@ -228,26 +440,27 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
       const newKf: Keyframe = { id: nanoid(), time: t, [trackKey]: defaultVal };
       newKfs = [...selectedAnim.keyframes, newKf];
     }
-    const next = animations.map(a => a.id === selectedAnim.id ? { ...a, keyframes: newKfs } : a);
-    saveProps({ animations: next });
+    saveProps({ animations: animations.map(a => a.id === selectedAnim.id ? { ...a, keyframes: newKfs } : a) });
   };
 
   const deleteKeyframe = (kfId: string) => {
     if (!selectedAnim) return;
-    const next = animations.map(a =>
-      a.id === selectedAnim.id ? { ...a, keyframes: a.keyframes.filter(k => k.id !== kfId) } : a
-    );
-    saveProps({ animations: next });
+    saveProps({
+      animations: animations.map(a =>
+        a.id === selectedAnim.id ? { ...a, keyframes: a.keyframes.filter(k => k.id !== kfId) } : a
+      ),
+    });
   };
 
   const updateKeyframeValue = (kfId: string, trackKey: keyof Keyframe, val: number) => {
     if (!selectedAnim) return;
-    const next = animations.map(a =>
-      a.id === selectedAnim.id
-        ? { ...a, keyframes: a.keyframes.map(k => k.id === kfId ? { ...k, [trackKey]: val } : k) }
-        : a
-    );
-    saveProps({ animations: next });
+    saveProps({
+      animations: animations.map(a =>
+        a.id === selectedAnim.id
+          ? { ...a, keyframes: a.keyframes.map(k => k.id === kfId ? { ...k, [trackKey]: val } : k) }
+          : a
+      ),
+    });
   };
 
   // ── joints CRUD ───────────────────────────────────────────────────────────
@@ -280,22 +493,48 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
     );
   }
 
+  const hasModel = isModelObject(selectedObject);
+
   return (
     <div className="flex flex-col h-full text-sm overflow-hidden bg-[#0d0d0d]">
       {/* Tab switcher */}
       <div className="flex border-b border-border shrink-0">
-        {(["animations", "joints"] as EditorTab[]).map(t => (
+        <button
+          onClick={() => setTab("animations")}
+          className={`flex-1 py-2 text-xs font-medium transition-colors ${
+            tab === "animations" ? "text-white border-b-2 border-violet-500" : "text-muted-foreground hover:text-white"
+          }`}
+        >
+          Keyframes
+        </button>
+        {hasModel && (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-2 text-xs font-medium capitalize transition-colors ${
-              tab === t ? "text-white border-b-2 border-violet-500" : "text-muted-foreground hover:text-white"
+            onClick={() => setTab("gltf-clips")}
+            className={`flex-1 py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+              tab === "gltf-clips" ? "text-white border-b-2 border-violet-500" : "text-muted-foreground hover:text-white"
             }`}
           >
-            {t}
+            <Film className="w-3 h-3" />
+            Model Clips
           </button>
-        ))}
+        )}
+        <button
+          onClick={() => setTab("joints")}
+          className={`flex-1 py-2 text-xs font-medium capitalize transition-colors ${
+            tab === "joints" ? "text-white border-b-2 border-violet-500" : "text-muted-foreground hover:text-white"
+          }`}
+        >
+          Joints
+        </button>
       </div>
+
+      {/* ── GLTF CLIPS TAB ──────────────────────────────────────────────── */}
+      {tab === "gltf-clips" && (
+        <GltfClipsPanel
+          selectedObject={selectedObject}
+          onImportClip={importClip}
+        />
+      )}
 
       {/* ── ANIMATIONS TAB ──────────────────────────────────────────────── */}
       {tab === "animations" && (
@@ -323,9 +562,12 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
           {!selectedAnim ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6 py-8">
               <div className="w-12 h-12 rounded-2xl bg-[#1a1a1a] flex items-center justify-center">
-                <Play className="w-6 h-6 text-gray-600" />
+                <Zap className="w-6 h-6 text-gray-600" />
               </div>
-              <p className="text-xs text-muted-foreground">No animation selected. Create one to start.</p>
+              <p className="text-xs text-muted-foreground">
+                No animation selected. Create a keyframe animation or
+                {hasModel ? " import clips from the Model Clips tab." : " add one below."}
+              </p>
               <button onClick={addAnimation} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
                 <Plus className="w-3.5 h-3.5" /> New Animation
               </button>
@@ -363,8 +605,7 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
               <div className="flex-1 overflow-y-auto overflow-x-hidden">
                 {/* Time ruler */}
                 <div className="sticky top-0 z-20 bg-[#111] border-b border-border px-2 py-1 flex items-center gap-2 shrink-0">
-                  {/* Playback */}
-                  <button onClick={() => { setCurrentTime(0); }} title="Reset" className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#222]">
+                  <button onClick={() => setCurrentTime(0)} title="Reset" className="w-6 h-6 flex items-center justify-center rounded hover:bg-[#222]">
                     <RotateCcw className="w-3 h-3 text-gray-400" />
                   </button>
                   <button
@@ -379,7 +620,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                   <span className="text-xs text-muted-foreground font-mono ml-1">
                     {currentTime.toFixed(2)}s / {selectedAnim.duration.toFixed(2)}s
                   </span>
-                  {/* global time scrubber */}
                   <input
                     type="range" min={0} max={selectedAnim.duration} step={0.01}
                     value={currentTime}
@@ -396,7 +636,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
 
                   return (
                     <div key={trk.key} className="border-b border-[#1a1a1a]">
-                      {/* Track header */}
                       <div className="flex items-center gap-1.5 px-2 py-1 bg-[#0d0d0d]">
                         <button
                           onClick={() => setExpandedTracks(s => {
@@ -413,7 +652,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                         <span className="text-[10px] text-gray-600 font-mono w-16">
                           {sampleVal !== undefined ? sampleVal.toFixed(3) : "—"}
                         </span>
-                        {/* scrub bar */}
                         <div className="flex-1 pr-1">
                           <ScrubBar
                             duration={selectedAnim.duration}
@@ -436,7 +674,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                         </button>
                       </div>
 
-                      {/* Expanded: keyframe list */}
                       {isExpanded && kfsOnTrack.length > 0 && (
                         <div className="ml-8 divide-y divide-[#1a1a1a]">
                           {kfsOnTrack.sort((a, b) => a.time - b.time).map(kf => (
@@ -462,7 +699,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                   );
                 })}
 
-                {/* Help tip */}
                 <div className="px-3 py-2 text-[10px] text-gray-700 border-t border-[#1a1a1a]">
                   Double-click a track bar to add a keyframe · Right-click a diamond to delete · Drag the scrubber to preview
                 </div>
@@ -485,7 +721,6 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
             </button>
           </div>
 
-          {/* Add joint form */}
           {addJointOpen && (
             <div className="px-3 py-2 bg-[#111] border-b border-border space-y-2 shrink-0">
               <div className="flex gap-2">
@@ -518,9 +753,7 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                 <button onClick={addJoint} disabled={!newJointTarget} className="flex-1 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs py-1.5 rounded-lg transition-colors">
                   Create Joint
                 </button>
-                <button onClick={() => setAddJointOpen(false)} className="px-3 text-xs text-gray-400 hover:text-white">
-                  Cancel
-                </button>
+                <button onClick={() => setAddJointOpen(false)} className="px-3 text-xs text-gray-400 hover:text-white">Cancel</button>
               </div>
             </div>
           )}
@@ -569,9 +802,9 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                                 <input
                                   key={ax}
                                   type="number" min={-1} max={1} step={0.1}
-                                  value={j.axis[i]}
+                                  value={(j.axis as number[])[i]}
                                   onChange={e => {
-                                    const a = [...j.axis] as [number,number,number];
+                                    const a = [...(j.axis as number[])] as [number,number,number];
                                     a[i] = parseFloat(e.target.value) || 0;
                                     updateJoint(j.id, { axis: a });
                                   }}
@@ -600,15 +833,15 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
                             <div className="text-gray-500">Min angle</div>
                             <input
                               type="number" step={1}
-                              value={j.minAngle ?? -180}
-                              onChange={e => updateJoint(j.id, { minAngle: parseFloat(e.target.value) })}
+                              value={(j as any).minAngle ?? -180}
+                              onChange={e => updateJoint(j.id, { minAngle: parseFloat(e.target.value) } as any)}
                               className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 text-white text-[11px] outline-none"
                             />
                             <div className="text-gray-500">Max angle</div>
                             <input
                               type="number" step={1}
-                              value={j.maxAngle ?? 180}
-                              onChange={e => updateJoint(j.id, { maxAngle: parseFloat(e.target.value) })}
+                              value={(j as any).maxAngle ?? 180}
+                              onChange={e => updateJoint(j.id, { maxAngle: parseFloat(e.target.value) } as any)}
                               className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-1 text-white text-[11px] outline-none"
                             />
                           </>

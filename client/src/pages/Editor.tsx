@@ -1,7 +1,7 @@
-import { useState, Suspense, Component, type ReactNode, type DragEvent, useEffect, useMemo, useRef, forwardRef } from "react";
+import { useState, Suspense, Component, type ReactNode, type DragEvent, useEffect, useMemo, useRef, forwardRef, useCallback } from "react";
 import { useParams, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useGLTFModel } from "@/lib/gltf-loader";
@@ -69,6 +69,8 @@ import { useAuth } from "@/hooks/useAuth";
 import type { Game, GameObject, Script, User } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
 import AnimationEditor from "@/components/AnimationEditor";
+import SculptPanel from "@/components/SculptPanel";
+import SculptedMesh from "@/components/SculptedMesh";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -206,6 +208,33 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
 ];
 
 /**
+ * Build an edge-wireframe overlay from a cloned scene.
+ * Returns a THREE.Group of LineSegments, one per Mesh in the source scene.
+ * This gives a wireframe that matches the actual polygon topology of the model
+ * rather than a generic bounding-box rectangle.
+ */
+function buildEdgeWireframe(scene: THREE.Group, color = '#a855f7'): THREE.Group {
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7, depthTest: false });
+  const group = new THREE.Group();
+  scene.traverse((child: any) => {
+    if (!child.isMesh) return;
+    try {
+      const edges = new THREE.EdgesGeometry(child.geometry, 20); // 20° threshold removes interior creases
+      const lines = new THREE.LineSegments(edges, mat);
+      // Copy world transform relative to scene root
+      child.updateWorldMatrix(true, false);
+      scene.updateWorldMatrix(true, false);
+      const rel = new THREE.Matrix4().copy(scene.matrixWorld).invert().multiply(child.matrixWorld);
+      lines.applyMatrix4(rel);
+      group.add(lines);
+    } catch {
+      // skip degenerate geometry
+    }
+  });
+  return group;
+}
+
+/**
  * GltfLoader — editor viewport component for GLB/GLTF models.
  *
  * Uses the shared useGLTFModel hook (imperative GLTFLoader + local DRACO decoder)
@@ -214,8 +243,9 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
  *
  * While loading: shows a gray wireframe placeholder.
  * On error: shows a red wireframe placeholder.
- * On success: renders the normalised model with a transparent hit-mesh for clicking
- * and an optional purple wireframe overlay when selected.
+ * On success: renders the normalised model with a transparent hit-mesh for clicking,
+ * an edge-only wireframe overlay when selected (matching actual model topology),
+ * and plays any embedded GLTF animation clips via AnimationMixer.
  */
 const GltfLoader = forwardRef<THREE.Object3D, {
   url: string;
@@ -225,13 +255,14 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   selected: boolean;
   onClick: () => void;
 }>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
-  const { scene, loading, error } = useGLTFModel(url);
+  const { scene, animations, loading, error } = useGLTFModel(url);
+  const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+  const clonedRef = useRef<THREE.Group | null>(null);
 
-  const { cloned, wireClone, hitSize, hitCenter } = useMemo(() => {
-    if (!scene) return { cloned: null, wireClone: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number] };
+  const { cloned, edgeOverlay, hitSize, hitCenter } = useMemo(() => {
+    if (!scene) return { cloned: null, edgeOverlay: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number] };
 
     const c = scene.clone(true);
-    // Deep-clone materials so the model renders with its own colours
     c.traverse((child: any) => {
       if (child.isMesh && child.material) {
         child.material = Array.isArray(child.material)
@@ -250,31 +281,45 @@ const GltfLoader = forwardRef<THREE.Object3D, {
     box.getCenter(centre);
     c.position.set(-centre.x * ns, -centre.y * ns, -centre.z * ns);
 
-    // Hit-mesh bounding box (normalised coords)
     const normBox = new THREE.Box3().setFromObject(c);
     const normSize = new THREE.Vector3();
     const normCenter = new THREE.Vector3();
     normBox.getSize(normSize);
     normBox.getCenter(normCenter);
 
-    // Purple wireframe selection overlay
-    const wc = c.clone(true);
-    wc.traverse((child: any) => {
-      if (child.isMesh) {
-        child.material = new THREE.MeshBasicMaterial({ color: '#a855f7', wireframe: true, transparent: true, opacity: 0.45 });
-        child.renderOrder = 1;
-      }
-    });
+    // Build edge wireframe from actual mesh topology
+    const eo = buildEdgeWireframe(c, '#a855f7');
+    eo.renderOrder = 1;
 
     return {
       cloned: c,
-      wireClone: wc,
+      edgeOverlay: eo,
       hitSize: [normSize.x * 1.08, normSize.y * 1.08, normSize.z * 1.08] as [number, number, number],
       hitCenter: [normCenter.x, normCenter.y, normCenter.z] as [number, number, number],
     };
   }, [scene]);
 
-  // Loading placeholder
+  // Set up AnimationMixer and auto-play the first clip
+  useEffect(() => {
+    if (!cloned || !animations?.length) return;
+    const mixer = new THREE.AnimationMixer(cloned);
+    mixerRef.current = mixer;
+    clonedRef.current = cloned;
+    // Auto-play first clip as a preview loop
+    const action = mixer.clipAction(animations[0]);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    action.play();
+    return () => {
+      mixer.stopAllAction();
+      mixerRef.current = null;
+    };
+  }, [cloned, animations]);
+
+  // Step the mixer each frame
+  useFrame((_state, delta) => {
+    mixerRef.current?.update(delta);
+  });
+
   if (loading) {
     return (
       <mesh ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
@@ -284,7 +329,6 @@ const GltfLoader = forwardRef<THREE.Object3D, {
     );
   }
 
-  // Error placeholder
   if (error || !cloned) {
     return (
       <mesh ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
@@ -302,7 +346,7 @@ const GltfLoader = forwardRef<THREE.Object3D, {
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <primitive object={cloned} />
-      {selected && <primitive object={wireClone} />}
+      {selected && edgeOverlay && <primitive object={edgeOverlay} />}
     </group>
   );
 });
@@ -322,6 +366,28 @@ class ViewportErrorBoundary extends Component<{ children: ReactNode; fallback: R
     if (this.state.hasError) return this.props.fallback;
     return this.props.children;
   }
+}
+
+/** Edge wireframe that matches the actual geometry topology of a primitive. */
+function PrimitiveWireframe({ primitiveType }: { primitiveType?: string | null }) {
+  const edgesGeo = useMemo(() => {
+    let base: THREE.BufferGeometry;
+    switch (primitiveType) {
+      case "sphere":   base = new THREE.SphereGeometry(0.5, 16, 16); break;
+      case "cylinder": base = new THREE.CylinderGeometry(0.5, 0.5, 1, 16, 4); break;
+      case "plane":    base = new THREE.PlaneGeometry(1, 1, 4, 4); break;
+      default:         base = new THREE.BoxGeometry(1, 1, 1);
+    }
+    const eg = new THREE.EdgesGeometry(base, 15);
+    base.dispose();
+    return eg;
+  }, [primitiveType]);
+
+  return (
+    <lineSegments geometry={edgesGeo}>
+      <lineBasicMaterial color="#a855f7" transparent opacity={0.9} depthTest={false} />
+    </lineSegments>
+  );
 }
 
 interface PrimitiveMeshProps {
@@ -401,20 +467,48 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
     );
   }
 
+  const sculpt = props.sculpt ?? null;
+  const hasSculpt = sculpt && (
+    sculpt.noiseStrength !== 0 || sculpt.inflate !== 0 ||
+    sculpt.pushX !== 0 || sculpt.pushY !== 0 || sculpt.pushZ !== 0 ||
+    sculpt.waveAmplitude !== 0 || sculpt.smooth !== 0
+  );
+
+  if (hasSculpt) {
+    return (
+      <group ref={ref as any} position={position} rotation={rotation} scale={scale}>
+        <SculptedMesh
+          primitiveType={obj.primitiveType ?? "cube"}
+          sculpt={sculpt}
+          color={color}
+          transparent={isTransparent}
+          opacity={opacity}
+          selected={selected}
+          onClick={(e: any) => { e.stopPropagation(); onClick(); }}
+        />
+      </group>
+    );
+  }
+
   let geometry: JSX.Element;
+  let edgeGeo: JSX.Element;
   switch (obj.primitiveType) {
     case "sphere":
       geometry = <sphereGeometry args={[0.5, 32, 32]} />;
+      edgeGeo = <sphereGeometry args={[0.5, 16, 16]} />;
       break;
     case "cylinder":
       geometry = <cylinderGeometry args={[0.5, 0.5, 1, 32]} />;
+      edgeGeo = <cylinderGeometry args={[0.5, 0.5, 1, 16]} />;
       break;
     case "plane":
       geometry = <planeGeometry args={[1, 1]} />;
+      edgeGeo = <planeGeometry args={[1, 1]} />;
       break;
     case "cube":
     default:
       geometry = <boxGeometry args={[1, 1, 1]} />;
+      edgeGeo = <boxGeometry args={[1, 1, 1]} />;
   }
 
   return (
@@ -430,12 +524,7 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
     >
       {geometry}
       <meshStandardMaterial color={color} transparent={isTransparent} opacity={opacity} />
-      {selected && (
-        <mesh>
-          {geometry}
-          <meshBasicMaterial color="#ffffff" wireframe />
-        </mesh>
-      )}
+      {selected && <PrimitiveWireframe primitiveType={obj.primitiveType} />}
     </mesh>
   );
 });
@@ -836,14 +925,12 @@ export default function EditorPage() {
     return groups;
   }, [scripts]);
 
-  // If the Animate tab is active but no longer available (object changed / no animations),
-  // fall back to the Scene tab so the user doesn't see a blank panel.
-  const selectedAnimCount = ((selected?.properties as any)?.animations?.length ?? 0) as number;
+  // If the Animate tab is active but no object is selected, fall back to Scene.
   useEffect(() => {
-    if (activeTab === "animate" && selectedAnimCount === 0) {
+    if (activeTab === "animate" && !selected) {
       setActiveTab("scene");
     }
-  }, [selectedAnimCount, activeTab]);
+  }, [selected, activeTab]);
 
   /** Open a script in the editor tab. */
   const openScript = (s: Script) => {
@@ -1756,6 +1843,20 @@ export default function EditorPage() {
             </>
           )}
 
+          {/* ─── Sculpt ─── */}
+          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "model" && (
+            <>
+              <Separator />
+              <div className="space-y-1">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Sculpt</Label>
+                <SculptPanel
+                  selectedObject={selected}
+                  gameId={gameId}
+                />
+              </div>
+            </>
+          )}
+
           <Separator />
           <Button
             variant="destructive"
@@ -2096,8 +2197,8 @@ export default function EditorPage() {
                     </button>
                   </TabsTrigger>
                 )}
-                {/* Animate tab only appears when the selected object has animations saved */}
-                {((selected?.properties as any)?.animations?.length ?? 0) > 0 && (
+                {/* Animate tab appears whenever an object is selected */}
+                {selected && (
                   <TabsTrigger value="animate" data-testid="tab-animate">
                     <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                     Animate

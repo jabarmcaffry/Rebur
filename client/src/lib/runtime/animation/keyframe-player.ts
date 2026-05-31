@@ -368,6 +368,34 @@ export class Animator {
     return [...this._tracks];
   }
 
+  /**
+   * Play a clip by name — convenience helper for user scripts.
+   * If the clip is already loaded, plays the existing track.
+   * Pass an `AnimationDefinition` as the second arg to load-then-play.
+   *
+   * @example
+   *   obj.animator.playClip("run");
+   */
+  playClip(name: string, def?: AnimationDefinition): AnimationTrack | null {
+    let track = this._tracks.find(t => t.name === name) ?? null;
+    if (!track && def) {
+      track = this.load(def);
+    }
+    if (track) {
+      this.stopAll();
+      track.play();
+    }
+    return track;
+  }
+
+  /**
+   * Stop a specific clip by name.
+   */
+  stopClip(name: string): void {
+    const track = this._tracks.find(t => t.name === name);
+    if (track?.isPlaying) track.stop();
+  }
+
   /** @internal Called each frame by the game loop. */
   _step(dt: number): void {
     for (const track of this._tracks) {
@@ -423,16 +451,26 @@ export interface AnimationDef {
   name: string;
   duration: number;
   loop: boolean;
+  /** If true, the animation starts playing automatically when the game runs. */
+  autoPlay?: boolean;
   keyframes: Keyframe[];
 }
 
 /** Joint / constraint definition used by AnimationEditor rig view. */
 export interface JointDef {
   id: string;
+  name: string;
   type: "fixed" | "hinge" | "ball" | "slider";
-  objectId: string;
+  /** ID of the target object this joint connects to. */
+  targetObjectId: string;
   parentId?: string;
   anchor?: { x: number; y: number; z: number };
-  axis?: { x: number; y: number; z: number };
+  /** Joint axis — stored as a [x, y, z] tuple for editor convenience. */
+  axis: [number, number, number];
   limits?: { min: number; max: number };
+  minAngle?: number;
+  maxAngle?: number;
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
 }
