@@ -10,7 +10,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
-        value: production
+        value: development
       - key: API_ONLY
         value: true
       - key: SESSION_SECRET
