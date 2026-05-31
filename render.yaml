@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: free
     buildCommand: rm -rf node_modules package-lock.json && npm cache clean --force && npm install
- && npm run build:server
+ && npm run build:server && npm run build:client
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
