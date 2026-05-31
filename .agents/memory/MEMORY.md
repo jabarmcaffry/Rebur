@@ -2,3 +2,4 @@
 - [Rebur.Input unified API](rebur-input-api.md) — Input uses .on()/.off() only; callbacks always receive (player, key|entity); no isDown/isDownAny; per-player held state is player.input.key().
 - [player.input API](player-input-api.md) — per-player key polling + edge events; both makePlayerProxy and _makePlayerProxy must stay in sync; backed by perPlayerHeldKeys map in game-room.ts.
 - [Gui.bind enforcement](gui-bind-enforcement.md) — calling Gui.text/bar/image/button on a bound ID throws in dev, warns in prod; guiBoundIds is closure-scoped inside run() in script-runner.ts.
+- [VM script wrapper](vm-script-wrapper.md) — loadScript wraps user code in an async IIFE passing all globals as params; fixes "Rebur is not defined" in async continuations on Node.js 20.

@@ -1319,8 +1319,32 @@ export class ScriptRunner {
       __filename: undefined, __dirname: undefined,
     });
 
+    // Wrap the user script in an async IIFE that receives every documented
+    // global as an explicit parameter.  This is belt-and-suspenders: Node.js
+    // 20 VM async continuations (resumed `await`, timer callbacks, event
+    // handlers) may not retain the context's global object in their scope
+    // chain.  By passing everything as function arguments the closure always
+    // has the correct references regardless of which execution context the
+    // microtask resumes in.
+    //
+    // Benefits:
+    //   • Top-level `await wait(n)` works inside user scripts
+    //   • Rebur and all utility globals are guaranteed in scope everywhere
+    //   • Unhandled promise rejections are caught and routed to the console
+    const PARAM_LIST =
+      "Rebur,after,every,wait,random,randInt,pick,log,warn,error,Vector3,Color3," +
+      "Math,JSON,String,Number,Boolean,Array,Object,Date," +
+      "parseInt,parseFloat,isNaN,isFinite,Symbol,Promise";
+
+    const wrappedCode =
+      `(async function(${PARAM_LIST}){\n` +
+      code +
+      `\n})(${PARAM_LIST}).catch(function(__err){` +
+      `error("Unhandled async error: "+(__err&&__err.message||String(__err)));` +
+      `});`;
+
     try {
-      new Script(code, { filename: fileName }).runInContext(ctx, { timeout: 2000 });
+      new Script(wrappedCode, { filename: fileName }).runInContext(ctx, { timeout: 2000 });
     } catch (err: any) {
       log(`Runtime error: ${err?.message ?? err}`);
     }
