@@ -17,12 +17,6 @@ import type {
   SessionPlayer,
 } from "@shared/schema";
 
-// v3 — event-first scripting reshape: dropped onStart/onUpdate from seed
-// scripts in favor of top-level execution + events.on(...). Bumping the
-// key wipes any v2 worlds whose seeded "Welcome" still has the old shape.
-// v2 — schema reshape (Roblox-style service names: Workspace, Lighting,
-// Players, ServerScriptService, StarterPlayer, ReplicatedStorage). Bumping
-// the key wipes any v1 worlds since we explicitly dropped backwards compat.
 const LS_KEY = "rebur-engine:store:v3";
 
 type DB = {

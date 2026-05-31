@@ -1,35 +1,40 @@
 ---
-name: VM script wrapper
-description: Why user scripts are wrapped in an async IIFE in loadScript, and what the pattern looks like.
+name: Server script execution
+description: How server-side user scripts are executed — AsyncFunction, not VM module
 ---
 
-# VM Script Wrapper in loadScript
+# Server Script Execution in loadScript
 
 ## The Rule
-Every user script loaded via `ScriptRunner.loadScript()` is wrapped in an `async` IIFE before being run in the Node.js VM context. All documented globals (`Rebur`, `after`, `every`, `wait`, etc.) are passed as explicit function parameters.
+User scripts MUST be run via `AsyncFunction` (not `vm.createContext` + `vm.Script`). The VM module is removed entirely.
 
 ## Why
-Node.js 20 VM module: async continuations (resumed `await`, timer callbacks, event handlers fired from `tick()`) may not retain the VM context's global object in their scope chain. This causes "Rebur is not defined" ReferenceErrors even though `Rebur` is correctly in the `createContext` sandbox.
+`vm.createContext({ Rebur })` does NOT reliably make `Rebur` available as a global in the VM's scope chain on Node.js 20. Even with an IIFE wrapper that passes globals as parameters (`})(Rebur,...)`), the argument evaluation `Rebur` itself fails with "ReferenceError: Rebur is not defined" because the VM context lookup is broken. The VM module approach was tested and confirmed broken.
 
-**How to apply:** Any time `loadScript` is modified, keep the IIFE wrapper. The PARAM_LIST constant in `script-runner.ts` lists every global that must be passed.
+**AsyncFunction approach works because:**
+- `Rebur` and all other globals are explicit named parameters — never looked up via the scope chain
+- Parameters are local to the function, always in scope after `await` and in all closures
+- This is exactly what `ClientScriptRunner` does client-side, and it works there
 
-## Pattern (server/script-runner.ts ~line 1337)
-```js
-const PARAM_LIST =
-  "Rebur,after,every,wait,random,randInt,pick,log,warn,error,Vector3,Color3," +
-  "Math,JSON,String,Number,Boolean,Array,Object,Date," +
-  "parseInt,parseFloat,isNaN,isFinite,Symbol,Promise";
+## Pattern (server/script-runner.ts ~line 1310)
+```typescript
+const PARAMS = [
+  "Rebur",
+  "after", "every", "wait", "random", "randInt", "pick",
+  "log", "warn", "error",
+  "Vector3", "Color3",
+  "Math", "JSON", "String", "Number", "Boolean", "Array", "Object", "Date",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "Symbol", "Promise",
+  // Blocked — shadowed to undefined for security
+  "process", "require", "fetch", "__filename", "__dirname",
+  "global", "globalThis", "Buffer",
+  "setInterval", "setTimeout", "clearInterval", "clearTimeout",
+];
 
-const wrappedCode =
-  `(async function(${PARAM_LIST}){\n` +
-  code +
-  `\n})(${PARAM_LIST}).catch(function(__err){` +
-  `error("Unhandled async error: "+(__err&&__err.message||String(__err)));` +
-  `});`;
+const AsyncFunc = Object.getPrototypeOf(async function(){}).constructor as any;
+const fn = new AsyncFunc(...PARAMS, code);
+fn(Rebur, after, every, wait, ..., undefined, undefined, ...).catch(...);
 ```
 
-## Side-effects / benefits
-- Top-level `await wait(n)` now works in user scripts
-- Unhandled promise rejections are caught and routed to the in-game console
-- VM context still has all globals set (belt-and-suspenders)
-- `function` declarations inside scripts are scoped to the IIFE (fine — scripts are isolated)
+## Do NOT go back to vm.createContext
+The VM module import (`import { createContext, Script } from "vm"`) was removed. Do not re-add it.

@@ -1,5 +1,5 @@
 /**
- * script-runner.ts — Server-side VM sandbox for Rebur game scripts.
+ * script-runner.ts — Server-side sandbox for Rebur game scripts.
  *
  * Globals available in scripts (exactly as documented):
  *   Rebur — the only engine global
@@ -7,10 +7,12 @@
  *   Vector3, Color3
  *   Math, JSON, String, Number, Boolean, Array, Object, Date,
  *   parseInt, parseFloat, isNaN, isFinite, Symbol, Promise
- *   Blocked: process, require, fetch, __filename, __dirname
+ *
+ * Dangerous globals (process, require, fetch, etc.) are shadowed to undefined.
+ *
+ * Scripts run via AsyncFunction — every global is an explicit parameter so
+ * closures and async continuations always have them in scope.
  */
-
-import { createContext, Script } from "vm";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
@@ -1302,49 +1304,44 @@ export class ScriptRunner {
       Tags:       reburTags,
     };
 
-    // ── VM context — exactly the documented globals, nothing more ──────────
-    const ctx = createContext({
-      Rebur,
+    // ── AsyncFunction sandbox ──────────────────────────────────────────────
+    // Every documented global is an explicit parameter so closures and async
+    // continuations always have them in scope — no VM context lookup needed.
+    // Dangerous Node.js globals are shadowed by passing `undefined`.
+    const PARAMS = [
+      "Rebur",
+      "after", "every", "wait",
+      "random", "randInt", "pick",
+      "log", "warn", "error",
+      "Vector3", "Color3",
+      "Math", "JSON", "String", "Number", "Boolean", "Array", "Object", "Date",
+      "parseInt", "parseFloat", "isNaN", "isFinite", "Symbol", "Promise",
+      // Blocked — shadowed to undefined
+      "process", "require", "fetch", "__filename", "__dirname",
+      "global", "globalThis", "Buffer",
+      "setInterval", "setTimeout", "clearInterval", "clearTimeout",
+    ];
 
-      after, every, wait,
-      random, randInt, pick,
-      log, warn, error,
-
-      Vector3, Color3,
-      Math, JSON, String, Number, Boolean, Array, Object, Date,
-      parseInt, parseFloat, isNaN, isFinite, Symbol, Promise,
-
-      // Blocked for security
-      process: undefined, require: undefined, fetch: undefined,
-      __filename: undefined, __dirname: undefined,
-    });
-
-    // Wrap the user script in an async IIFE that receives every documented
-    // global as an explicit parameter.  This is belt-and-suspenders: Node.js
-    // 20 VM async continuations (resumed `await`, timer callbacks, event
-    // handlers) may not retain the context's global object in their scope
-    // chain.  By passing everything as function arguments the closure always
-    // has the correct references regardless of which execution context the
-    // microtask resumes in.
-    //
-    // Benefits:
-    //   • Top-level `await wait(n)` works inside user scripts
-    //   • Rebur and all utility globals are guaranteed in scope everywhere
-    //   • Unhandled promise rejections are caught and routed to the console
-    const PARAM_LIST =
-      "Rebur,after,every,wait,random,randInt,pick,log,warn,error,Vector3,Color3," +
-      "Math,JSON,String,Number,Boolean,Array,Object,Date," +
-      "parseInt,parseFloat,isNaN,isFinite,Symbol,Promise";
-
-    const wrappedCode =
-      `(async function(${PARAM_LIST}){\n` +
-      code +
-      `\n})(${PARAM_LIST}).catch(function(__err){` +
-      `error("Unhandled async error: "+(__err&&__err.message||String(__err)));` +
-      `});`;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const AsyncFunc = Object.getPrototypeOf(async function(){}).constructor as any;
 
     try {
-      new Script(wrappedCode, { filename: fileName }).runInContext(ctx, { timeout: 2000 });
+      const fn: (...args: any[]) => Promise<void> = new AsyncFunc(...PARAMS, code);
+      fn(
+        Rebur,
+        after, every, wait,
+        random, randInt, pick,
+        log, warn, error,
+        Vector3, Color3,
+        Math, JSON, String, Number, Boolean, Array, Object, Date,
+        parseInt, parseFloat, isNaN, isFinite, Symbol, Promise,
+        // Blocked:
+        undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
+      ).catch((err: any) => {
+        error(`Unhandled async error: ${err?.message ?? err}`);
+      });
     } catch (err: any) {
       log(`Runtime error: ${err?.message ?? err}`);
     }
