@@ -325,6 +325,29 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       }
 
       const updated = await storage.updateScript(req.params.id, req.body);
+
+      // Hot-reload scripts in every live room that is running this game.
+      // This means edits take effect immediately — no need to leave and
+      // rejoin Play mode to see changes.
+      const sessions = gameIdToSessions.get(script.gameId);
+      if (sessions && sessions.size > 0) {
+        try {
+          const allScripts = await storage.getScripts(script.gameId);
+          const scriptPayload = allScripts.map((s: any) => ({
+            code: s.code ?? "",
+            name: s.name ?? "Script",
+            enabled: s.enabled !== false,
+          }));
+          for (const sid of sessions) {
+            const room = gameRooms.get(sid);
+            if (room) room.loadScripts(scriptPayload);
+          }
+          console.log(`[routes] hot-reloaded scripts for game ${script.gameId} in ${sessions.size} room(s)`);
+        } catch (err) {
+          console.error("[routes] hot-reload failed:", err);
+        }
+      }
+
       res.json(updated);
     } catch (error: any) {
       console.error("Error updating script:", error);
@@ -504,6 +527,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   const clients = new Map<string, ConnectedClient>();
   // One GameRoom per session (keyed by sessionId)
   const gameRooms = new Map<string, GameRoom>();
+  // Reverse index: gameId → set of active sessionIds that belong to it.
+  // Used to push script reloads into live rooms whenever a script is saved.
+  const gameIdToSessions = new Map<string, Set<string>>();
   // Single-session enforcement: maps authenticated userId → active clientId
   // so the same account can only be in one game at a time.
   const activeUserSessions = new Map<string, string>(); // userId → clientId
@@ -556,6 +582,12 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
         }
       }
       gameRooms.set(sessionId, room);
+      // Register the reverse lookup so script saves can find this room.
+      if (gameId) {
+        const s = gameIdToSessions.get(gameId) ?? new Set<string>();
+        s.add(sessionId);
+        gameIdToSessions.set(gameId, s);
+      }
     }
     return gameRooms.get(sessionId)!;
   }
@@ -789,6 +821,14 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
           if (room.playerCount === 0) {
             room.stop();
             gameRooms.delete(client.sessionId);
+            // Clean up the reverse gameId → session index.
+            if (client.gameId) {
+              const s = gameIdToSessions.get(client.gameId);
+              if (s) {
+                s.delete(client.sessionId);
+                if (s.size === 0) gameIdToSessions.delete(client.gameId);
+              }
+            }
           }
         }
         await storage.removeSessionPlayer(client.playerId);
