@@ -69,8 +69,6 @@ import { useAuth } from "@/hooks/useAuth";
 import type { Game, GameObject, Script, User } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
 import AnimationEditor from "@/components/AnimationEditor";
-import SculptPanel from "@/components/SculptPanel";
-import SculptedMesh from "@/components/SculptedMesh";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -467,48 +465,13 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
     );
   }
 
-  const sculpt = props.sculpt ?? null;
-  const hasSculpt = sculpt && (
-    sculpt.noiseStrength !== 0 || sculpt.inflate !== 0 ||
-    sculpt.pushX !== 0 || sculpt.pushY !== 0 || sculpt.pushZ !== 0 ||
-    sculpt.waveAmplitude !== 0 || sculpt.smooth !== 0
-  );
-
-  if (hasSculpt) {
-    return (
-      <group ref={ref as any} position={position} rotation={rotation} scale={scale}>
-        <SculptedMesh
-          primitiveType={obj.primitiveType ?? "cube"}
-          sculpt={sculpt}
-          color={color}
-          transparent={isTransparent}
-          opacity={opacity}
-          selected={selected}
-          onClick={(e: any) => { e.stopPropagation(); onClick(); }}
-        />
-      </group>
-    );
-  }
-
   let geometry: JSX.Element;
-  let edgeGeo: JSX.Element;
   switch (obj.primitiveType) {
-    case "sphere":
-      geometry = <sphereGeometry args={[0.5, 32, 32]} />;
-      edgeGeo = <sphereGeometry args={[0.5, 16, 16]} />;
-      break;
-    case "cylinder":
-      geometry = <cylinderGeometry args={[0.5, 0.5, 1, 32]} />;
-      edgeGeo = <cylinderGeometry args={[0.5, 0.5, 1, 16]} />;
-      break;
-    case "plane":
-      geometry = <planeGeometry args={[1, 1]} />;
-      edgeGeo = <planeGeometry args={[1, 1]} />;
-      break;
+    case "sphere":   geometry = <sphereGeometry args={[0.5, 32, 32]} />; break;
+    case "cylinder": geometry = <cylinderGeometry args={[0.5, 0.5, 1, 32]} />; break;
+    case "plane":    geometry = <planeGeometry args={[1, 1]} />; break;
     case "cube":
-    default:
-      geometry = <boxGeometry args={[1, 1, 1]} />;
-      edgeGeo = <boxGeometry args={[1, 1, 1]} />;
+    default:         geometry = <boxGeometry args={[1, 1, 1]} />;
   }
 
   return (
@@ -925,12 +888,6 @@ export default function EditorPage() {
     return groups;
   }, [scripts]);
 
-  // If the Animate tab is active but no object is selected, fall back to Scene.
-  useEffect(() => {
-    if (activeTab === "animate" && !selected) {
-      setActiveTab("scene");
-    }
-  }, [selected, activeTab]);
 
   /** Open a script in the editor tab. */
   const openScript = (s: Script) => {
@@ -1656,8 +1613,55 @@ export default function EditorPage() {
           {/* ─── Entity (primitive/model) properties ─── */}
           {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && (
             <>
+              {/* Model-specific section */}
+              {selected.type === "model" && (() => {
+                const fileUrl = getProp<string>("fileUrl", "");
+                const fileName = fileUrl ? fileUrl.split("/").pop() ?? fileUrl : null;
+                const playingClip = getProp<string>("playingClip", "");
+                const animSpeed = getProp<number>("animationSpeed", 1);
+                return (
+                  <div className="space-y-3">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">3D Model</Label>
+                    {fileName ? (
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">File</Label>
+                        <div className="text-xs font-mono text-foreground/70 bg-muted px-2 py-1.5 rounded truncate" title={fileUrl}>
+                          {fileName}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground italic">No model file — import a .glb via the menu.</p>
+                    )}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Playing Clip</Label>
+                      <Input
+                        value={playingClip}
+                        onChange={(e) => handlePropertyChange({ playingClip: e.target.value })}
+                        placeholder='e.g. "idle" or "walk"'
+                        className="text-xs font-mono"
+                        data-testid="input-playing-clip"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Clip name from the Model Clips tab (Animate panel)</p>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px] text-muted-foreground">Anim Speed</Label>
+                        <span className="text-[10px] text-muted-foreground tabular-nums">{animSpeed.toFixed(2)}×</span>
+                      </div>
+                      <Slider
+                        value={[animSpeed]}
+                        min={0}
+                        max={4}
+                        step={0.05}
+                        onValueChange={([v]) => handlePropertyChange({ animationSpeed: v })}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="space-y-1.5">
-                <Label className="text-xs">Color</Label>
+                <Label className="text-xs">{selected.type === "model" ? "Tint Color" : "Color"}</Label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
@@ -1839,20 +1843,6 @@ export default function EditorPage() {
                     </div>
                   </div>
                 )}
-              </div>
-            </>
-          )}
-
-          {/* ─── Sculpt ─── */}
-          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "model" && (
-            <>
-              <Separator />
-              <div className="space-y-1">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Sculpt</Label>
-                <SculptPanel
-                  selectedObject={selected}
-                  gameId={gameId}
-                />
               </div>
             </>
           )}
@@ -2197,13 +2187,11 @@ export default function EditorPage() {
                     </button>
                   </TabsTrigger>
                 )}
-                {/* Animate tab appears whenever an object is selected */}
-                {selected && (
-                  <TabsTrigger value="animate" data-testid="tab-animate">
-                    <Sparkles className="w-3.5 h-3.5 mr-1.5" />
-                    Animate
-                  </TabsTrigger>
-                )}
+                {/* Animate tab — always visible */}
+                <TabsTrigger value="animate" data-testid="tab-animate">
+                  <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                  Animate
+                </TabsTrigger>
               </TabsList>
             </div>
 
