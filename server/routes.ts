@@ -41,10 +41,18 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // Version endpoint — clients poll this to detect new deployments
+  // Version endpoint — clients poll this to detect new deployments.
+  // The extra headers tell every caching layer (browser, Render CDN, Fastly,
+  // Cloudflare, etc.) never to store or reuse this response.
   app.get('/api/version', (_req, res) => {
-    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.json({ buildId: BUILD_ID });
+    res.set({
+      'Cache-Control':   'no-store, no-cache, must-revalidate, private, max-age=0',
+      'Pragma':          'no-cache',
+      'Expires':         '0',
+      'Surrogate-Control': 'no-store',          // Fastly / Varnish
+      'CDN-Cache-Control': 'no-store, max-age=0', // Cloudflare / generic CDN
+    });
+    res.json({ buildId: BUILD_ID, ts: Date.now() });
   });
 
   // Auth middleware

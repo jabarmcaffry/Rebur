@@ -14,17 +14,25 @@ import "./index.css";
   // by the Vite dev server, so we skip the watch when the tag is absent).
   if (!startingBuildId) return;
 
-  const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+  const CHECK_INTERVAL_MS = 30 * 1000; // 30 seconds
 
   async function checkVersion() {
     try {
       const apiBase = (import.meta.env?.VITE_API_URL ?? "").replace(/\/$/, "");
-      const res = await fetch(`${apiBase}/api/version`, { cache: "no-store" });
+      // Append a timestamp so no browser or CDN can cache this request.
+      const res = await fetch(`${apiBase}/api/version?_=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "pragma": "no-cache", "cache-control": "no-cache" },
+      });
       if (!res.ok) return;
       const { buildId } = await res.json();
       if (buildId && buildId !== startingBuildId) {
-        // New deployment detected — hard reload to pick up fresh assets.
-        window.location.reload();
+        // New deployment detected — replace the URL with a cache-busting
+        // query param so the browser is forced to re-fetch index.html and
+        // all assets rather than serving anything from disk cache.
+        const url = new URL(window.location.href);
+        url.searchParams.set("_reload", String(Date.now()));
+        window.location.replace(url.toString());
       }
     } catch {
       // Network error — silently skip, will retry next interval.
