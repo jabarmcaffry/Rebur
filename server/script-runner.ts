@@ -124,7 +124,7 @@ export interface GuiElement {
   id: string;
   kind: "text" | "button" | "image" | "bar";
   text?: string;
-  x: number; y: number;
+  x?: number; y?: number;
   width?: number; height?: number;
   anchor?: string;
   color?: string;
@@ -1378,7 +1378,7 @@ export class ScriptRunner {
     this._fireGlobal("tick", dt);
   }
 
-  // ── Public event firing (called by GameRoom) ────────────────────────────────
+  // ── Public event firing (called by GameRoom) ───────��────────────────────────
 
   firePlayerAdded(player: ScriptPlayerState) {
     this._fireGlobal("playerjoined", this._makePlayerProxy(player));
@@ -1484,7 +1484,7 @@ export class ScriptRunner {
     this.playerGuiClickHandlers.delete(playerId);
   }
 
-  // ── Drain queues (called by GameRoom each tick) ─────────────────────────────
+  // ── Drain queues (called by GameRoom each tick) ──────────���──────────────────
 
   drainSounds(): ScriptSoundEvent[]          { const s=[...this.soundQueue]; this.soundQueue=[]; return s; }
   drainCreatedObjects(): ScriptCreatedObject[]{ const o=[...this.createdObjects]; this.createdObjects=[]; return o; }

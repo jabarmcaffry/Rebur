@@ -423,16 +423,23 @@ export interface AnimationDef {
   name: string;
   duration: number;
   loop: boolean;
+  autoPlay?: boolean;
   keyframes: Keyframe[];
 }
 
 /** Joint / constraint definition used by AnimationEditor rig view. */
 export interface JointDef {
   id: string;
+  name?: string;
   type: "fixed" | "hinge" | "ball" | "slider";
-  objectId: string;
+  targetObjectId: string;
   parentId?: string;
   anchor?: { x: number; y: number; z: number };
-  axis?: { x: number; y: number; z: number };
+  axis?: [number, number, number];
+  offsetX?: number;
+  offsetY?: number;
+  offsetZ?: number;
+  minAngle?: number;
+  maxAngle?: number;
   limits?: { min: number; max: number };
 }
