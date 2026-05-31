@@ -321,6 +321,8 @@ interface Props {
   allObjects: GameObject[];
   gameId: string;
   onObjectUpdate?: (obj: GameObject) => void;
+  /** Called whenever the animation scrub head moves — lets the viewport preview the pose. Null = stop preview. */
+  onPreviewTransform?: (t: Partial<Record<keyof Keyframe, number>> | null) => void;
 }
 
 type EditorTab = "animations" | "gltf-clips" | "joints";
@@ -328,7 +330,7 @@ type EditorTab = "animations" | "gltf-clips" | "joints";
 const isModelObject = (obj: GameObject | null) =>
   obj?.type === "model" && !!(obj?.properties as any)?.fileUrl;
 
-export default function AnimationEditor({ selectedObject, allObjects, gameId, onObjectUpdate }: Props) {
+export default function AnimationEditor({ selectedObject, allObjects, gameId, onObjectUpdate, onPreviewTransform }: Props) {
   const [tab, setTab] = useState<EditorTab>("animations");
   const [selectedAnimId, setSelectedAnimId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -382,6 +384,23 @@ export default function AnimationEditor({ selectedObject, allObjects, gameId, on
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [playing, selectedAnim, stopPlayback]);
+
+  // ── live viewport preview ─────────────────────────────────────────────────
+  // Whenever the scrub head moves (playing or dragging), push the sampled pose
+  // to the editor viewport so the user can see the animation happening live.
+  useEffect(() => {
+    if (!onPreviewTransform) return;
+    if (!selectedAnim || selectedAnim.keyframes.length === 0) {
+      onPreviewTransform(null);
+      return;
+    }
+    onPreviewTransform(sampleAnim(selectedAnim, currentTime));
+  }, [currentTime, selectedAnim, onPreviewTransform]);
+
+  // Clear preview when the animation editor loses its selection or unmounts.
+  useEffect(() => {
+    return () => { onPreviewTransform?.(null); };
+  }, [selectedObject?.id]);
 
   // ── animation CRUD ────────────────────────────────────────────────────────
   const addAnimation = () => {

@@ -252,20 +252,27 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   scale: [number, number, number];
   selected: boolean;
   onClick: () => void;
-}>(function GltfLoader({ url, position, rotation, scale, selected, onClick }, ref) {
+  /** Called once when the GLTF scene graph is parsed — provides the list of named mesh/group names. */
+  onPartsLoaded?: (parts: string[]) => void;
+}>(function GltfLoader({ url, position, rotation, scale, selected, onClick, onPartsLoaded }, ref) {
   const { scene, animations, loading, error } = useGLTFModel(url);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clonedRef = useRef<THREE.Group | null>(null);
 
-  const { cloned, edgeOverlay, hitSize, hitCenter } = useMemo(() => {
-    if (!scene) return { cloned: null, edgeOverlay: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number] };
+  const { cloned, edgeOverlay, hitSize, hitCenter, partNames } = useMemo(() => {
+    if (!scene) return { cloned: null, edgeOverlay: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number], partNames: [] as string[] };
 
     const c = scene.clone(true);
+    const discovered: string[] = [];
     c.traverse((child: any) => {
       if (child.isMesh && child.material) {
         child.material = Array.isArray(child.material)
           ? child.material.map((m: THREE.Material) => m.clone())
           : child.material.clone();
+      }
+      // Collect named nodes (meshes and groups with meaningful names)
+      if (child.name && child.name !== scene.name && !child.name.match(/^(RootNode|Scene|Armature|Skeleton|_rootJoint)$/i)) {
+        if (child.isMesh || child.isGroup) discovered.push(child.name);
       }
     });
 
@@ -294,8 +301,14 @@ const GltfLoader = forwardRef<THREE.Object3D, {
       edgeOverlay: eo,
       hitSize: [normSize.x * 1.08, normSize.y * 1.08, normSize.z * 1.08] as [number, number, number],
       hitCenter: [normCenter.x, normCenter.y, normCenter.z] as [number, number, number],
+      partNames: [...new Set(discovered)],
     };
   }, [scene]);
+
+  // Report named parts to parent once loaded
+  useEffect(() => {
+    if (partNames.length > 0) onPartsLoaded?.(partNames);
+  }, [partNames, onPartsLoaded]);
 
   // Set up AnimationMixer and auto-play the first clip
   useEffect(() => {
@@ -392,10 +405,11 @@ interface PrimitiveMeshProps {
   obj: GameObject;
   selected: boolean;
   onClick: () => void;
+  onPartsLoaded?: (objectId: string, parts: string[]) => void;
 }
 
 const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function PrimitiveMesh(
-  { obj, selected, onClick },
+  { obj, selected, onClick, onPartsLoaded },
   ref,
 ) {
   const position: [number, number, number] = [obj.positionX ?? 0, obj.positionY ?? 0, obj.positionZ ?? 0];
@@ -443,7 +457,16 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
       );
     }
     return (
-      <GltfLoader ref={ref} url={modelUrl} position={position} rotation={rotation} scale={scale} selected={selected} onClick={onClick} />
+      <GltfLoader
+        ref={ref}
+        url={modelUrl}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        selected={selected}
+        onClick={onClick}
+        onPartsLoaded={(parts) => onPartsLoaded?.(obj.id, parts)}
+      />
     );
   }
 
@@ -519,6 +542,12 @@ export default function EditorPage() {
   const [publishDest, setPublishDest] = useState<"platform" | "embed" | "both">("platform");
   const [publishAudience, setPublishAudience] = useState<"everyone" | "friends" | "private">("everyone");
   const [publishDesc, setPublishDesc] = useState("");
+  /** Pose override applied to the selected object while the Animate tab is scrubbing/playing. */
+  const [animPreview, setAnimPreview] = useState<Partial<Record<string, number>> | null>(null);
+  /** Named meshes discovered inside a loaded GLTF, keyed by object id. */
+  const [modelParts, setModelParts] = useState<Record<string, string[]>>({});
+  /** Which virtual mesh part is highlighted: "objectId:meshName" */
+  const [selectedPartKey, setSelectedPartKey] = useState<string | null>(null);
 
   const { data: game } = useQuery<Game>({ queryKey: ["/api/games", gameId] });
   const { data: objects = [] } = useQuery<GameObject[]>({ queryKey: ["/api/games", gameId, "objects"] });
@@ -1321,6 +1350,24 @@ export default function EditorPage() {
         {childObjs.map((child) => (
           <ObjectTreeRow key={child.id} o={child} containerName={containerName} indent={indent + 12} />
         ))}
+        {/* Virtual GLTF mesh parts — discovered when the model loads in the viewport */}
+        {o.type === "model" && (modelParts[o.id] ?? []).map((partName) => {
+          const partKey = `${o.id}:${partName}`;
+          const isPartSelected = selectedPartKey === partKey;
+          return (
+            <div
+              key={partKey}
+              className={`flex items-center gap-1 rounded-md cursor-pointer transition-colors ${
+                isPartSelected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/40 text-muted-foreground hover:text-foreground"
+              }`}
+              style={{ paddingLeft: indent + 20 }}
+              onClick={() => setSelectedPartKey(isPartSelected ? null : partKey)}
+            >
+              <Box className="w-3 h-3 shrink-0 opacity-60 my-0.5" />
+              <span className="text-xs py-1.5 truncate">{partName}</span>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -1660,23 +1707,30 @@ export default function EditorPage() {
                 );
               })()}
 
-              <div className="space-y-1.5">
-                <Label className="text-xs">{selected.type === "model" ? "Tint Color" : "Color"}</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={selected.color ?? "#888888"}
-                    onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                    className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
-                    data-testid="input-object-color"
-                  />
-                  <Input
-                    value={selected.color ?? "#888888"}
-                    onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                    className="font-mono text-xs"
-                  />
+              {selected.type !== "model" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selected.color ?? "#888888"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                      data-testid="input-object-color"
+                    />
+                    <Input
+                      value={selected.color ?? "#888888"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
+              {selected.type === "model" && (
+                <p className="text-[10px] text-muted-foreground italic">
+                  Colors come from the GLTF materials — edit in Blender/Maya and re-import.
+                </p>
+              )}
               <Separator />
               <VectorField
                 label="Position"
@@ -2235,13 +2289,29 @@ export default function EditorPage() {
                       <Suspense fallback={null}>
                         {renderableObjects.map((obj) => {
                           const isSelected = selectedId === obj.id;
+                          // Apply animation-editor preview pose (position/rotation/scale override)
+                          const previewedObj = (isSelected && animPreview)
+                            ? {
+                                ...obj,
+                                positionX: animPreview.px ?? obj.positionX,
+                                positionY: animPreview.py ?? obj.positionY,
+                                positionZ: animPreview.pz ?? obj.positionZ,
+                                rotationX: animPreview.rx !== undefined ? animPreview.rx * (Math.PI / 180) : obj.rotationX,
+                                rotationY: animPreview.ry !== undefined ? animPreview.ry * (Math.PI / 180) : obj.rotationY,
+                                rotationZ: animPreview.rz !== undefined ? animPreview.rz * (Math.PI / 180) : obj.rotationZ,
+                                scaleX: animPreview.sx ?? obj.scaleX,
+                                scaleY: animPreview.sy ?? obj.scaleY,
+                                scaleZ: animPreview.sz ?? obj.scaleZ,
+                              }
+                            : obj;
                           const mesh = (
                             <PrimitiveMesh
                               key={obj.id}
-                              obj={obj}
+                              obj={previewedObj}
                               selected={isSelected}
                               onClick={() => setSelectedId(obj.id)}
                               ref={isSelected ? selectedMeshRef : null}
+                              onPartsLoaded={(oid, parts) => setModelParts(prev => ({ ...prev, [oid]: parts }))}
                             />
                           );
                           if (isSelected && selectedObjectIsTransformable) {
@@ -2496,6 +2566,7 @@ export default function EditorPage() {
                 selectedObject={selected}
                 allObjects={objects ?? []}
                 gameId={gameId}
+                onPreviewTransform={(t) => setAnimPreview(t as any)}
               />
             </TabsContent>
           </Tabs>
