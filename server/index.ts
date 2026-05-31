@@ -65,12 +65,18 @@ app.use((req, res, next) => {
 });
 
 // ── No-cache on every response ───────────────────────────────────────────────
-// Render.com's CDN must never serve a stale response. Set this before all
-// routes so every API reply, redirect, and error carries these headers.
+// Kill caching at every layer: browser, Render CDN (Fastly/Varnish),
+// and any generic CDN in between.
+// `private` is the key addition — without it, shared/CDN caches are
+// allowed to store responses even when Cache-Control says no-cache.
+// `Surrogate-Control` is the Fastly/Varnish kill-switch used by Render.
+// `CDN-Cache-Control` covers Cloudflare and generic CDN nodes.
 app.use((_req, res, next) => {
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
+  res.setHeader("Surrogate-Control", "no-store");
+  res.setHeader("CDN-Cache-Control", "no-store, max-age=0");
   next();
 });
 

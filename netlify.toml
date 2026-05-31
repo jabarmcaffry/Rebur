@@ -11,12 +11,19 @@
 
 # ── Cache headers ────────────────────────────────────────────────────────────
 # index.html and everything else: never cache — always fetch fresh.
+# `private` tells shared/CDN caches this response is not for them.
+# `Netlify-CDN-Cache-Control` is Netlify's own CDN kill-switch and takes
+# priority over Cache-Control for their edge nodes.
+# `Surrogate-Control` covers Fastly/Varnish layers.
 [[headers]]
   for = "/*"
   [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
+    Cache-Control = "no-store, no-cache, must-revalidate, private, max-age=0"
     Pragma = "no-cache"
     Expires = "0"
+    Netlify-CDN-Cache-Control = "no-store, max-age=0"
+    Surrogate-Control = "no-store"
+    CDN-Cache-Control = "no-store, max-age=0"
 
 # Hashed assets (e.g. /assets/index-AbCd1234.js) can be cached forever
 # because the filename changes every build.
