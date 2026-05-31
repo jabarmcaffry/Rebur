@@ -127,6 +127,8 @@ export function serveStatic(app: Express) {
   app.use(
     express.static(distPath, {
       index: false,
+      etag: false,
+      lastModified: false,
       setHeaders(res) {
         res.set(noCacheHeaders);
       },

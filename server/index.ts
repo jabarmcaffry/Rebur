@@ -8,6 +8,13 @@ process.env.NODE_ENV = process.env.NODE_ENV || "development";
 
 const app = express();
 
+// Disable Express's built-in ETag generation globally.
+// Without this, Express computes ETags for every response and happily
+// returns 304 Not Modified when the browser sends If-None-Match — even
+// when Cache-Control says no-cache/no-store. Killing ETags at the app
+// level means every request always gets a fresh 200.
+app.set("etag", false);
+
 // ── CORS ────────────────────────────────────────────────────────────────────
 // In production (API_ONLY mode on Render.com), the Netlify frontend makes
 // WebSocket connections directly to this server.  Allow those cross-origin
