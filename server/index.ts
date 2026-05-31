@@ -57,6 +57,16 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── No-cache on every response ───────────────────────────────────────────────
+// Render.com's CDN must never serve a stale response. Set this before all
+// routes so every API reply, redirect, and error carries these headers.
+app.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: false }));
 
