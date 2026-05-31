@@ -1,19 +1,19 @@
-services:
-  - type: web
-    name: rebur-engine
-    runtime: node
-    region: oregon
-    plan: free
-    buildCommand: rm -rf node_modules package-lock.json && npm cache clean --force && npm install
- && npm run build:server && npm run build:client
-    startCommand: npm start
-    healthCheckPath: /api/health
-    envVars:
-      - key: NODE_ENV
-        value: development
-      - key: API_ONLY
-        value: true
-      - key: SESSION_SECRET
-        generateValue: true
+# Exported from Render on 2026-05-31T17:06:53Z
+version: "1"
+projects:
+- name: My project
+  environments:
+  - name: Production
+    services:
+    - type: web
+      name: Rebur
+      runtime: node
+      repo: https://github.com/jabarmcaffry/Rebur
+      plan: free
+      envVars:
       - key: DATABASE_URL
         sync: false
+      region: oregon
+      buildCommand: npm install
+      startCommand: npm run start
+      autoDeployTrigger: "off"
