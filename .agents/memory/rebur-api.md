@@ -46,15 +46,25 @@ Real AABB slab-method in `Rebur.Workspace.raycast()`. Tests Workspace objects on
 ## player.input.on() auto-cleanup
 Returns an unsubscribe fn AND registers it in `perPlayerInputUnsubs`. `clearPlayerHeldKeys(playerId)` calls all those unsubscribes automatically. No manual playerLeft bookkeeping needed.
 
+## Implemented APIs (post-audit)
+- `body.setVelocity(v)` — sets velX/Y/Z directly; game-room picks them up next physics step (bidirectional sync)
+- `body.angularVelocity` — read-only {x:0,y:0,z:0}; no angular simulation exists
+- `body.applyTorque(t)` — warns + no-ops; no angular simulation
+- `player.rotation` — getter returns {x:0, y:p.heading, z:0}; setter writes mut().heading which is applied to p.rotY in game-room; heading synced back from physics each frame (sp.heading = p.rotY)
+- `player.setAttribute(k,v)` / `player.getAttribute(k)` — backed by p._attrs Map<string,any>; works on both makePlayerProxy and _makePlayerProxy
+- `entity.type` — returns obj.type ?? "primitive" (was hardcoded "primitive"); primitiveType also now exposed
+- `Rebur.Workspace.query({type})` — filter now uses (o.type ?? "primitive") === filter.type; type/primitiveType populated in game-room setObjects
+- `Rebur.Input.isDown` — removed from monaco completions and doc string; per-player held state is player.input.key()
+- Container dropdown — added to Properties panel in Editor.tsx; uses handleObjectFieldChange("container", value)
+
 ## Core gaps (not yet real)
 1. `collisionStarted`/`collisionEnded` — never fired
-2. `player.body.applyImpulse` — stub
-3. `Rebur.Input.isDown()` — always false
-4. `player.animator` — stub
-5. `player.inventory` + `player.motors` — stubs
-6. `player.data` + `Rebur.DataStore` — in-memory only
-7. `Rebur.Camera` — settings not applied client-side
-8. `entity.setParent()`/`parent`/`children` — stubs
-9. Raycast doesn't hit players
-10. `Rebur.Network.on()` from client — no client LocalScript yet
-11. `Rebur.Lighting` / `Rebur.ReplicatedStorage` / `Rebur.ServerStorage` entities are read-only (no create/raycast)
+2. `player.animator` — stub
+3. `player.inventory` + `player.motors` — stubs
+4. `player.data` + `Rebur.DataStore` — in-memory only
+5. `Rebur.Camera` — settings not applied client-side
+6. `entity.setParent()`/`parent`/`children` — stubs
+7. Raycast doesn't hit players
+8. `Rebur.Network.on()` from client — no client LocalScript yet
+9. `Rebur.Lighting` / `Rebur.ReplicatedStorage` / `Rebur.ServerStorage` entities are read-only (no create/raycast)
+10. Angular physics — no simulation; angularVelocity always {0,0,0}; applyTorque warns + no-ops

@@ -150,6 +150,8 @@ export class GameRoom {
       this.scriptObjs.set(o.name ?? o.id, {
         id: o.id, name: o.name ?? "Part",
         container: c,
+        type: o.type ?? "primitive",
+        primitiveType: o.primitiveType ?? undefined,
         positionX: px, positionY: py, positionZ: pz,
         rotationX: o.rotationX ?? 0, rotationY: o.rotationY ?? 0, rotationZ: o.rotationZ ?? 0,
         scaleX: sx, scaleY: sy, scaleZ: sz,
@@ -388,6 +390,7 @@ export class GameRoom {
         if (mut.impulseX !== undefined) p.vx += mut.impulseX;
         if (mut.impulseY !== undefined) p.vy += mut.impulseY;
         if (mut.impulseZ !== undefined) p.vz += mut.impulseZ;
+        if (mut.heading  !== undefined) p.rotY = mut.heading;
         if (p.health <= 0) this._handlePlayerDeath(p);
       }
     }
@@ -443,6 +446,7 @@ export class GameRoom {
         sp.health = p.health; sp.maxHealth = p.maxHealth;
         sp.speed = p.speed; sp.jumpPower = p.jumpPower;
         sp.shirtColor = p.shirtColor; sp.skinColor = p.skinColor; sp.pantsColor = p.pantsColor;
+        sp.heading = p.rotY; // keep rotation.y in sync with physics
       }
     }
 

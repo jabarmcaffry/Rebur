@@ -1304,6 +1304,24 @@ export default function EditorPage() {
             </span>
           </div>
 
+          {/* ─── Container dropdown ─── */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Container</Label>
+            <Select
+              value={selected.container ?? "Workspace"}
+              onValueChange={(v) => handleObjectFieldChange("container", v)}
+            >
+              <SelectTrigger data-testid="select-container">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CONTAINERS.map((c) => (
+                  <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* ─── Audio-specific properties ─── */}
           {selected.type === "audio" && (
             <>

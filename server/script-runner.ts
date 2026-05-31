@@ -20,6 +20,8 @@ export interface ScriptObjState {
   id: string;
   name: string;
   container?: string;
+  type?: string;          // "primitive" | "model" | "light" | "audio" | "folder"
+  primitiveType?: string; // "cube" | "sphere" | "cylinder" | "plane"
   positionX: number; positionY: number; positionZ: number;
   rotationX: number; rotationY: number; rotationZ: number;
   scaleX: number;    scaleY: number;    scaleZ: number;
@@ -55,6 +57,8 @@ export interface ScriptPlayerState {
   pantsColor: string;
   spawnX?: number; spawnY?: number; spawnZ?: number;
   onGround?: boolean;
+  heading?: number;          // yaw in radians — player.rotation.y
+  _attrs?: Map<string, any>; // per-player setAttribute store
 }
 
 export interface ScriptPlayerMutation {
@@ -70,6 +74,7 @@ export interface ScriptPlayerMutation {
   pantsColor?: string;
   spawnPoint?: { x: number; y: number; z: number };
   impulseX?: number; impulseY?: number; impulseZ?: number;
+  heading?: number;  // yaw in radians — applied to the player's facing angle
 }
 
 export interface ScriptCreatedObject {
@@ -365,7 +370,8 @@ export class ScriptRunner {
         set friction(v)     { obj.friction = Math.max(0, +v); },
         get restitution()   { return obj.restitution ?? 0; },
         set restitution(v)  { obj.restitution = Math.max(0, Math.min(1, +v)); },
-        get velocity()      { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
+        get velocity()            { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
+        get angularVelocity()     { return { x: 0, y: 0, z: 0 }; }, // no angular sim yet
         applyForce(f: any) {
           obj.forceX = (obj.forceX ?? 0) + (+(f?.x ?? 0));
           obj.forceY = (obj.forceY ?? 0) + (+(f?.y ?? 0));
@@ -376,13 +382,22 @@ export class ScriptRunner {
           obj.impulseY = (obj.impulseY ?? 0) + (+(f?.y ?? 0));
           obj.impulseZ = (obj.impulseZ ?? 0) + (+(f?.z ?? 0));
         },
+        setVelocity(v: any) {
+          obj.velX = +(v?.x ?? 0);
+          obj.velY = +(v?.y ?? 0);
+          obj.velZ = +(v?.z ?? 0);
+        },
+        applyTorque(_t: any) {
+          warn("body.applyTorque() is not yet simulated — angular physics is not supported.");
+        },
       };
 
       const ep: any = {
         get id()        { return obj.id; },
         get name()      { return obj.name; },
         set name(v)     { obj.name = String(v); },
-        get type()      { return "primitive"; },
+        get type()      { return obj.type ?? "primitive"; },
+        get primitiveType() { return obj.primitiveType ?? null; },
         get isPlayer()  { return false; },
         get destroyed() { return obj._destroyed === true; },
 
@@ -601,8 +616,8 @@ export class ScriptRunner {
 
         get position()   { return { x: p.position.x, y: p.position.y, z: p.position.z }; },
         set position(v: any) { mut().teleport = { x: +(v?.x??0), y: +(v?.y??0), z: +(v?.z??0) }; },
-        get rotation()   { return { x: 0, y: 0, z: 0 }; },
-        set rotation(_v) {},
+        get rotation()   { return { x: 0, y: p.heading ?? 0, z: 0 }; },
+        set rotation(v: any) { const y = +(v?.y ?? 0); p.heading = y; mut().heading = y; },
 
         get health()        { return p.health; },
         set health(v: any)  { const n=Math.max(0,+v); p.health=n; mut().health=n; },
@@ -650,8 +665,8 @@ export class ScriptRunner {
           }
           return true;
         },
-        setAttribute(_k: string, _v: any) {},
-        getAttribute(_k: string) { return undefined; },
+        setAttribute(k: string, v: any) { if (!p._attrs) p._attrs = new Map(); p._attrs.set(k, v); },
+        getAttribute(k: string) { return p._attrs?.get(k); },
       };
     };
 
@@ -761,7 +776,7 @@ export class ScriptRunner {
           }
         }
         if (filter?.type) {
-          results = results.filter(o => "primitive" === filter.type || (o as any).type === filter.type);
+          results = results.filter(o => (o.type ?? "primitive") === filter.type);
         }
         if (filter?.where) {
           results = results.filter(o => {
@@ -1354,8 +1369,8 @@ export class ScriptRunner {
       get type()      { return "player"; },
       get position()  { return { x: p.position.x, y: p.position.y, z: p.position.z }; },
       set position(v: any) { mut().teleport = { x: +(v?.x??0), y: +(v?.y??0), z: +(v?.z??0) }; },
-      get rotation()  { return { x: 0, y: 0, z: 0 }; },
-      set rotation(_v: any) {},
+      get rotation()  { return { x: 0, y: p.heading ?? 0, z: 0 }; },
+      set rotation(v: any) { const y = +(v?.y ?? 0); p.heading = y; mut().heading = y; },
       get health()           { return p.health; },
       set health(v: any)     { const n=Math.max(0,+v); p.health=n; mut().health=n; },
       get maxHealth()        { return p.maxHealth; },
@@ -1391,8 +1406,8 @@ export class ScriptRunner {
         for (const h of self.objHandlers.get(key) ?? []) { try { h(...args); } catch { /* isolate */ } }
         return true;
       },
-      setAttribute(_k: string, _v: any) {},
-      getAttribute(_k: string) { return undefined; },
+      setAttribute(k: string, v: any) { if (!p._attrs) p._attrs = new Map(); p._attrs.set(k, v); },
+      getAttribute(k: string) { return p._attrs?.get(k); },
       gui: {
         text:   (id: string, text: string, opts?: any) => { getPlayerMap().set(id, { id, kind:"text", text, ...mapGuiOpts(opts), visible:true }); },
         button: (id: string, text: string, opts?: any, onClick?: any) => {

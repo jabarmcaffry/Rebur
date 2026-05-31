@@ -1248,7 +1248,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur.Input",
     kind: K.Variable,
     detail: "InputAPI — keyboard & mouse",
-    doc: "Keyboard and mouse input.\n\nMethods:\n- .on('press', fn)      — fn(player, key) fires on key down\n- .on('release', fn)    — fn(player, key) fires on key up\n- .on('mouseClick', fn) — fn(player, entity|null) fires on 3D click\n- .off(event, fn)       — remove a listener\n- .isDown(key)          — poll whether a key is currently held",
+    doc: "Keyboard and mouse input.\n\nMethods:\n- .on('press', fn)      — fn(player, key) fires on key down\n- .on('release', fn)    — fn(player, key) fires on key up\n- .on('mouseClick', fn) — fn(player, entity|null) fires on 3D click\n- .off(event, fn)       — remove a listener\n\nTo poll whether a specific key is held for a specific player, use:\n  player.input.key('w')   — returns true/false",
     insert: "Rebur.Input",
   },
   {
@@ -1273,14 +1273,6 @@ const COMPLETIONS: CompletionDef[] = [
     detail: "Rebur.Input.on('mouseClick', fn) → unsubscribe",
     doc: "Called on every 3D viewport click. Callback receives (player, entity | null).\nfires for the player who clicked. entity is null if the click hit empty space.\n\nExample:\nRebur.Input.on('mouseClick', (player, entity) => {\n  if (entity) log(player.username, 'clicked', entity.name);\n});",
     insert: "Rebur.Input.on(\"mouseClick\", (player, entity) => {\n\tif (entity) {\n\t\t${1}\n\t}\n})",
-    snippet: true,
-  },
-  {
-    label: "Rebur.Input.isDown",
-    kind: K.Function,
-    detail: "Rebur.Input.isDown(key) → boolean",
-    doc: "Poll whether a key is currently held by any player. Use inside a tick loop.",
-    insert: "Rebur.Input.isDown(\"${1:w}\")",
     snippet: true,
   },
   {
