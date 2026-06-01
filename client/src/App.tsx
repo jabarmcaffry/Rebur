@@ -15,6 +15,7 @@ import AlertsPage from "@/pages/AlertsPage";
 import EditorPage from "@/pages/Editor";
 import PlayPage from "@/pages/PlayPage";
 import ProfilePage from "@/pages/Profile";
+import AdminDashboard from "@/pages/AdminDashboard";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -58,6 +59,9 @@ function Router() {
       </Route>
       <Route path="/profile">
         <ProtectedRoute component={ProfilePage} />
+      </Route>
+      <Route path="/admin">
+        <ProtectedRoute component={AdminDashboard} />
       </Route>
       {/* Legacy redirects */}
       <Route path="/dashboard">
