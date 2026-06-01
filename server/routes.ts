@@ -25,7 +25,7 @@ const upload = multer({
   }),
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
   fileFilter: (req, file, cb) => {
-    const allowedExts = ['.glb', '.gltf', '.png', '.jpg', '.jpeg', '.mp3', '.wav', '.ogg', '.m4a', '.aac'];
+    const allowedExts = ['.glb', '.gltf', '.fbx', '.png', '.jpg', '.jpeg', '.mp3', '.wav', '.ogg', '.m4a', '.aac'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedExts.includes(ext)) {
       cb(null, true);

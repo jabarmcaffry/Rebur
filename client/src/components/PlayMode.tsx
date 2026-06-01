@@ -412,9 +412,19 @@ export default function PlayMode({
               fadeDistance={60}
               infiniteGrid
             />
-            {renderableObjects.map((o) => (
-              <Primitive key={o.id} obj={o} />
-            ))}
+            {renderableObjects.map((o) => {
+              // Streaming: compute distance to local player for LOD decisions
+              const px = localPlayer?.position.x ?? 0;
+              const py = localPlayer?.position.y ?? 0;
+              const pz = localPlayer?.position.z ?? 0;
+              const dx = o.position.x - px;
+              const dy = o.position.y - py;
+              const dz = o.position.z - pz;
+              const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+              // Streaming radius: skip objects beyond 200 units
+              if (dist > 200) return null;
+              return <Primitive key={o.id} obj={o} distanceToPlayer={dist} />;
+            })}
             <Avatar player={player} isLocal={true} />
             {renderPlayers.map((rp) => (
               <Avatar key={rp.id} player={rp} isLocal={false} />

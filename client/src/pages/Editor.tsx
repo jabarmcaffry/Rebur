@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
-import { useGLTFModel } from "@/lib/gltf-loader";
+import { useModelFile } from "@/lib/gltf-loader";
 import MonacoEditor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -255,7 +255,7 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   /** Called once when the GLTF scene graph is parsed — provides the list of named mesh/group names. */
   onPartsLoaded?: (parts: string[]) => void;
 }>(function GltfLoader({ url, position, rotation, scale, selected, onClick, onPartsLoaded }, ref) {
-  const { scene, animations, loading, error } = useGLTFModel(url);
+  const { scene, animations, loading, error } = useModelFile(url);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clonedRef = useRef<THREE.Group | null>(null);
 
@@ -344,7 +344,13 @@ const GltfLoader = forwardRef<THREE.Object3D, {
     return (
       <mesh ref={ref as any} position={position} rotation={rotation} scale={scale} onClick={(e) => { e.stopPropagation(); onClick(); }}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color="#ef4444" wireframe />
+        <meshStandardMaterial color="#666666" wireframe />
+        {selected && (
+          <lineSegments>
+            <edgesGeometry args={[new THREE.BoxGeometry(1, 1, 1)]} />
+            <lineBasicMaterial color="#a855f7" transparent opacity={0.9} depthTest={false} />
+          </lineSegments>
+        )}
       </mesh>
     );
   }
@@ -548,6 +554,8 @@ export default function EditorPage() {
   const [modelParts, setModelParts] = useState<Record<string, string[]>>({});
   /** Which virtual mesh part is highlighted: "objectId:meshName" */
   const [selectedPartKey, setSelectedPartKey] = useState<string | null>(null);
+  /** Model objects whose GLTF parts are expanded in the hierarchy. */
+  const [expandedModelIds, setExpandedModelIds] = useState<Set<string>>(new Set());
 
   const { data: game } = useQuery<Game>({ queryKey: ["/api/games", gameId] });
   const { data: objects = [] } = useQuery<GameObject[]>({ queryKey: ["/api/games", gameId, "objects"] });
@@ -723,13 +731,13 @@ export default function EditorPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    const validExtensions = ['.glb', '.gltf'];
+    const validExtensions = ['.glb', '.gltf', '.fbx'];
     const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
     
     if (!validExtensions.includes(ext)) {
       toast({
         title: "Invalid file type",
-        description: "Please select a .glb or .gltf file",
+        description: "Please select a .glb, .gltf, or .fbx file",
         variant: "destructive",
       });
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1329,6 +1337,25 @@ export default function EditorPage() {
           <div className="cursor-grab active:cursor-grabbing p-1 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity">
             <GripVertical className="w-3 h-3 text-muted-foreground" />
           </div>
+          {/* Expand/collapse chevron for model objects that have parts loaded */}
+          {o.type === "model" && (modelParts[o.id] ?? []).length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpandedModelIds(prev => {
+                  const next = new Set(prev);
+                  next.has(o.id) ? next.delete(o.id) : next.add(o.id);
+                  return next;
+                });
+              }}
+              className="p-1 opacity-60 hover:opacity-100 transition-opacity shrink-0"
+              title={expandedModelIds.has(o.id) ? "Collapse parts" : "Expand parts"}
+            >
+              {expandedModelIds.has(o.id)
+                ? <ChevronDown className="w-3 h-3" />
+                : <ChevronRight className="w-3 h-3" />}
+            </button>
+          )}
           <button
             onClick={() => { setSelectedId(o.id); setHierarchyOpen(false); }}
             className="flex-1 min-w-0 text-left px-1 py-1.5 text-sm flex items-center gap-2"
@@ -1350,24 +1377,26 @@ export default function EditorPage() {
         {childObjs.map((child) => (
           <ObjectTreeRow key={child.id} o={child} containerName={containerName} indent={indent + 12} />
         ))}
-        {/* Virtual GLTF mesh parts — discovered when the model loads in the viewport */}
-        {o.type === "model" && (modelParts[o.id] ?? []).map((partName) => {
-          const partKey = `${o.id}:${partName}`;
-          const isPartSelected = selectedPartKey === partKey;
-          return (
-            <div
-              key={partKey}
-              className={`flex items-center gap-1 rounded-md cursor-pointer transition-colors ${
-                isPartSelected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/40 text-muted-foreground hover:text-foreground"
-              }`}
-              style={{ paddingLeft: indent + 20 }}
-              onClick={() => setSelectedPartKey(isPartSelected ? null : partKey)}
-            >
-              <Box className="w-3 h-3 shrink-0 opacity-60 my-0.5" />
-              <span className="text-xs py-1.5 truncate">{partName}</span>
-            </div>
-          );
-        })}
+        {/* Virtual GLTF/FBX mesh parts — collapsible, discovered when model loads */}
+        {o.type === "model" && (modelParts[o.id] ?? []).length > 0 && expandedModelIds.has(o.id) && (
+          (modelParts[o.id] ?? []).map((partName) => {
+            const partKey = `${o.id}:${partName}`;
+            const isPartSelected = selectedPartKey === partKey;
+            return (
+              <div
+                key={partKey}
+                className={`flex items-center gap-1 rounded-md cursor-pointer transition-colors ${
+                  isPartSelected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/40 text-muted-foreground hover:text-foreground"
+                }`}
+                style={{ paddingLeft: indent + 20 }}
+                onClick={() => setSelectedPartKey(isPartSelected ? null : partKey)}
+              >
+                <Box className="w-3 h-3 shrink-0 opacity-60 my-0.5" />
+                <span className="text-xs py-1.5 truncate">{partName}</span>
+              </div>
+            );
+          })
+        )}
       </div>
     );
   }
@@ -2050,7 +2079,7 @@ export default function EditorPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".glb,.gltf"
+            accept=".glb,.gltf,.fbx"
             onChange={handleImport3DModel}
             className="hidden"
             data-testid="input-import-model"
