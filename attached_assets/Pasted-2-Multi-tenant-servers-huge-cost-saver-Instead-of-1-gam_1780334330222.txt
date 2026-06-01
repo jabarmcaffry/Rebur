@@ -1,0 +1,143 @@
+2. Multi-tenant servers (huge cost saver)
+
+Instead of 1 game = 1 server, you run:
+
+* Many games on the same physical machine
+* Isolated environments per game instance
+
+So 100 small games might run on 5 machines instead of 100.
+
+This is where most “cheap scaling” actually comes from.
+
+⸻
+
+3. Region-based clustering
+
+Group players intelligently:
+
+* Small games: shared cluster
+* Medium games: dedicated cluster
+* Big games: isolated cluster
+
+And dynamically move instances between clusters based on load.
+
+This avoids wasting whole machines on tiny games.
+
+⸻
+
+4. Tick-rate scaling (massive optimization trick)
+
+Not all games need 60 TPS.
+
+You can dynamically adjust:
+
+* Empty game → 1–5 ticks/sec
+* Casual game → 20–30 ticks/sec
+* Competitive shooter → 60+ ticks/sec
+
+This alone can cut CPU cost massively at scale.
+
+⸻
+
+5. Interest-based simulation (VERY important for Roblox-style)
+
+Only simulate what players can actually see or affect.
+
+Example:
+
+* If 10 players are in one area, only simulate that area fully
+* Far away parts of the world run in “low fidelity” or freeze
+
+This is how big open-world games don’t explode in cost.
+
+⸻
+
+6. Shared services layer (instead of per-game backend)
+
+Don’t let every game rebuild core systems.
+
+Rebur should provide:
+
+* matchmaking
+* chat
+* inventory/avatars
+* physics runtime (optional)
+* persistence APIs
+
+So devs don’t spin up full backend stacks per game.
+
+This reduces:
+
+* duplicated servers
+* wasted memory
+* redundant databases
+
+⸻
+
+7. State compression + snapshotting (for sleep/wake)
+
+Instead of keeping full memory alive:
+
+* Serialize game state efficiently
+* Store deltas (not full dumps)
+* Restore quickly on wake
+
+This makes sleep/wake actually practical at scale.
+
+⸻
+
+8. “Cold start tiers” (important cost control trick)
+
+Not all servers need instant wake speed.
+
+You can define:
+
+* Tier 1 games (popular): always warm or instant wake
+* Tier 2: fast wake (hundreds ms)
+* Tier 3: slow wake (seconds, but cheap)
+
+Most platforms don’t expose this control — but it saves a lot of money.
+
+⸻
+
+9. Predictive scaling (underrated)
+
+Instead of reacting:
+
+* Pre-wake servers before demand spikes
+* Based on:
+    * time of day
+    * player history
+    * game popularity trends
+
+This avoids lag spikes entirely.
+
+⸻
+
+The key mindset shift (important)
+
+Roblox-style systems aren’t “servers running games.”
+
+They are:
+
+a distributed runtime that creates and destroys game worlds on demand
+
+Sleep/wake is just one optimization inside that.
+
+⸻
+
+If you combine everything for Rebur, your architecture becomes:
+
+* Instances instead of servers
+* Multi-tenant compute
+* Auto scaling clusters
+* Smart simulation reduction
+* Shared platform services
+* Sleep/wake for idle instances
+* Predictive warm-up
+
+That’s how you get:
+
+* lower cost than VPS hosting
+* smoother scaling than traditional game servers
+* and near-instant join experience when done right

@@ -91,6 +91,9 @@ export class GameRoom {
   private tickNumber = 0;
   private spawnPoint = { x: 0, y: 1.5, z: 0 };
   private objIdCounter = 0;
+  private currentTickMs = TICK_MS;
+  /** Units — dynamic objects farther than this from every player skip physics (interest-based sim). */
+  private interestRadius = 60;
   // Per-player held keys (key: playerId, value: Set of held key strings)
   private playerHeldKeys = new Map<string, Set<string>>();
 
@@ -243,7 +246,7 @@ export class GameRoom {
 
     if (!this.interval) {
       this.lastTick = Date.now();
-      this.interval = setInterval(() => this._tick(), TICK_MS);
+      this.interval = setInterval(() => this._tick(), this.currentTickMs);
     }
   }
 
@@ -451,8 +454,24 @@ export class GameRoom {
     }
 
     // ── Step 6: Dynamic object physics ───────────────────────────────────────
+    // Interest-based simulation: build the set of active player positions once,
+    // then skip full physics for objects outside interestRadius of every player.
+    const _playerPositions = this.players.size > 0
+      ? Array.from(this.players.values()).map(p => ({ x: p.x, y: p.y, z: p.z }))
+      : [];
+    const _ir2 = this.interestRadius * this.interestRadius;
+
     for (const obj of this.dynamics.values()) {
       if (obj.anchored) continue;
+
+      // Interest gate: only run full physics for objects near at least one player.
+      if (_playerPositions.length > 0 && this.interestRadius > 0) {
+        const inZone = _playerPositions.some(pp => {
+          const dx = obj.x - pp.x, dy = obj.y - pp.y, dz = obj.z - pp.z;
+          return dx*dx + dy*dy + dz*dz <= _ir2;
+        });
+        if (!inZone) continue; // freeze: skip gravity/drag/movement for this frame
+      }
 
       obj.vy += GRAVITY * dt;
       const drag = Math.pow(OBJ_DRAG, dt);
@@ -837,6 +856,90 @@ export class GameRoom {
 
   stop() {
     if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  }
+
+  // ── Instance-manager lifecycle API ────────────────────────────────────────
+
+  /** Dynamically scale the simulation tick rate (1–120 Hz). */
+  setTickRate(hz: number): void {
+    const ms = Math.round(1000 / Math.max(1, Math.min(120, hz)));
+    if (ms === this.currentTickMs) return;
+    this.currentTickMs = ms;
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = setInterval(() => this._tick(), this.currentTickMs);
+    }
+  }
+
+  /** Pause the tick loop — used when an instance is put to sleep. */
+  pause(): void {
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  }
+
+  /** Resume the tick loop after wake. */
+  resume(): void {
+    if (!this.interval) {
+      this.lastTick = Date.now();
+      this.interval = setInterval(() => this._tick(), this.currentTickMs);
+    }
+  }
+
+  /** Set the interest-zone radius (0 = disable interest filtering). */
+  setInterestRadius(units: number): void {
+    this.interestRadius = Math.max(0, units);
+  }
+
+  /**
+   * Serialize the full world state for sleep snapshots.
+   * Captures positions/velocities of all dynamic objects.
+   * Players are excluded (they've disconnected before sleep).
+   */
+  getPhysicsSnapshot(): import("./state-snapshot").GameSnapshot {
+    return {
+      version: 2,
+      timestamp: Date.now(),
+      gameId: "",      // filled in by InstanceManager
+      sessionId: "",   // filled in by InstanceManager
+      tickNumber: this.tickNumber,
+      spawnPoint: { ...this.spawnPoint },
+      objects: Array.from(this.allObjs.values()).map(o => ({
+        id: o.id, name: o.name, type: o.type, primitiveType: o.primitiveType,
+        x: o.x, y: o.y, z: o.z,
+        vx: o.vx, vy: o.vy, vz: o.vz,
+        rotX: o.rotX, rotY: o.rotY, rotZ: o.rotZ,
+        sx: o.sx, sy: o.sy, sz: o.sz,
+        color: o.color, visible: o.visible, anchored: o.anchored,
+        transparency: o.transparency ?? 0,
+        modelUrl: o.modelUrl, modelScale: o.modelScale,
+        gravityEnabled: o.gravityEnabled, gravityStrength: o.gravityStrength,
+        gravityRadius: o.gravityRadius,
+      })),
+      players: [],
+    };
+  }
+
+  /**
+   * Restore dynamic object positions/velocities from a sleep snapshot.
+   * Called on warm wake — static objects are already loaded from setObjects().
+   */
+  loadPhysicsSnapshot(snap: import("./state-snapshot").GameSnapshot): void {
+    this.spawnPoint = { ...snap.spawnPoint };
+    this.tickNumber = snap.tickNumber;
+    for (const so of snap.objects) {
+      const obj = this.allObjs.get(so.id);
+      if (!obj) continue;
+      obj.x = so.x; obj.y = so.y; obj.z = so.z;
+      obj.vx = so.vx; obj.vy = so.vy; obj.vz = so.vz;
+      obj.rotX = so.rotX; obj.rotY = so.rotY; obj.rotZ = so.rotZ;
+      obj.color = so.color; obj.visible = so.visible;
+      obj.transparency = so.transparency;
+      const sobj = this.scriptObjs.get(obj.name);
+      if (sobj) {
+        sobj.positionX = so.x; sobj.positionY = so.y; sobj.positionZ = so.z;
+        sobj.rotationX = so.rotX; sobj.rotationY = so.rotY; sobj.rotationZ = so.rotZ;
+        sobj.color = so.color; sobj.visible = so.visible;
+      }
+    }
   }
 
   getSnapshot(localPlayerId: string): RenderState {

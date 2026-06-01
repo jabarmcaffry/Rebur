@@ -10,6 +10,9 @@ import path from "path";
 import { promises as fs } from "fs";
 import { GameRoom } from "./game-room";
 import { BUILD_ID } from "./build-id";
+import { instanceManager } from "./instance-manager";
+import { clusterManager } from "./cluster-manager";
+import { matchmaking, platformChat, avatarService, serverMetrics, PHYSICS_PRESETS } from "./shared-services";
 
 // Set up multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -327,10 +330,9 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       const updated = await storage.updateScript(req.params.id, req.body);
 
       // Hot-reload scripts in every live room that is running this game.
-      // This means edits take effect immediately — no need to leave and
-      // rejoin Play mode to see changes.
-      const sessions = gameIdToSessions.get(script.gameId);
-      if (sessions && sessions.size > 0) {
+      // Uses InstanceManager to find all active/idle (non-sleeping) rooms.
+      const sessionIds = instanceManager.getSessionsForGame(script.gameId);
+      if (sessionIds.length > 0) {
         try {
           const allScripts = await storage.getScripts(script.gameId);
           const scriptPayload = allScripts.map((s: any) => ({
@@ -338,11 +340,11 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             name: s.name ?? "Script",
             enabled: s.enabled !== false,
           }));
-          for (const sid of sessions) {
-            const room = gameRooms.get(sid);
-            if (room) room.loadScripts(scriptPayload);
+          let reloaded = 0;
+          for (const sid of sessionIds) {
+            if (instanceManager.reloadScripts(sid, scriptPayload)) reloaded++;
           }
-          console.log(`[routes] hot-reloaded scripts for game ${script.gameId} in ${sessions.size} room(s)`);
+          console.log(`[routes] hot-reloaded scripts for game ${script.gameId} in ${reloaded}/${sessionIds.length} room(s)`);
         } catch (err) {
           console.error("[routes] hot-reload failed:", err);
         }
@@ -525,11 +527,6 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   }
 
   const clients = new Map<string, ConnectedClient>();
-  // One GameRoom per session (keyed by sessionId)
-  const gameRooms = new Map<string, GameRoom>();
-  // Reverse index: gameId → set of active sessionIds that belong to it.
-  // Used to push script reloads into live rooms whenever a script is saved.
-  const gameIdToSessions = new Map<string, Set<string>>();
   // Single-session enforcement: maps authenticated userId → active clientId
   // so the same account can only be in one game at a time.
   const activeUserSessions = new Map<string, string>(); // userId → clientId
@@ -559,38 +556,156 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
     });
   }
 
-  /** Ensure a GameRoom exists for the session and return it. */
+  /**
+   * Ensure a GameRoom exists for the session and return it.
+   * Routes through InstanceManager so idle/sleeping rooms are woken
+   * and cluster telemetry is tracked.
+   */
   async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<GameRoom> {
-    if (!gameRooms.has(sessionId)) {
-      const room = new GameRoom(
-        (msg) => broadcastAll(sessionId, msg),
-        (playerId, msg) => sendToPlayer(playerId, msg),
-      );
-      if (gameId) {
-        try {
-          const objects = await storage.getGameObjects(gameId);
-          room.setObjects(objects as any[]);
-          // Load and execute scripts server-side — never sent to clients
-          const scripts = await storage.getScripts(gameId);
-          room.loadScripts(scripts.map((s: any) => ({
-            code: s.code ?? "",
-            name: s.name ?? "Script",
-            enabled: s.enabled !== false,
-          })));
-        } catch (err) {
-          console.error("[room] failed to load world:", err);
-        }
-      }
-      gameRooms.set(sessionId, room);
-      // Register the reverse lookup so script saves can find this room.
-      if (gameId) {
-        const s = gameIdToSessions.get(gameId) ?? new Set<string>();
-        s.add(sessionId);
-        gameIdToSessions.set(gameId, s);
-      }
+    const room = await instanceManager.getOrWakeInstance(
+      sessionId,
+      gameId ?? "",
+      (msg) => broadcastAll(sessionId, msg),
+      (playerId, msg) => sendToPlayer(playerId, msg),
+      async () => {
+        if (!gameId) return [];
+        return (await storage.getGameObjects(gameId)) as any[];
+      },
+      async () => {
+        if (!gameId) return [];
+        const scripts = await storage.getScripts(gameId);
+        return scripts.map((s: any) => ({
+          code: s.code ?? "",
+          name: s.name ?? "Script",
+          enabled: s.enabled !== false,
+        }));
+      },
+    );
+    if (gameId) {
+      clusterManager.registerInstance(sessionId, gameId, room.playerCount);
+      serverMetrics.inc("rooms.created");
     }
-    return gameRooms.get(sessionId)!;
+    return room;
   }
+
+  /** Look up an active (non-sleeping) room. */
+  function getRoom(sessionId: string): GameRoom | undefined {
+    return instanceManager.getRoom(sessionId);
+  }
+
+  // ─── Distributed Runtime APIs ────────────────────────────────────────────
+
+  /** GET /api/instances — live snapshot of all game instances */
+  app.get("/api/instances", (_req, res) => {
+    res.json({
+      summary: instanceManager.getSummary(),
+      instances: instanceManager.getStats(),
+    });
+  });
+
+  /** GET /api/instances/:sessionId — detail for one instance */
+  app.get("/api/instances/:sessionId", (req, res) => {
+    const rec = instanceManager.getRecord(req.params.sessionId);
+    if (!rec) return res.status(404).json({ message: "Instance not found" });
+    res.json({
+      sessionId: rec.sessionId,
+      gameId: rec.gameId,
+      state: rec.state,
+      playerCount: rec.playerCount,
+      tickRateHz: rec.tickRateHz,
+      uptimeMs: Date.now() - rec.createdAt,
+      wakeCount: rec.wakeCount,
+      totalPlayerJoins: rec.totalPlayerJoins,
+    });
+  });
+
+  /** DELETE /api/instances/:sessionId — force-terminate an instance */
+  app.delete("/api/instances/:sessionId", isAuthenticated, (req, res) => {
+    instanceManager.terminateInstance(req.params.sessionId);
+    clusterManager.unregisterInstance(req.params.sessionId);
+    res.json({ success: true });
+  });
+
+  /** GET /api/clusters — cluster load report + predictive warm list */
+  app.get("/api/clusters", (_req, res) => {
+    res.json(clusterManager.getLoadReport());
+  });
+
+  /** POST /api/matchmaking/enqueue — join the matchmaking queue for a game */
+  app.post("/api/matchmaking/enqueue", isAuthenticated, async (req: any, res) => {
+    const userId  = getUserId(req);
+    const { gameId } = req.body;
+    if (!gameId) return res.status(400).json({ message: "gameId required" });
+    const ticket = matchmaking.enqueue(userId, gameId);
+    serverMetrics.inc("matchmaking.enqueued");
+    res.json(ticket);
+  });
+
+  /** GET /api/matchmaking/queue/:gameId — current queue for a game */
+  app.get("/api/matchmaking/queue/:gameId", isAuthenticated, (req, res) => {
+    res.json(matchmaking.getQueue(req.params.gameId));
+  });
+
+  /** POST /api/matchmaking/match — mark a ticket as matched to a session */
+  app.post("/api/matchmaking/match", isAuthenticated, (req, res) => {
+    const { ticketId, sessionId } = req.body;
+    if (!ticketId || !sessionId) return res.status(400).json({ message: "ticketId + sessionId required" });
+    matchmaking.match(ticketId, sessionId);
+    res.json({ success: true });
+  });
+
+  /** GET /api/shared/chat/:channel — history for a platform chat channel */
+  app.get("/api/shared/chat/:channel", (_req, res) => {
+    const limit = Math.min(parseInt(String(_req.query.limit ?? "20"), 10), 100);
+    res.json(platformChat.getHistory(_req.params.channel, limit));
+  });
+
+  /** POST /api/shared/chat/:channel — publish a message to a platform channel */
+  app.post("/api/shared/chat/:channel", isAuthenticated, async (req: any, res) => {
+    const userId = getUserId(req);
+    const { username = "Player", text } = req.body;
+    if (!text) return res.status(400).json({ message: "text required" });
+    const msg = platformChat.publish(req.params.channel, userId, username, text);
+    serverMetrics.inc("chat.messages");
+    res.json(msg);
+  });
+
+  /** GET /api/avatars/:userId — get avatar config */
+  app.get("/api/avatars/:userId", (req, res) => {
+    const avatar = avatarService.getAvatar(req.params.userId)
+      ?? avatarService.defaultAvatar(req.params.userId);
+    res.json(avatar);
+  });
+
+  /** PATCH /api/avatars/:userId — update avatar config */
+  app.patch("/api/avatars/:userId", isAuthenticated, async (req: any, res) => {
+    const userId = getUserId(req);
+    if (userId !== req.params.userId) return res.status(403).json({ message: "Not authorized" });
+    const updated = avatarService.patchAvatar(userId, req.body);
+    res.json(updated);
+  });
+
+  /** GET /api/avatars/:userId/inventory — list inventory */
+  app.get("/api/avatars/:userId/inventory", isAuthenticated, async (req: any, res) => {
+    const userId = getUserId(req);
+    if (userId !== req.params.userId) return res.status(403).json({ message: "Not authorized" });
+    res.json(avatarService.getInventory(userId));
+  });
+
+  /** GET /api/physics-presets — all named physics configurations */
+  app.get("/api/physics-presets", (_req, res) => {
+    res.json(PHYSICS_PRESETS);
+  });
+
+  /** GET /api/metrics — server runtime counters */
+  app.get("/api/metrics", (_req, res) => {
+    res.json({
+      ...serverMetrics.snapshot(),
+      instances: instanceManager.getSummary(),
+    });
+  });
+
+  // ─── WebSocket multiplayer server ─────────────────────────────────────────
 
   wss.on('connection', (ws: WebSocket) => {
     let clientId: string | null = null;
@@ -624,7 +739,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (gameId) {
               const game = await storage.getGame(gameId);
               const maxPlayers = (game as any)?.maxPlayers ?? 10;
-              const room = gameRooms.get(sessionId);
+              const room = getRoom(sessionId);
               const currentCount = room ? room.playerCount : 0;
               if (currentCount >= maxPlayers) {
                 ws.send(JSON.stringify({
@@ -652,6 +767,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             // can read the spawn point extracted from the game's objects.
             const room = await getOrCreateRoom(sessionId, gameId);
             const sp = room.getSpawnPoint();
+            serverMetrics.inc("players.joined");
 
             const player = await storage.addSessionPlayer({
               sessionId,
@@ -668,6 +784,8 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (userId) activeUserSessions.set(userId, clientId);
 
             room.addPlayer(player.id, finalName, sp.x, sp.y, sp.z, colors || {});
+            instanceManager.onPlayerCountChanged(sessionId, room.playerCount);
+            if (gameId) clusterManager.updatePlayerCount(sessionId, room.playerCount, room.playerCount - 1);
 
             // Broadcast a complete RenderPlayer to existing clients so they can
             // render the newcomer's avatar immediately without waiting for worldState.
@@ -690,7 +808,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             const { moveX, moveZ, jump, rotY, camY, sprint } = message;
             room.applyInput(client.playerId, moveX ?? 0, moveZ ?? 0, !!jump, rotY ?? 0, camY ?? 0, !!sprint);
@@ -702,7 +820,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             room.handleObjectClick(client.playerId, message.objectId ?? null);
             break;
@@ -715,7 +833,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!client) break;
             const { position, rotation } = message;
             // Sync position into the room so worldState stays accurate
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (room) room.syncPosition(client.playerId, position.x, position.y, position.z, rotation);
             // Also persist & relay immediately for low-latency feel
             await storage.updateSessionPlayer(client.playerId, {
@@ -757,7 +875,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             const { elementId } = message;
             if (typeof elementId === 'string') {
@@ -771,7 +889,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             if (typeof message.key === 'string') {
               room.handleKeyDown(client.playerId, message.key);
@@ -784,7 +902,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             if (typeof message.key === 'string') {
               room.handleKeyUp(client.playerId, message.key);
@@ -797,7 +915,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             if (!clientId) break;
             const client = clients.get(clientId);
             if (!client) break;
-            const room = gameRooms.get(client.sessionId);
+            const room = getRoom(client.sessionId);
             if (!room) break;
             if (typeof message.event === 'string') {
               room.handleNetworkMessage(client.playerId, message.event, message.payload ?? null);
@@ -814,26 +932,19 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
       if (!clientId) return;
       const client = clients.get(clientId);
       if (client) {
-        // Remove from game room
-        const room = gameRooms.get(client.sessionId);
+        const room = getRoom(client.sessionId);
         if (room) {
           room.removePlayer(client.playerId);
-          if (room.playerCount === 0) {
-            room.stop();
-            gameRooms.delete(client.sessionId);
-            // Clean up the reverse gameId → session index.
-            if (client.gameId) {
-              const s = gameIdToSessions.get(client.gameId);
-              if (s) {
-                s.delete(client.sessionId);
-                if (s.size === 0) gameIdToSessions.delete(client.gameId);
-              }
-            }
+          const newCount = room.playerCount;
+          // Notify instance manager (schedules idle/sleep/terminate timers)
+          instanceManager.onPlayerCountChanged(client.sessionId, newCount);
+          if (client.gameId) {
+            clusterManager.updatePlayerCount(client.sessionId, newCount, newCount + 1);
           }
+          serverMetrics.inc("players.left");
         }
         await storage.removeSessionPlayer(client.playerId);
         broadcast(client.sessionId, { type: 'playerLeft', playerId: client.playerId });
-        // Release the single-session slot for this user
         if (client.userId && activeUserSessions.get(client.userId) === clientId) {
           activeUserSessions.delete(client.userId);
         }
