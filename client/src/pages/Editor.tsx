@@ -5,6 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useModelFile } from "@/lib/gltf-loader";
+import type { ReburScene } from "@shared/rebur-scene";
 import MonacoEditor from "@monaco-editor/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -252,27 +253,22 @@ const GltfLoader = forwardRef<THREE.Object3D, {
   scale: [number, number, number];
   selected: boolean;
   onClick: () => void;
-  /** Called once when the GLTF scene graph is parsed — provides the list of named mesh/group names. */
-  onPartsLoaded?: (parts: string[]) => void;
-}>(function GltfLoader({ url, position, rotation, scale, selected, onClick, onPartsLoaded }, ref) {
-  const { scene, animations, loading, error } = useModelFile(url);
+  /** Called once when the model is parsed — provides the full extracted Rebur Scene. */
+  onSceneExtracted?: (rs: ReburScene) => void;
+}>(function GltfLoader({ url, position, rotation, scale, selected, onClick, onSceneExtracted }, ref) {
+  const { scene, animations, loading, error, reburScene } = useModelFile(url);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clonedRef = useRef<THREE.Group | null>(null);
 
-  const { cloned, edgeOverlay, hitSize, hitCenter, partNames } = useMemo(() => {
-    if (!scene) return { cloned: null, edgeOverlay: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number], partNames: [] as string[] };
+  const { cloned, edgeOverlay, hitSize, hitCenter } = useMemo(() => {
+    if (!scene) return { cloned: null, edgeOverlay: null, hitSize: [1,1,1] as [number,number,number], hitCenter: [0,0,0] as [number,number,number] };
 
     const c = scene.clone(true);
-    const discovered: string[] = [];
     c.traverse((child: any) => {
       if (child.isMesh && child.material) {
         child.material = Array.isArray(child.material)
           ? child.material.map((m: THREE.Material) => m.clone())
           : child.material.clone();
-      }
-      // Collect named nodes (meshes and groups with meaningful names)
-      if (child.name && child.name !== scene.name && !child.name.match(/^(RootNode|Scene|Armature|Skeleton|_rootJoint)$/i)) {
-        if (child.isMesh || child.isGroup) discovered.push(child.name);
       }
     });
 
@@ -301,14 +297,13 @@ const GltfLoader = forwardRef<THREE.Object3D, {
       edgeOverlay: eo,
       hitSize: [normSize.x * 1.08, normSize.y * 1.08, normSize.z * 1.08] as [number, number, number],
       hitCenter: [normCenter.x, normCenter.y, normCenter.z] as [number, number, number],
-      partNames: [...new Set(discovered)],
     };
   }, [scene]);
 
-  // Report named parts to parent once loaded
+  // Report extracted Rebur Scene to parent once it's available
   useEffect(() => {
-    if (partNames.length > 0) onPartsLoaded?.(partNames);
-  }, [partNames, onPartsLoaded]);
+    if (reburScene) onSceneExtracted?.(reburScene);
+  }, [reburScene, onSceneExtracted]);
 
   // Set up AnimationMixer and auto-play the first clip
   useEffect(() => {
@@ -411,11 +406,11 @@ interface PrimitiveMeshProps {
   obj: GameObject;
   selected: boolean;
   onClick: () => void;
-  onPartsLoaded?: (objectId: string, parts: string[]) => void;
+  onSceneExtracted?: (objectId: string, rs: ReburScene) => void;
 }
 
 const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function PrimitiveMesh(
-  { obj, selected, onClick, onPartsLoaded },
+  { obj, selected, onClick, onSceneExtracted },
   ref,
 ) {
   const position: [number, number, number] = [obj.positionX ?? 0, obj.positionY ?? 0, obj.positionZ ?? 0];
@@ -471,7 +466,7 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
         scale={scale}
         selected={selected}
         onClick={onClick}
-        onPartsLoaded={(parts) => onPartsLoaded?.(obj.id, parts)}
+        onSceneExtracted={(rs) => onSceneExtracted?.(obj.id, rs)}
       />
     );
   }
@@ -551,7 +546,7 @@ export default function EditorPage() {
   /** Pose override applied to the selected object while the Animate tab is scrubbing/playing. */
   const [animPreview, setAnimPreview] = useState<Partial<Record<string, number>> | null>(null);
   /** Named meshes discovered inside a loaded GLTF, keyed by object id. */
-  const [modelParts, setModelParts] = useState<Record<string, string[]>>({});
+  const [reburScenes, setReburScenes] = useState<Record<string, ReburScene>>({});
   /** Which virtual mesh part is highlighted: "objectId:meshName" */
   const [selectedPartKey, setSelectedPartKey] = useState<string | null>(null);
   /** Model objects whose GLTF parts are expanded in the hierarchy. */
@@ -1337,8 +1332,8 @@ export default function EditorPage() {
           <div className="cursor-grab active:cursor-grabbing p-1 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity">
             <GripVertical className="w-3 h-3 text-muted-foreground" />
           </div>
-          {/* Expand/collapse chevron for model objects that have parts loaded */}
-          {o.type === "model" && (modelParts[o.id] ?? []).length > 0 && (
+          {/* Expand/collapse chevron for model objects that have a Rebur Scene loaded */}
+          {o.type === "model" && !!reburScenes[o.id]?.rootNodeIds?.length && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -1377,26 +1372,43 @@ export default function EditorPage() {
         {childObjs.map((child) => (
           <ObjectTreeRow key={child.id} o={child} containerName={containerName} indent={indent + 12} />
         ))}
-        {/* Virtual GLTF/FBX mesh parts — collapsible, discovered when model loads */}
-        {o.type === "model" && (modelParts[o.id] ?? []).length > 0 && expandedModelIds.has(o.id) && (
-          (modelParts[o.id] ?? []).map((partName) => {
-            const partKey = `${o.id}:${partName}`;
+        {/* Rebur Scene node tree — collapsible hierarchy from extracted model */}
+        {o.type === "model" && reburScenes[o.id] && expandedModelIds.has(o.id) && (() => {
+          const rs = reburScenes[o.id];
+          return rs.rootNodeIds.map((nodeId) => {
+            const node = rs.nodes[nodeId];
+            if (!node) return null;
+            const partKey = `${o.id}:${nodeId}`;
             const isPartSelected = selectedPartKey === partKey;
+            const KindIcon =
+              node.kind === "mesh" || node.kind === "skinned-mesh" ? Box
+              : node.kind === "light" ? Sun
+              : node.kind === "camera" ? Eye
+              : Layers;
+            const kindLabel =
+              node.kind === "skinned-mesh" ? "rigged mesh"
+              : node.kind === "mesh" ? `${rs.meshes[node.meshIds[0]]?.vertexCount ?? 0} verts`
+              : node.kind === "light" ? "light"
+              : node.kind === "camera" ? "camera"
+              : `${node.childIds.length} children`;
             return (
               <div
                 key={partKey}
-                className={`flex items-center gap-1 rounded-md cursor-pointer transition-colors ${
-                  isPartSelected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/40 text-muted-foreground hover:text-foreground"
+                className={`flex items-center gap-1.5 rounded-md cursor-pointer transition-colors ${
+                  isPartSelected
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "hover:bg-sidebar-accent/40 text-muted-foreground hover:text-foreground"
                 }`}
                 style={{ paddingLeft: indent + 20 }}
                 onClick={() => setSelectedPartKey(isPartSelected ? null : partKey)}
               >
-                <Box className="w-3 h-3 shrink-0 opacity-60 my-0.5" />
-                <span className="text-xs py-1.5 truncate">{partName}</span>
+                <KindIcon className="w-3 h-3 shrink-0 opacity-60 my-0.5" />
+                <span className="text-xs py-1.5 truncate flex-1">{node.name}</span>
+                <span className="text-[10px] opacity-40 pr-1 shrink-0">{kindLabel}</span>
               </div>
             );
-          })
-        )}
+          });
+        })()}
       </div>
     );
   }
@@ -2340,7 +2352,7 @@ export default function EditorPage() {
                               selected={isSelected}
                               onClick={() => setSelectedId(obj.id)}
                               ref={isSelected ? selectedMeshRef : null}
-                              onPartsLoaded={(oid, parts) => setModelParts(prev => ({ ...prev, [oid]: parts }))}
+                              onSceneExtracted={(oid, rs) => setReburScenes(prev => ({ ...prev, [oid]: rs }))}
                             />
                           );
                           if (isSelected && selectedObjectIsTransformable) {
