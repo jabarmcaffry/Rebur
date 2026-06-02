@@ -1,0 +1,99 @@
+
+6. New Character/Avatar System in Editor
+Requirements
+
+Character should be visible in the editor (not just runtime)
+Show in hierarchy under a "Character" container
+Display: Body parts, Clothing, Accessories, Motor6D joints, Scripts, Attachments, Particle effects
+Allow placing a custom rig model in Character container to replace default avatar
+Rig editing capabilities
+
+Implementation
+A. Add "Character" Container to Editor
+
+Add Character to the CONTAINERS list in Editor.tsx
+This container holds the avatar rig definition
+
+B. Character Data Model
+Create a new type for character rigs:
+interface CharacterRig {
+  id: string;
+  name: string;
+  // Body parts hierarchy
+  parts: {
+    head: RigPart;
+    torso: RigPart;
+    leftArm: RigPart;
+    rightArm: RigPart;
+    leftLeg: RigPart;
+    rightLeg: RigPart;
+  };
+  // Motor6D joints connecting parts
+  joints: Motor6DJoint[];
+  // Attachments (where accessories/tools connect)
+  attachments: Attachment[];
+  // Optional custom model URL
+  modelUrl?: string;
+}
+C. CharacterEditor Component
+New component for editing character rigs in the editor:
+
+Visual rig preview (3D view of the skeleton)
+Joint hierarchy tree
+Part properties (size, color, offset)
+Attachment point management
+
+Files to Create
+
+client/src/components/CharacterEditor.tsx - Main rig editing component
+client/src/lib/character-types.ts - Type definitions for character system
+shared/character-schema.ts - Shared types for character data
+
+Files to Modify
+
+client/src/pages/Editor.tsx - Add Character container, integrate CharacterEditor
+shared/schema.ts - Add character rig storage (or store in game properties)
+client/src/components/play/Avatar.tsx - Load custom rig if defined
+
+
+7. Frame-by-Frame Rig Animation System (Replace Current Animation Editor)
+Current State
+The current AnimationEditor.tsx does keyframe animation on object transforms (position, rotation, scale). This is for animating scene objects, not character rigs.
+New System Requirements
+
+Animate rig joints frame-by-frame (like Procreate but 3D)
+Move joints manually for each frame
+Timeline with frames (not time-based keyframes)
+Play preview while editing
+Undo/redo support
+Save animations as reusable assets
+
+Implementation
+A. Data Model for Rig Animations
+interface RigAnimation {
+  id: string;
+  name: string;
+  frameRate: number; // e.g., 24 fps
+  frames: RigFrame[];
+}
+
+interface RigFrame {
+  index: number;
+  jointPoses: Map<string, JointPose>; // joint ID -> pose
+}
+
+interface JointPose {
+  rotation: { x: number; y: number; z: number }; // Euler angles
+  // Optionally position offset for root motion
+  position?: { x: number; y: number; z: number };
+}
+B. RigAnimationEditor Component
+Replace/extend current AnimationEditor with:
+
+3D viewport showing the rig
+Ability to select and rotate joints with gizmos
+Frame timeline (not time-based scrubbing)
+Frame navigation: prev/next frame, jump to frame
+Onion skinning (ghost of previous/next frames)
+Play/pause preview at specified FPS
+Undo/redo stack

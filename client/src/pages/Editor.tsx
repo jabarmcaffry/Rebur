@@ -69,7 +69,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Game, GameObject, Script, User } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
-import AnimationEditor from "@/components/AnimationEditor";
+import RigAnimationEditor from "@/components/RigAnimationEditor";
+import CharacterEditor from "@/components/CharacterEditor";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -98,7 +99,8 @@ const PRIMITIVES = [
 const CONTAINERS = [
   { name: "Workspace",           displayName: "Workspace",           icon: Box,      hint: "3D objects in the live world",                         defaultScriptType: "Script" },
   { name: "Lighting",            displayName: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                          defaultScriptType: "Script" },
-  { name: "Players",             displayName: "Players",             icon: Box,      hint: "Player avatars + per-player data",                     defaultScriptType: "LocalScript" },
+  { name: "Character",           displayName: "Character",           icon: Users,    hint: "Avatar rig — body parts, joints, attachments",         defaultScriptType: "LocalScript" },
+  { name: "Players",             displayName: "Players",             icon: Users,    hint: "Player avatars + per-player data",                     defaultScriptType: "LocalScript" },
   { name: "ServerScriptService", displayName: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",                defaultScriptType: "Script" },
   { name: "StarterPlayer",       displayName: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",          defaultScriptType: "LocalScript" },
   { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates — visible to all, not for secrets",   defaultScriptType: "ModuleScript" },
@@ -523,7 +525,7 @@ export default function EditorPage() {
   const { user } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
-  const [activeTab, setActiveTab] = useState<"scene" | "script" | "animate">("scene");
+  const [activeTab, setActiveTab] = useState<"scene" | "script" | "animate" | "character">("scene");
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [scriptDraft, setScriptDraft] = useState<string>("");
   const [hierarchyOpen, setHierarchyOpen] = useState(false);
@@ -543,8 +545,6 @@ export default function EditorPage() {
   const [publishDest, setPublishDest] = useState<"platform" | "embed" | "both">("platform");
   const [publishAudience, setPublishAudience] = useState<"everyone" | "friends" | "private">("everyone");
   const [publishDesc, setPublishDesc] = useState("");
-  /** Pose override applied to the selected object while the Animate tab is scrubbing/playing. */
-  const [animPreview, setAnimPreview] = useState<Partial<Record<string, number>> | null>(null);
   /** Named meshes discovered inside a loaded GLTF, keyed by object id. */
   const [reburScenes, setReburScenes] = useState<Record<string, ReburScene>>({});
   /** Which virtual mesh part is highlighted: "objectId:meshName" */
@@ -2287,6 +2287,11 @@ export default function EditorPage() {
                   <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                   Animate
                 </TabsTrigger>
+                {/* Character tab — always visible */}
+                <TabsTrigger value="character" data-testid="tab-character">
+                  <Users className="w-3.5 h-3.5 mr-1.5" />
+                  Character
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -2330,25 +2335,10 @@ export default function EditorPage() {
                       <Suspense fallback={null}>
                         {renderableObjects.map((obj) => {
                           const isSelected = selectedId === obj.id;
-                          // Apply animation-editor preview pose (position/rotation/scale override)
-                          const previewedObj = (isSelected && animPreview)
-                            ? {
-                                ...obj,
-                                positionX: animPreview.px ?? obj.positionX,
-                                positionY: animPreview.py ?? obj.positionY,
-                                positionZ: animPreview.pz ?? obj.positionZ,
-                                rotationX: animPreview.rx !== undefined ? animPreview.rx * (Math.PI / 180) : obj.rotationX,
-                                rotationY: animPreview.ry !== undefined ? animPreview.ry * (Math.PI / 180) : obj.rotationY,
-                                rotationZ: animPreview.rz !== undefined ? animPreview.rz * (Math.PI / 180) : obj.rotationZ,
-                                scaleX: animPreview.sx ?? obj.scaleX,
-                                scaleY: animPreview.sy ?? obj.scaleY,
-                                scaleZ: animPreview.sz ?? obj.scaleZ,
-                              }
-                            : obj;
                           const mesh = (
                             <PrimitiveMesh
                               key={obj.id}
-                              obj={previewedObj}
+                              obj={obj}
                               selected={isSelected}
                               onClick={() => setSelectedId(obj.id)}
                               ref={isSelected ? selectedMeshRef : null}
@@ -2603,12 +2593,11 @@ export default function EditorPage() {
             </TabsContent>
 
             <TabsContent value="animate" className="flex-1 m-0 min-h-0 overflow-hidden">
-              <AnimationEditor
-                selectedObject={selected}
-                allObjects={objects ?? []}
-                gameId={gameId}
-                onPreviewTransform={(t) => setAnimPreview(t as any)}
-              />
+              <RigAnimationEditor gameId={gameId} />
+            </TabsContent>
+
+            <TabsContent value="character" className="flex-1 m-0 min-h-0 overflow-hidden">
+              <CharacterEditor />
             </TabsContent>
           </Tabs>
         </main>
