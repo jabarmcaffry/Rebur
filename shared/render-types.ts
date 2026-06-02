@@ -28,6 +28,9 @@ export interface RenderObject {
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;
+  // Physics properties for client-side prediction
+  anchored?: boolean;
+  canCollide?: boolean;
 }
 
 // ── Render-Only Player State ──────────────────────────────────────────────────

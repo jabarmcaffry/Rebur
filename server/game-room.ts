@@ -59,6 +59,7 @@ interface StaticBox {
   minY: number; maxY: number;
   minZ: number; maxZ: number;
   name: string;
+  canCollide: boolean;
 }
 
 /** Per-player network state for delta compression + culling. */
@@ -76,6 +77,7 @@ interface DynamicObj {
   rotX: number; rotY: number; rotZ: number;
   sx: number; sy: number; sz: number;
   color: string; visible: boolean; anchored: boolean;
+  canCollide: boolean; // Whether this object participates in collision
   transparency: number;
   modelUrl?: string;
   modelScale?: number;
@@ -196,6 +198,7 @@ export class GameRoom {
         sx, sy, sz,
         color: o.color ?? "#888888",
         visible: true, anchored,
+        canCollide: o.properties?.canCollide !== false,
         transparency: o.properties?.transparency ?? 0,
         modelUrl: o.type === "model" ? o.properties?.fileUrl : undefined,
         audioUrl: o.type === "audio" ? o.properties?.fileUrl : undefined,
@@ -210,12 +213,14 @@ export class GameRoom {
       this.allObjs.set(o.id, dobj);
 
       const isLogicalOnly = o.type === "audio" || o.type === "folder";
+      const canCollide = o.properties?.canCollide !== false;
       if (!isLogicalOnly && anchored) {
         this.statics.push({
           name: dobj.name,
           minX: px - sx/2, maxX: px + sx/2,
           minY: py - sy/2, maxY: py + sy/2,
           minZ: pz - sz/2, maxZ: pz + sz/2,
+          canCollide,
         });
       } else if (!isLogicalOnly) {
         this.dynamics.set(o.id, dobj);
@@ -573,6 +578,7 @@ export class GameRoom {
           rotX: spec.rotationX, rotY: spec.rotationY, rotZ: spec.rotationZ,
           sx: spec.scaleX, sy: spec.scaleY, sz: spec.scaleZ,
           color: spec.color, visible: true, anchored: spec.anchored,
+          canCollide: spec.canCollide !== false,
           transparency: spec.transparency,
         };
         this.allObjs.set(id, dobj);
@@ -583,6 +589,7 @@ export class GameRoom {
             minX: spec.positionX - spec.scaleX/2, maxX: spec.positionX + spec.scaleX/2,
             minY: spec.positionY - spec.scaleY/2, maxY: spec.positionY + spec.scaleY/2,
             minZ: spec.positionZ - spec.scaleZ/2, maxZ: spec.positionZ + spec.scaleZ/2,
+            canCollide: spec.canCollide !== false,
           });
         }
         this.scriptObjs.set(spec.name, {
@@ -925,6 +932,7 @@ export class GameRoom {
     color: o.color, visible: o.visible, transparency: o.transparency ?? 0,
     modelUrl: o.modelUrl, modelScale: o.modelScale, audioUrl: o.audioUrl,
     animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
+    anchored: o.anchored, canCollide: o.canCollide,
   });
 
   private _toRenderPlayer = (p: PlayerState): RenderPlayer => ({
