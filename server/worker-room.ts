@@ -24,7 +24,26 @@ import { buildSync } from "esbuild";
 import type { RenderState, RenderPlayer } from "@shared/render-types";
 import type { GameSnapshot } from "./state-snapshot";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// In ESM, import.meta.url is available; in CJS bundle, it's undefined.
+// Fall back to process.cwd() for production builds where __dirname is unreliable.
+function getServerDir(): string {
+  if (typeof import.meta?.url === "string") {
+    return path.dirname(fileURLToPath(import.meta.url));
+  }
+  // In production CJS bundle, resolve from project root
+  const cwd = process.cwd();
+  // Check if server/ directory exists relative to cwd
+  const serverDir = path.join(cwd, "server");
+  try {
+    require("fs").statSync(serverDir);
+    return serverDir;
+  } catch {
+    // Fallback: we might be inside dist/, go up one level
+    return path.join(cwd, "server");
+  }
+}
+
+const __dirname = getServerDir();
 
 // ── WorkerRoom ────────────────────────────────────────────────────────────────
 
