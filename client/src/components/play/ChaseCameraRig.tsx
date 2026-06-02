@@ -15,7 +15,7 @@ export default function ChaseCameraRig({
   serverCamera,
   onCameraYawChange,
 }: {
-  player: RenderPlayer;
+  player: RenderPlayer | null;
   shiftLock?: boolean;
   serverCamera?: RenderState["camera"];
   onCameraYawChange?: (yaw: number) => void;
@@ -33,6 +33,9 @@ export default function ChaseCameraRig({
   const defaultFov = 60;
 
   useFrame(() => {
+    // No player yet — keep OrbitControls active but don't chase anything.
+    if (!player) return;
+
     const mode = serverCamera?.mode ?? "thirdPerson";
     const fov = serverCamera?.fov ?? defaultFov;
 

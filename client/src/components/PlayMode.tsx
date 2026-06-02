@@ -391,20 +391,9 @@ export default function PlayMode({
     renderClient.clickGuiElement(elementId);
   }, [renderClient]);
 
-  // Use predicted player (client-side physics) for local rendering, fall back to server or default
-  const player = predictedPlayer ?? localPlayer ?? {
-    id: "",
-    name: username,
-    position: { x: 0, y: 5, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    onGround: false,
-    animation: "idle",
-    health: 100,
-    maxHealth: 100,
-    colors: { shirt: avatarCfg.shirtColor, skin: avatarCfg.skinColor, pants: avatarCfg.pantsColor },
-    motors: {},
-  };
+  // Use predicted player (client-side physics) for local rendering, fall back to server state.
+  // Never fall back to a hard-coded mid-air position — wait for the server's first state packet.
+  const player = predictedPlayer ?? localPlayer ?? null;
 
   const totalPlayers = 1 + renderPlayers.length;
 
@@ -490,7 +479,7 @@ export default function PlayMode({
               if (dist > 200) return null;
               return <Primitive key={o.id} obj={o} distanceToPlayer={dist} />;
             })}
-            <Avatar player={player} isLocal={true} />
+            {player && <Avatar player={player} isLocal={true} />}
             {renderPlayers.map((rp) => (
               <Avatar key={rp.id} player={rp} isLocal={false} />
             ))}
@@ -683,7 +672,7 @@ export default function PlayMode({
             {fps} FPS
           </div>
         )}
-        {player.health < player.maxHealth && (
+        {player && player.health < player.maxHealth && (
           <div
             className="flex items-center gap-2 px-2 py-1 rounded-md bg-black/55 backdrop-blur"
             data-testid="hud-health"
@@ -703,7 +692,7 @@ export default function PlayMode({
       </div>
 
       {/* ── STATS OVERLAY ── */}
-      {showStats && (
+      {showStats && player && (
         <div className="absolute top-14 left-2 z-40 px-3 py-2 rounded-lg bg-black/70 backdrop-blur border border-white/10 font-mono text-xs text-white/80 space-y-0.5 pointer-events-none">
           <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Stats</div>
           <div>HP: <span className="text-neutral-100">{Math.round(player.health)}/{player.maxHealth}</span></div>
@@ -733,7 +722,7 @@ export default function PlayMode({
                   {username.charAt(0).toUpperCase()}
                 </div>
                 <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
-                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(player.health)}</span>
+                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(player?.health ?? 100)}</span>
                 <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
               </div>
               {/* Remote players */}
