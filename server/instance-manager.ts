@@ -13,7 +13,11 @@
  */
 
 import { GameRoom } from "./game-room";
+import { WorkerRoom } from "./worker-room";
 import type { GameSnapshot } from "./state-snapshot";
+
+/** Either a same-thread GameRoom or a Worker-hosted WorkerRoom. */
+export type AnyRoom = GameRoom | WorkerRoom;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -42,7 +46,7 @@ export type InstanceState = "active" | "idle" | "sleeping" | "terminated";
 export interface InstanceRecord {
   sessionId: string;
   gameId: string;
-  room: GameRoom;
+  room: AnyRoom;
   state: InstanceState;
   playerCount: number;
   tickRateHz: number;
@@ -88,7 +92,7 @@ export class InstanceManager {
     sendToPlayerFn: (playerId: string, msg: object) => void,
     loadObjects: () => Promise<any[]>,
     loadScripts: () => Promise<{ code: string; name: string; enabled: boolean }[]>,
-  ): Promise<GameRoom> {
+  ): Promise<AnyRoom> {
     const existing = this.instances.get(sessionId);
 
     if (existing) {
@@ -100,8 +104,8 @@ export class InstanceManager {
       return existing.room;
     }
 
-    // Cold start: create fresh instance
-    const room = new GameRoom(broadcastFn, sendToPlayerFn);
+    // Cold start: create fresh instance in its own Worker thread
+    const room = new WorkerRoom(broadcastFn, sendToPlayerFn);
     const record: InstanceRecord = {
       sessionId, gameId,
       room,
@@ -156,7 +160,7 @@ export class InstanceManager {
           console.log(`[instance] idle session=${sessionId}`);
 
           rec._sleepTimer = setTimeout(() => {
-            if (rec.playerCount === 0) this._sleepInstance(rec);
+            if (rec.playerCount === 0) this._sleepInstance(rec).catch(console.error);
           }, SLEEP_AFTER_IDLE_MS);
         }
       }, IDLE_AFTER_MS);
@@ -178,7 +182,7 @@ export class InstanceManager {
   }
 
   /** Look up a running room by sessionId (undefined if sleeping/terminated). */
-  getRoom(sessionId: string): GameRoom | undefined {
+  getRoom(sessionId: string): AnyRoom | undefined {
     const rec = this.instances.get(sessionId);
     if (!rec || rec.state === "sleeping" || rec.state === "terminated") return undefined;
     return rec.room;
@@ -194,7 +198,7 @@ export class InstanceManager {
     const rec = this.instances.get(sessionId);
     if (!rec) return;
     this._clearTimers(rec);
-    rec.room.pause();
+    rec.room.stop();        // terminates worker thread if WorkerRoom; pauses if GameRoom
     rec.state = "terminated";
     rec.snapshot = undefined;
     this.instances.delete(sessionId);
@@ -273,11 +277,12 @@ export class InstanceManager {
     console.log(`[instance] woke session=${rec.sessionId} in ${Date.now() - t0}ms (wake #${rec.wakeCount})`);
   }
 
-  private _sleepInstance(rec: InstanceRecord): void {
+  private async _sleepInstance(rec: InstanceRecord): Promise<void> {
     if (rec.playerCount > 0 || rec.state === "sleeping" || rec.state === "terminated") return;
 
-    const snap = rec.room.getPhysicsSnapshot();
-    snap.gameId = rec.gameId;
+    // getPhysicsSnapshot is sync on GameRoom, async on WorkerRoom — Promise.resolve handles both
+    const snap = await Promise.resolve(rec.room.getPhysicsSnapshot());
+    snap.gameId    = rec.gameId;
     snap.sessionId = rec.sessionId;
     rec.snapshot = snap;
     rec.room.pause();

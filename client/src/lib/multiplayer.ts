@@ -209,6 +209,43 @@ export class MultiplayerManager {
         break;
       }
 
+      case "worldDelta": {
+        // Delta-compressed tick update — apply incremental changes
+        // Players: always full list, same logic as worldState
+        for (const sp of (msg.players ?? [])) {
+          if (sp.id === this.myPlayerId) continue;
+          let rp = this.remotePlayers.get(sp.id);
+          if (!rp) {
+            rp = {
+              id: sp.id, username: sp.name || "Player",
+              position: sp.position ?? { x: 0, y: 5, z: 0 },
+              rotationY: sp.rotY ?? 0,
+            };
+            this.remotePlayers.set(sp.id, rp);
+            this.onPlayersChanged?.();
+          } else {
+            rp.position  = sp.position ?? rp.position;
+            rp.rotationY = sp.rotY ?? rp.rotationY;
+          }
+        }
+        const activeIds = new Set((msg.players ?? []).map((p: any) => p.id));
+        for (const id of this.remotePlayers.keys()) {
+          if (!activeIds.has(id)) { this.remotePlayers.delete(id); this.onPlayersChanged?.(); }
+        }
+
+        // Objects: apply adds/changes/removes
+        for (const id of (msg.removed ?? [])) this.serverObjects.delete(id);
+        for (const o of [...(msg.added ?? []), ...(msg.changed ?? [])]) {
+          this.serverObjects.set(o.id, {
+            x: o.position?.x ?? 0, y: o.position?.y ?? 0, z: o.position?.z ?? 0,
+            rotX: o.rotation?.x ?? 0, rotY: o.rotation?.y ?? 0, rotZ: o.rotation?.z ?? 0,
+            color: o.color, visible: o.visible,
+          });
+        }
+        this.onObjectsChanged?.();
+        break;
+      }
+
       case "playerLeft": {
         this.remotePlayers.delete(msg.playerId);
         this.onPlayersChanged?.();

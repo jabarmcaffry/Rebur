@@ -243,6 +243,39 @@ export class RenderClient {
         break;
       }
 
+      case "worldDelta": {
+        // Apply delta-compressed update on top of the current nextState.
+        // If we have no baseline or the delta is for a different tick, ignore —
+        // the server always sends a full worldState on the next tick when it
+        // detects the client is out of sync.
+        if (!this.nextState || msg.baseTick !== this.nextState.tick) break;
+
+        // Build updated object map: keep unchanged, apply changes, add new, remove absent
+        const objMap = new Map<string, RenderObject>(
+          this.nextState.objects.map(o => [o.id, o]),
+        );
+        for (const id of msg.removed)  objMap.delete(id);
+        for (const o  of msg.added)    objMap.set(o.id, o);
+        for (const o  of msg.changed)  objMap.set(o.id, o);
+
+        this.prevState = this.nextState;
+        this.nextState = {
+          tick:          msg.tick,
+          serverTime:    msg.serverTime,
+          objects:       Array.from(objMap.values()),
+          players:       msg.players,
+          gui:           msg.gui,
+          localPlayerId: msg.localPlayerId ?? this.localPlayerId,
+          camera:        msg.camera ?? this.nextState.camera,
+          lighting:      this.nextState.lighting,
+        };
+        this.stateReceivedAt = performance.now();
+        this.gui = msg.gui;
+        if (msg.camera !== undefined) this.camera = msg.camera;
+        this.onGuiChanged?.();
+        break;
+      }
+
       case "objectUpdate": {
         const obj = this.objects.get(msg.id);
         if (obj) {

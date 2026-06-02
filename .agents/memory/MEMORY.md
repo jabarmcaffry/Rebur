@@ -4,3 +4,4 @@
 - [player.input API](player-input-api.md) — per-player key polling + edge events; both makePlayerProxy and _makePlayerProxy must stay in sync; backed by perPlayerHeldKeys map in game-room.ts.
 - [Gui.bind enforcement](gui-bind-enforcement.md) — calling Gui.text/bar/image/button on a bound ID throws in dev, warns in prod; guiBoundIds is closure-scoped inside run() in script-runner.ts.
 - [Distributed runtime architecture](distributed-runtime.md) — InstanceManager/ClusterManager/shared-services sit on top of GameRoom; routes.ts no longer has gameRooms Map.
+- [Worker threads + tsx/esbuild](worker-thread-tsx.md) — tsx IPC pipe can't cross Worker boundaries; compile TS worker to .mjs with esbuild at startup instead.

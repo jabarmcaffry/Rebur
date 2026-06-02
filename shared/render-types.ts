@@ -107,10 +107,32 @@ export interface RenderState {
 
 // ── WebSocket Protocol Messages ───────────────────────────────────────────────
 
+// ── World Delta (delta-compressed tick update with network culling) ───────────
+
+export interface WorldDelta {
+  /** Tick number of the state this delta was computed from. */
+  baseTick: number;
+  /** Tick number of this delta (the new state). */
+  tick: number;
+  serverTime: number;
+  /** Objects newly entered the player's view radius. */
+  added: RenderObject[];
+  /** Objects that changed position/rotation/color/visibility. */
+  changed: RenderObject[];
+  /** IDs of objects that left the player's view radius or were destroyed. */
+  removed: string[];
+  /** Always the full player list (players are always relevant). */
+  players: RenderPlayer[];
+  gui: RenderGuiElement[];
+  localPlayerId: string;
+  camera?: RenderState["camera"];
+}
+
 // Server → Client
 export type ServerMessage =
   | { type: "init"; playerId: string; playerName: string; state: RenderState }
   | { type: "worldState"; state: RenderState }
+  | { type: "worldDelta" } & WorldDelta
   | { type: "objectUpdate"; id: string; changes: Partial<RenderObject> }
   | { type: "playerUpdate"; id: string; changes: Partial<RenderPlayer> }
   | { type: "guiUpdate"; gui: RenderGuiElement[] }

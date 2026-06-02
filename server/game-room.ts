@@ -30,6 +30,13 @@ const OBJ_BOUNCE    = 0.25;
 const OBJ_DRAG      = 0.88;
 const KILL_Y        = -50;
 
+// ── Network culling + delta compression constants ─────────────────────────────
+/** Objects further than this from a player are not sent to that player. 0 = disabled. */
+const VIEW_RADIUS    = 120;
+const VIEW_RADIUS_SQ = VIEW_RADIUS * VIEW_RADIUS;
+/** If more than this fraction of visible objects changed, send a full state instead of delta. */
+const DELTA_FULL_THRESHOLD = 0.55;
+
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
 interface PlayerState {
@@ -52,6 +59,13 @@ interface StaticBox {
   minY: number; maxY: number;
   minZ: number; maxZ: number;
   name: string;
+}
+
+/** Per-player network state for delta compression + culling. */
+interface PlayerNetState {
+  lastTick: number;
+  sentIds: Set<string>;
+  objStates: Map<string, RenderObject>;
 }
 
 interface DynamicObj {
@@ -96,6 +110,8 @@ export class GameRoom {
   private interestRadius = 60;
   // Per-player held keys (key: playerId, value: Set of held key strings)
   private playerHeldKeys = new Map<string, Set<string>>();
+  // Per-player network state: last tick snapshot for delta compression + culling
+  private perPlayerNetState = new Map<string, PlayerNetState>();
 
   constructor(
     private readonly broadcastFn: (msg: object) => void,
@@ -260,6 +276,7 @@ export class GameRoom {
     }
     this.players.delete(id);
     this.playerHeldKeys.delete(id);
+    this.perPlayerNetState.delete(id);
     for (const key of this.touchedPairs) {
       if (key.startsWith(id + ":")) this.touchedPairs.delete(key);
     }
@@ -707,13 +724,11 @@ export class GameRoom {
     this.tickNumber++;
     if (this.players.size === 0) return;
 
-    // ── Step 11: Broadcast worldState (per-player for GUI, shared for world) ──
-    const renderObjects  = Array.from(this.allObjs.values()).map(this._toRenderObj);
-    const renderPlayers  = Array.from(this.players.values()).map(this._toRenderPlayer);
-    const broadcastTime  = Date.now();
-    const tick           = this.tickNumber;
+    // ── Step 11: Broadcast worldState with network culling + delta compression ──
+    const broadcastTime = Date.now();
+    const tick          = this.tickNumber;
 
-    const toRenderGui = (g: any) => ({
+    const toRenderGui = (g: any): RenderGuiElement => ({
       id: g.id, kind: g.kind, text: g.text, x: g.x, y: g.y,
       width: g.width, height: g.height, anchor: g.anchor ?? "topLeft",
       color: g.color ?? "#ffffff", fontSize: g.fontSize ?? 14,
@@ -724,37 +739,120 @@ export class GameRoom {
 
     const camSettings = this.scriptRunner?.getCameraSettings() ?? {};
     const cameraState = Object.keys(camSettings).length > 0 ? {
-      mode: camSettings.mode ?? "thirdPerson",
+      mode: (camSettings.mode ?? "thirdPerson") as "thirdPerson" | "firstPerson" | "fixed" | "follow" | "scripted" | "free",
       position: camSettings.position,
-      lookAt: camSettings.lookAt,
-      fov: camSettings.fov,
+      lookAt:   camSettings.lookAt,
+      fov:      camSettings.fov,
       distance: camSettings.distance,
     } : undefined;
 
+    // All render players always included (few in count, always relevant)
+    const renderPlayers = Array.from(this.players.values()).map(this._toRenderPlayer);
+
     if (this.sendToPlayerFn) {
-      // Per-player worldState: each player gets global gui + their own gui
+      // ── Per-player: culling + delta compression ─────────────────────────────
+      // Build the complete render-object list once, then filter per player.
+      const allRenderObjs = Array.from(this.allObjs.values()).map(this._toRenderObj);
+
       for (const p of this.players.values()) {
-        const playerGui = this.scriptRunner?.getGuiElementsForPlayer(p.id) ?? this.scriptRunner?.getGuiElements() ?? [];
-        const state: RenderState = {
-          tick, serverTime: broadcastTime,
-          objects: renderObjects,
-          players: renderPlayers,
-          gui: playerGui.map(toRenderGui),
-          localPlayerId: p.id,
-          camera: cameraState,
-        };
-        this.sendToPlayerFn(p.id, { type: "worldState", state });
+        const playerGui = (
+          this.scriptRunner?.getGuiElementsForPlayer(p.id) ??
+          this.scriptRunner?.getGuiElements() ??
+          []
+        );
+        const guiMapped = playerGui.map(toRenderGui);
+
+        // ── Network culling ─────────────────────────────────────────────────
+        const culledObjs = VIEW_RADIUS > 0
+          ? allRenderObjs.filter(o => {
+              const dx = o.position.x - p.x;
+              const dy = o.position.y - p.y;
+              const dz = o.position.z - p.z;
+              return dx * dx + dy * dy + dz * dz <= VIEW_RADIUS_SQ;
+            })
+          : allRenderObjs;
+
+        const net = this.perPlayerNetState.get(p.id);
+
+        if (!net) {
+          // First tick for this player — always send full worldState
+          const state: RenderState = {
+            tick, serverTime: broadcastTime,
+            objects: culledObjs, players: renderPlayers,
+            gui: guiMapped, localPlayerId: p.id, camera: cameraState,
+          };
+          this.sendToPlayerFn(p.id, { type: "worldState", state });
+          this.perPlayerNetState.set(p.id, {
+            lastTick: tick,
+            sentIds:  new Set(culledObjs.map(o => o.id)),
+            objStates: new Map(culledObjs.map(o => [o.id, o])),
+          });
+          continue;
+        }
+
+        // ── Delta compression ───────────────────────────────────────────────
+        const currentIds = new Set(culledObjs.map(o => o.id));
+
+        // Objects that newly entered the view radius
+        const added: RenderObject[] = culledObjs.filter(o => !net.sentIds.has(o.id));
+
+        // Objects that left the view radius (or were destroyed)
+        const removed: string[] = [];
+        for (const id of net.sentIds) {
+          if (!currentIds.has(id)) removed.push(id);
+        }
+
+        // Objects that were already visible and have changed this tick
+        const changed: RenderObject[] = [];
+        for (const o of culledObjs) {
+          if (!net.sentIds.has(o.id)) continue; // already in `added`
+          const prev = net.objStates.get(o.id)!;
+          if (this._objChanged(prev, o)) changed.push(o);
+        }
+
+        const totalChanges = added.length + changed.length + removed.length;
+        // If more than DELTA_FULL_THRESHOLD of visible objects changed,
+        // a full state is cheaper (avoids re-encoding unchanged objects twice).
+        // When there are 0 objects, a worldDelta with empty arrays is always
+        // the right choice (it's smaller and still correct).
+        const sendFull =
+          culledObjs.length > 0 &&
+          totalChanges / culledObjs.length > DELTA_FULL_THRESHOLD;
+
+        if (sendFull) {
+          const state: RenderState = {
+            tick, serverTime: broadcastTime,
+            objects: culledObjs, players: renderPlayers,
+            gui: guiMapped, localPlayerId: p.id, camera: cameraState,
+          };
+          this.sendToPlayerFn(p.id, { type: "worldState", state });
+        } else {
+          this.sendToPlayerFn(p.id, {
+            type: "worldDelta",
+            baseTick: net.lastTick, tick, serverTime: broadcastTime,
+            added, changed, removed,
+            players: renderPlayers, gui: guiMapped,
+            localPlayerId: p.id, camera: cameraState,
+          });
+        }
+
+        // Update per-player net state for next tick
+        net.lastTick = tick;
+        net.sentIds  = currentIds;
+        for (const o of added)   net.objStates.set(o.id, o);
+        for (const o of changed) net.objStates.set(o.id, o);
+        for (const id of removed) net.objStates.delete(id);
       }
+
     } else {
-      // Fallback: broadcast same state to all (no per-player GUI)
+      // Fallback: single broadcast to all (no per-player GUI, no culling or delta)
       const guiElements = this.scriptRunner?.getGuiElements() ?? [];
       const state: RenderState = {
         tick, serverTime: broadcastTime,
-        objects: renderObjects,
+        objects: Array.from(this.allObjs.values()).map(this._toRenderObj),
         players: renderPlayers,
         gui: guiElements.map(toRenderGui),
-        localPlayerId: null,
-        camera: cameraState,
+        localPlayerId: null, camera: cameraState,
       };
       this.broadcastFn({ type: "worldState", state });
     }
@@ -856,6 +954,28 @@ export class GameRoom {
 
   stop() {
     if (this.interval) { clearInterval(this.interval); this.interval = null; }
+  }
+
+  /**
+   * Fast field-by-field comparison to decide whether an object needs to be
+   * included in the delta for a given player.  Only checks fields that change
+   * during normal gameplay — position, rotation, color, visibility,
+   * transparency, and animation state.
+   */
+  private _objChanged(prev: RenderObject, curr: RenderObject): boolean {
+    const pp = prev.position, cp = curr.position;
+    if (Math.abs(pp.x - cp.x) > 0.001 ||
+        Math.abs(pp.y - cp.y) > 0.001 ||
+        Math.abs(pp.z - cp.z) > 0.001) return true;
+    const pr = prev.rotation, cr = curr.rotation;
+    if (Math.abs(pr.x - cr.x) > 0.001 ||
+        Math.abs(pr.y - cr.y) > 0.001 ||
+        Math.abs(pr.z - cr.z) > 0.001) return true;
+    if (prev.color       !== curr.color)       return true;
+    if (prev.visible     !== curr.visible)     return true;
+    if (prev.animation   !== curr.animation)   return true;
+    if (Math.abs((prev.transparency ?? 0) - (curr.transparency ?? 0)) > 0.001) return true;
+    return false;
   }
 
   // ── Instance-manager lifecycle API ────────────────────────────────────────

@@ -8,7 +8,7 @@ import { insertGameSchema, insertGameObjectSchema, insertScriptSchema } from "@s
 import multer from "multer";
 import path from "path";
 import { promises as fs } from "fs";
-import { GameRoom } from "./game-room";
+import type { AnyRoom } from "./instance-manager";
 import { BUILD_ID } from "./build-id";
 import { instanceManager } from "./instance-manager";
 import { clusterManager } from "./cluster-manager";
@@ -561,7 +561,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
    * Routes through InstanceManager so idle/sleeping rooms are woken
    * and cluster telemetry is tracked.
    */
-  async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<GameRoom> {
+  async function getOrCreateRoom(sessionId: string, gameId?: string): Promise<AnyRoom> {
     const room = await instanceManager.getOrWakeInstance(
       sessionId,
       gameId ?? "",
@@ -589,7 +589,7 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   }
 
   /** Look up an active (non-sleeping) room. */
-  function getRoom(sessionId: string): GameRoom | undefined {
+  function getRoom(sessionId: string): AnyRoom | undefined {
     return instanceManager.getRoom(sessionId);
   }
 
