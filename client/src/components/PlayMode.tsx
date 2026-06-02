@@ -18,6 +18,7 @@ import Avatar from "@/components/play/Avatar";
 import ChaseCameraRig from "@/components/play/ChaseCameraRig";
 import { RenderClient } from "@/lib/render-client";
 import { ClientScriptRunner } from "@/lib/runtime/client-script-runner";
+import { ClientPhysics } from "@/lib/client-physics";
 import type { RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
 
 interface ChatMessage {
@@ -53,6 +54,12 @@ export default function PlayMode({
       pantsColor: avatarCfg.pantsColor,
     }, userId);
   }, [gameId, username, avatarCfg, userId]);
+
+  // Create ClientPhysics for local prediction
+  const clientPhysics = useMemo(() => new ClientPhysics(), []);
+
+  // Predicted player state for smooth local rendering
+  const [predictedPlayer, setPredictedPlayer] = useState<RenderPlayer | null>(null);
 
   // State for rendering
   const [renderObjects, setRenderObjects] = useState<RenderObject[]>([]);
@@ -108,13 +115,37 @@ export default function PlayMode({
   useEffect(() => {
     renderClient.onPlayersChanged = () => {
       setRenderPlayers(Array.from(renderClient.players.values()));
-      setLocalPlayer(renderClient.getLocalPlayer());
+      const serverLocalPlayer = renderClient.getLocalPlayer();
+      setLocalPlayer(serverLocalPlayer);
       setMpConnected(renderClient.connected);
+
+      // Reconcile client physics with server state
+      if (serverLocalPlayer) {
+        clientPhysics.reconcileWithServer(
+          serverLocalPlayer.position,
+          serverLocalPlayer.velocity,
+          serverLocalPlayer.rotation.y,
+          serverLocalPlayer.onGround
+        );
+      }
     };
 
     renderClient.onObjectsChanged = () => {
       const interp = renderClient.getInterpolatedState();
       setRenderObjects(interp.objects);
+
+      // Update client physics colliders from world objects
+      clientPhysics.setColliders(
+        interp.objects.map(o => ({
+          id: o.id,
+          name: o.name,
+          position: o.position,
+          scale: o.scale,
+          type: o.type,
+          anchored: (o as any).anchored ?? true,
+          canCollide: (o as any).canCollide ?? true,
+        }))
+      );
     };
 
     renderClient.onGuiChanged = () => {
@@ -184,15 +215,49 @@ export default function PlayMode({
     };
   }, [renderClient, scripts]);
 
-  // Game loop - send inputs and update state
+  // Game loop - send inputs and update state with client-side prediction
   useEffect(() => {
     let raf = 0;
     let lastTime = performance.now();
+    let sprintHeld = false;
 
     const loop = () => {
       const now = performance.now();
-      const dt = (now - lastTime) / 1000;
+      const dt = Math.min((now - lastTime) / 1000, 0.05); // Cap dt to prevent large jumps
       lastTime = now;
+
+      // Check sprint key
+      const k = keysRef.current;
+      sprintHeld = k["shift"] || k["shiftleft"] || k["shiftright"];
+
+      // Apply input to client physics for local prediction
+      clientPhysics.applyInput(
+        inputRef.current.moveX,
+        inputRef.current.moveZ,
+        inputRef.current.jump,
+        cameraYawRef.current,
+        sprintHeld,
+        dt
+      );
+
+      // Update visual smoothing
+      clientPhysics.updateVisual(dt);
+
+      // Get predicted state for rendering
+      const predicted = clientPhysics.getPredictedState();
+      const serverPlayer = renderClient.getLocalPlayer();
+
+      // Create predicted player for rendering
+      if (serverPlayer) {
+        setPredictedPlayer({
+          ...serverPlayer,
+          position: predicted.position,
+          rotation: predicted.rotation,
+          velocity: predicted.velocity,
+          onGround: predicted.onGround,
+          animation: predicted.animation,
+        });
+      }
 
       // Send inputs to server
       renderClient.updateInput(
@@ -200,15 +265,15 @@ export default function PlayMode({
         inputRef.current.moveZ,
         inputRef.current.jump,
         cameraYawRef.current,
-        false
+        sprintHeld
       );
       inputRef.current.jump = false; // Reset jump after sending
 
-      // Update interpolated state for rendering
+      // Update interpolated state for rendering (remote objects and players)
       const interp = renderClient.getInterpolatedState();
       setRenderObjects(interp.objects);
       setRenderPlayers(interp.players);
-      setLocalPlayer(renderClient.getLocalPlayer());
+      setLocalPlayer(serverPlayer);
       setTick((t) => (t + 1) % 1000000);
 
       // FPS counter
@@ -226,7 +291,7 @@ export default function PlayMode({
 
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [renderClient]);
+  }, [renderClient, clientPhysics]);
 
   // Keyboard input
   useEffect(() => {
@@ -326,8 +391,8 @@ export default function PlayMode({
     renderClient.clickGuiElement(elementId);
   }, [renderClient]);
 
-  // Use local player or create default for rendering
-  const player = localPlayer ?? {
+  // Use predicted player (client-side physics) for local rendering, fall back to server or default
+  const player = predictedPlayer ?? localPlayer ?? {
     id: "",
     name: username,
     position: { x: 0, y: 5, z: 0 },
