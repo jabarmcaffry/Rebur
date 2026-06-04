@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid } from "@react-three/drei";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -479,10 +479,12 @@ export default function PlayMode({
               if (dist > 200) return null;
               return <Primitive key={o.id} obj={o} distanceToPlayer={dist} />;
             })}
-            {player && <Avatar player={player} isLocal={true} />}
-            {renderPlayers.map((rp) => (
-              <Avatar key={rp.id} player={rp} isLocal={false} />
-            ))}
+            <Suspense fallback={null}>
+              {player && <Avatar player={player} isLocal={true} />}
+              {renderPlayers.map((rp) => (
+                <Avatar key={rp.id} player={rp} isLocal={false} />
+              ))}
+            </Suspense>
             <ChaseCameraRig 
               player={player} 
               shiftLock={shiftLock}

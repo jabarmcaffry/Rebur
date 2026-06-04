@@ -69,8 +69,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import type { Game, GameObject, Script, User } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
-import RigAnimationEditor from "@/components/RigAnimationEditor";
-import CharacterEditor from "@/components/CharacterEditor";
+import AnimationEditor from "@/components/AnimationEditor";
 import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
@@ -525,7 +524,7 @@ export default function EditorPage() {
   const { user } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transformMode, setTransformMode] = useState<TransformMode>("translate");
-  const [activeTab, setActiveTab] = useState<"scene" | "script" | "animate" | "character">("scene");
+  const [activeTab, setActiveTab] = useState<"scene" | "script" | "animate">("scene");
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
   const [scriptDraft, setScriptDraft] = useState<string>("");
   const [hierarchyOpen, setHierarchyOpen] = useState(false);
@@ -2287,11 +2286,6 @@ export default function EditorPage() {
                   <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                   Animate
                 </TabsTrigger>
-                {/* Character tab — always visible */}
-                <TabsTrigger value="character" data-testid="tab-character">
-                  <Users className="w-3.5 h-3.5 mr-1.5" />
-                  Character
-                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -2593,11 +2587,7 @@ export default function EditorPage() {
             </TabsContent>
 
             <TabsContent value="animate" className="flex-1 m-0 min-h-0 overflow-hidden">
-              <RigAnimationEditor gameId={gameId} />
-            </TabsContent>
-
-            <TabsContent value="character" className="flex-1 m-0 min-h-0 overflow-hidden">
-              <CharacterEditor />
+              <AnimationEditor gameId={gameId} />
             </TabsContent>
           </Tabs>
         </main>
