@@ -37,6 +37,31 @@ const JOINT_BONE_MAP: Record<JointName, string[]> = {
   RightLowerLeg: ["RightLeg", "RightShin", "Right_Lower_Leg", "RightKnee", "mixamorigRightLeg"],
 };
 
+// ─── GLB bone tree types ──────────────────────────────────────────────────────
+
+export interface GlbBone {
+  name: string;
+  children: GlbBone[];
+}
+
+function buildGlbBoneTree(scene: THREE.Object3D): GlbBone[] {
+  function walk(bone: THREE.Bone): GlbBone {
+    return {
+      name: bone.name || "(unnamed)",
+      children: bone.children
+        .filter((c): c is THREE.Bone => c instanceof THREE.Bone)
+        .map(walk),
+    };
+  }
+  const roots: THREE.Bone[] = [];
+  scene.traverse(n => {
+    if (n instanceof THREE.Bone && !(n.parent instanceof THREE.Bone)) {
+      roots.push(n);
+    }
+  });
+  return roots.map(walk);
+}
+
 // ─── Real avatar preview (replaces fake RigMesh) ──────────────────────────────
 
 interface AvatarPreviewProps {
@@ -44,14 +69,16 @@ interface AvatarPreviewProps {
   customPoses: Partial<Record<JointName, JointPose>> | null;
   showMesh: boolean;
   onClipsLoaded: (names: string[]) => void;
+  onBonesLoaded: (bones: GlbBone[]) => void;
 }
 
-function AvatarPreview({ glbClip, customPoses, showMesh, onClipsLoaded }: AvatarPreviewProps) {
+function AvatarPreview({ glbClip, customPoses, showMesh, onClipsLoaded, onBonesLoaded }: AvatarPreviewProps) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene: origScene, animations } = useGLTF("/Avatar_all_animations.glb");
   const cloned = useMemo(() => cloneSkeleton(origScene), [origScene]);
   const { actions, names } = useAnimations(animations, groupRef);
   const reportedRef = useRef(false);
+  const bonesReportedRef = useRef(false);
 
   // Build bone reference map for custom pose application
   const boneMap = useMemo<Map<JointName, THREE.Bone>>(() => {
@@ -69,6 +96,15 @@ function AvatarPreview({ glbClip, customPoses, showMesh, onClipsLoaded }: Avatar
     }
     return map;
   }, [cloned]);
+
+  // Extract and report the actual GLB bone hierarchy once
+  useEffect(() => {
+    if (!bonesReportedRef.current) {
+      bonesReportedRef.current = true;
+      const tree = buildGlbBoneTree(cloned);
+      onBonesLoaded(tree);
+    }
+  }, [cloned, onBonesLoaded]);
 
   // Report GLB clip names once
   useEffect(() => {
@@ -119,6 +155,37 @@ function AvatarPreview({ glbClip, customPoses, showMesh, onClipsLoaded }: Avatar
     <group ref={groupRef} position={[0, 0, 0]}>
       <primitive object={cloned} />
     </group>
+  );
+}
+
+// ─── GLB bone tree (shows actual skeleton from the loaded GLB) ────────────────
+
+function GlbBoneTreeNode({ bone, depth }: { bone: GlbBone; depth: number }) {
+  const [open, setOpen] = useState(depth < 2);
+  const hasChildren = bone.children.length > 0;
+  return (
+    <div>
+      <div
+        className="flex items-center gap-1 py-[3px] select-none text-xs rounded hover:bg-white/5 text-muted-foreground hover:text-foreground"
+        style={{ paddingLeft: 4 + depth * 10 }}
+      >
+        {hasChildren ? (
+          <button
+            className="w-3.5 h-3.5 flex items-center justify-center shrink-0 text-muted-foreground"
+            onClick={() => setOpen(v => !v)}
+          >
+            {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+          </button>
+        ) : (
+          <span className="w-3.5 h-3.5 shrink-0" />
+        )}
+        <span className="w-1.5 h-1.5 rounded-full bg-teal-500/70 shrink-0" />
+        <span className="flex-1 truncate font-mono text-[10px]">{bone.name}</span>
+      </div>
+      {open && bone.children.map((c, i) => (
+        <GlbBoneTreeNode key={`${c.name}-${i}`} bone={c} depth={depth + 1} />
+      ))}
+    </div>
   );
 }
 
@@ -361,6 +428,8 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
   const [glbClips, setGlbClips] = useState<string[]>([]);
   // Which GLB clip is active (null = using a custom animation)
   const [activeGlbClip, setActiveGlbClip] = useState<string | null>(null);
+  // Actual GLB skeleton bone hierarchy
+  const [glbBones, setGlbBones] = useState<GlbBone[]>([]);
 
   const [currentFrame, setCurrentFrame]   = useState(0);
   const [selectedJoint, setSelectedJoint] = useState<JointName | null>(null);
@@ -389,6 +458,11 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       setActiveGlbClip(names[0]);
       setActiveAnimId("");
     }
+  }, []);
+
+  // ── Callback to receive actual GLB bone hierarchy ─────────────
+  const handleBonesLoaded = useCallback((bones: GlbBone[]) => {
+    setGlbBones(bones);
   }, []);
 
   // ── Persist helpers ───────────────────────────────────────────
@@ -666,30 +740,41 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       <div className="flex flex-1 min-h-0">
 
         {/* Bone tree sidebar */}
-        <div className="w-40 border-r border-border bg-card/20 flex flex-col shrink-0">
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border shrink-0">
-            Skeleton
+        <div className="w-44 border-r border-border bg-card/20 flex flex-col shrink-0">
+          <div className="px-2 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border shrink-0 flex items-center justify-between">
+            <span>Skeleton</span>
+            {isGlbMode && glbBones.length > 0 && (
+              <span className="text-teal-400 normal-case tracking-normal">GLB</span>
+            )}
           </div>
           <ScrollArea className="flex-1">
             <div className="py-1">
-              {ROOT_JOINTS.map(j => (
-                <BoneTreeNode
-                  key={j}
-                  joint={j}
-                  depth={0}
-                  selectedJoint={selectedJoint}
-                  frameJoints={isGlbMode ? {} : currentPoses}
-                  onSelect={j => {
-                    if (!isGlbMode) setSelectedJoint(j);
-                  }}
-                />
-              ))}
+              {isGlbMode ? (
+                glbBones.length > 0 ? (
+                  glbBones.map((b, i) => (
+                    <GlbBoneTreeNode key={`${b.name}-${i}`} bone={b} depth={0} />
+                  ))
+                ) : (
+                  <div className="px-3 py-2 text-[10px] text-muted-foreground italic">Loading bones…</div>
+                )
+              ) : (
+                ROOT_JOINTS.map(j => (
+                  <BoneTreeNode
+                    key={j}
+                    joint={j}
+                    depth={0}
+                    selectedJoint={selectedJoint}
+                    frameJoints={currentPoses}
+                    onSelect={j => setSelectedJoint(j)}
+                  />
+                ))
+              )}
             </div>
           </ScrollArea>
           <div className="border-t border-border p-2 shrink-0">
             <p className="text-[9px] text-muted-foreground leading-tight">
               {isGlbMode
-                ? "Built-in clips can't be edited. Add a custom animation to create new poses."
+                ? "Actual GLB skeleton bones. Add a custom animation to pose individual bones."
                 : "Select a bone to pose it. Double-click a tab to rename."}
             </p>
           </div>
@@ -729,6 +814,7 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
                 customPoses={isGlbMode ? null : currentPoses}
                 showMesh={showMesh}
                 onClipsLoaded={handleClipsLoaded}
+                onBonesLoaded={handleBonesLoaded}
               />
             </Suspense>
             <OrbitControls makeDefault target={[0, 1.0, 0]} />

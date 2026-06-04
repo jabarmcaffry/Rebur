@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Gamepad2, Clock, LogOut, User } from "lucide-react";
+import { Plus, Gamepad2, Clock, LogOut, User, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import type { Game } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -27,6 +27,8 @@ export default function Dashboard() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newGameTitle, setNewGameTitle] = useState("");
   const [newGameDescription, setNewGameDescription] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [gameToDelete, setGameToDelete] = useState<Game | null>(null);
 
   const { data: games, isLoading } = useQuery<Game[]>({
     queryKey: ["/api/games"],
@@ -61,6 +63,28 @@ export default function Dashboard() {
       toast({
         title: "Error",
         description: error.message || "Failed to create game",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteGameMutation = useMutation({
+    mutationFn: async (gameId: string) => {
+      return await apiRequest("DELETE", `/api/games/${gameId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/games"] });
+      setDeleteDialogOpen(false);
+      setGameToDelete(null);
+      toast({
+        title: "Game deleted",
+        description: "The game project has been permanently deleted.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete game",
         variant: "destructive",
       });
     },
@@ -178,11 +202,26 @@ export default function Dashboard() {
                     <Clock className="w-3 h-3" />
                     <span>{formatDate(game.updatedAt)}</span>
                   </div>
-                  <Link href={`/editor/${game.id}`}>
-                    <Button size="sm" variant="secondary" data-testid={`button-edit-${game.id}`}>
-                      Edit
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-red-400 hover:bg-red-500/10"
+                      data-testid={`button-delete-${game.id}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setGameToDelete(game);
+                        setDeleteDialogOpen(true);
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
-                  </Link>
+                    <Link href={`/editor/${game.id}`}>
+                      <Button size="sm" variant="secondary" data-testid={`button-edit-${game.id}`}>
+                        Edit
+                      </Button>
+                    </Link>
+                  </div>
                 </CardFooter>
               </Card>
             ))}
@@ -201,6 +240,35 @@ export default function Dashboard() {
           </Card>
         )}
       </main>
+
+      {/* Delete Game Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={(open) => { setDeleteDialogOpen(open); if (!open) setGameToDelete(null); }}>
+        <DialogContent data-testid="dialog-delete-game">
+          <DialogHeader>
+            <DialogTitle>Delete Game</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to permanently delete <span className="font-semibold text-foreground">"{gameToDelete?.title}"</span>? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setDeleteDialogOpen(false); setGameToDelete(null); }}
+              data-testid="button-cancel-delete"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => gameToDelete && deleteGameMutation.mutate(gameToDelete.id)}
+              disabled={deleteGameMutation.isPending}
+              data-testid="button-confirm-delete"
+            >
+              {deleteGameMutation.isPending ? "Deleting..." : "Delete Game"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Game Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

@@ -721,17 +721,22 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
             const { sessionId, userId, playerName, gameId, colors } = message;
 
             // ── Single-session enforcement ─────────────────────────────────
-            // Authenticated users can only be in one game session at a time.
+            // If the user already has an active session, boot the old one so the
+            // new connection can proceed — this handles the case where the user
+            // refreshes, navigates away, or the previous WS close wasn't clean.
             if (userId) {
               const existingClientId = activeUserSessions.get(userId);
               if (existingClientId && clients.has(existingClientId)) {
-                ws.send(JSON.stringify({
-                  type: "error",
-                  code: "ALREADY_IN_GAME",
-                  message: "You are already playing in another session. Leave that game first.",
-                }));
-                // Don't close — keep the WebSocket open so the client can show the error UI.
-                break;
+                const old = clients.get(existingClientId)!;
+                try { old.ws.close(); } catch {}
+                const oldRoom = getRoom(old.sessionId);
+                if (oldRoom) {
+                  oldRoom.removePlayer(old.playerId);
+                  broadcast(old.sessionId, { type: 'playerLeft', playerId: old.playerId }, existingClientId);
+                }
+                await storage.removeSessionPlayer(old.playerId);
+                clients.delete(existingClientId);
+                activeUserSessions.delete(userId);
               }
             }
 
