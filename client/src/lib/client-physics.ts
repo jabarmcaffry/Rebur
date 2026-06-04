@@ -58,6 +58,8 @@ export class ClientPhysics {
   private initialized = false;
 
   setColliders(colliders: Collider[]): void {
+    // Only include colliders that have both canCollide AND anchored enabled
+    // Default is true for both when undefined (matching server behavior)
     this.colliders = colliders.filter((c) => c.canCollide !== false && c.anchored !== false);
   }
 

@@ -394,7 +394,7 @@ export class GameRoom {
       }
     }
 
-    // ── Step 3: Apply script player mutations ─────────────────────────────────
+    // ── Step 3: Apply script player mutations ──────���──────────────────────────
     if (this.scriptRunner) {
       const mutations = this.scriptRunner.drainAllPlayerMutations();
       for (const [playerId, mut] of mutations) {
@@ -883,6 +883,9 @@ export class GameRoom {
 
   private _pushPlayerOutOfStatics(p: PlayerState) {
     for (const b of this.statics) {
+      // Skip objects that have canCollide disabled
+      if (!b.canCollide) continue;
+      
       const ox = Math.min(p.x+PLAYER_RADIUS, b.maxX) - Math.max(p.x-PLAYER_RADIUS, b.minX);
       const oy = Math.min(p.y+PLAYER_HALF_H, b.maxY) - Math.max(p.y-PLAYER_HALF_H, b.minY);
       const oz = Math.min(p.z+PLAYER_RADIUS, b.maxZ) - Math.max(p.z-PLAYER_RADIUS, b.minZ);
@@ -901,8 +904,14 @@ export class GameRoom {
   }
 
   private _pushObjOutOfStatics(obj: DynamicObj) {
+    // Skip objects that have canCollide disabled
+    if (!obj.canCollide) return;
+    
     const hx=obj.sx/2, hy=obj.sy/2, hz=obj.sz/2;
     for (const b of this.statics) {
+      // Skip static colliders that have canCollide disabled
+      if (!b.canCollide) continue;
+      
       const ox = Math.min(obj.x+hx, b.maxX) - Math.max(obj.x-hx, b.minX);
       const oy = Math.min(obj.y+hy, b.maxY) - Math.max(obj.y-hy, b.minY);
       const oz = Math.min(obj.z+hz, b.maxZ) - Math.max(obj.z-hz, b.minZ);
