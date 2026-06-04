@@ -346,6 +346,11 @@ export class RenderClient {
   }
 
   private _applyState(state: RenderState) {
+    // Set nextState immediately so getLocalPlayer() works right after init
+    this.prevState = this.nextState;
+    this.nextState = state;
+    this.stateReceivedAt = performance.now();
+
     this.objects.clear();
     for (const obj of state.objects) {
       this.objects.set(obj.id, obj);

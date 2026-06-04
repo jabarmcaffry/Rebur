@@ -1,9 +1,10 @@
-// Blender-style animation editor
-// Top: 3D skeleton viewport (scene-like)  |  Bottom: Procreate-style frame-per-frame timeline
+// Animation editor — shows real GLB avatar in the viewport
+// Top: 3D viewport with real avatar + skeleton  |  Bottom: frame-per-frame timeline
 
-import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, Suspense } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Grid } from "@react-three/drei";
+import { OrbitControls, Grid, useGLTF, useAnimations } from "@react-three/drei";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import * as THREE from "three";
 import {
   Play, Pause, Plus, Trash2, RotateCcw, RotateCw,
@@ -19,244 +20,104 @@ import {
   loadAnimations, saveAnimations, emptyFrame, emptyAnimation, nanoid,
 } from "@/lib/character-types";
 
-// ─── Bone line (connects joints visually) ────────────────────────────────────
+// Preload avatar so editor doesn't stutter on first open
+useGLTF.preload("/Avatar_all_animations.glb");
 
-function BoneLine({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
-  const obj = useMemo(() => {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(...from),
-      new THREE.Vector3(...to),
-    ]);
-    const mat = new THREE.LineBasicMaterial({ color: "#4b5563" });
-    return new THREE.Line(geo, mat);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => { obj.geometry.dispose(); (obj.material as THREE.Material).dispose(); }, [obj]);
-  return <primitive object={obj} />;
+// Map our joint names → possible GLB bone name variants
+const JOINT_BONE_MAP: Record<JointName, string[]> = {
+  Torso:         ["Hips", "Spine", "Spine1", "Spine2", "Chest", "Torso", "mixamorigHips", "mixamorigSpine"],
+  Head:          ["Head", "Neck", "Neck1", "mixamorigHead", "mixamorigNeck"],
+  LeftUpperArm:  ["LeftArm", "LeftShoulder", "Left_Upper_Arm", "mixamorigLeftArm", "mixamorigLeftShoulder"],
+  LeftLowerArm:  ["LeftForeArm", "LeftForearm", "Left_Lower_Arm", "mixamorigLeftForeArm"],
+  RightUpperArm: ["RightArm", "RightShoulder", "Right_Upper_Arm", "mixamorigRightArm", "mixamorigRightShoulder"],
+  RightLowerArm: ["RightForeArm", "RightForearm", "Right_Lower_Arm", "mixamorigRightForeArm"],
+  LeftUpperLeg:  ["LeftUpLeg", "LeftThigh", "Left_Upper_Leg", "LeftHip", "mixamorigLeftUpLeg"],
+  LeftLowerLeg:  ["LeftLeg", "LeftShin", "Left_Lower_Leg", "LeftKnee", "mixamorigLeftLeg"],
+  RightUpperLeg: ["RightUpLeg", "RightThigh", "Right_Upper_Leg", "RightHip", "mixamorigRightUpLeg"],
+  RightLowerLeg: ["RightLeg", "RightShin", "Right_Lower_Leg", "RightKnee", "mixamorigRightLeg"],
+};
+
+// ─── Real avatar preview (replaces fake RigMesh) ──────────────────────────────
+
+interface AvatarPreviewProps {
+  glbClip: string | null;
+  customPoses: Partial<Record<JointName, JointPose>> | null;
+  showMesh: boolean;
+  onClipsLoaded: (names: string[]) => void;
 }
 
-// ─── FK Rig mesh (body + handles + lines, all driven by poses) ───────────────
+function AvatarPreview({ glbClip, customPoses, showMesh, onClipsLoaded }: AvatarPreviewProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const { scene: origScene, animations } = useGLTF("/Avatar_all_animations.glb");
+  const cloned = useMemo(() => cloneSkeleton(origScene), [origScene]);
+  const { actions, names } = useAnimations(animations, groupRef);
+  const reportedRef = useRef(false);
 
-interface RigMeshProps {
-  poses: Partial<Record<JointName, JointPose>>;
-  selectedJoint: JointName | null;
-  onJointClick: (j: JointName) => void;
-  showBody: boolean;
-}
+  // Build bone reference map for custom pose application
+  const boneMap = useMemo<Map<JointName, THREE.Bone>>(() => {
+    const map = new Map<JointName, THREE.Bone>();
+    const allBones: THREE.Bone[] = [];
+    cloned.traverse(n => { if (n instanceof THREE.Bone) allBones.push(n); });
+    for (const joint of JOINT_NAMES) {
+      const candidates = JOINT_BONE_MAP[joint];
+      for (const candidate of candidates) {
+        const bone = allBones.find(b =>
+          b.name.toLowerCase() === candidate.toLowerCase()
+        );
+        if (bone) { map.set(joint, bone); break; }
+      }
+    }
+    return map;
+  }, [cloned]);
 
-function RigMesh({ poses, selectedJoint, onJointClick, showBody }: RigMeshProps) {
-  const DEG = Math.PI / 180;
+  // Report GLB clip names once
+  useEffect(() => {
+    if (names.length > 0 && !reportedRef.current) {
+      reportedRef.current = true;
+      onClipsLoaded(names);
+    }
+  }, [names, onClipsLoaded]);
 
-  const torsoRef = useRef<THREE.Group>(null);
-  const headRef  = useRef<THREE.Group>(null);
-  const lUARef   = useRef<THREE.Group>(null);
-  const lLARef   = useRef<THREE.Group>(null);
-  const rUARef   = useRef<THREE.Group>(null);
-  const rLARef   = useRef<THREE.Group>(null);
-  const lULRef   = useRef<THREE.Group>(null);
-  const lLLRef   = useRef<THREE.Group>(null);
-  const rULRef   = useRef<THREE.Group>(null);
-  const rLLRef   = useRef<THREE.Group>(null);
+  // Play / switch GLB clip
+  useEffect(() => {
+    if (!actions || names.length === 0) return;
+    if (glbClip && actions[glbClip]) {
+      Object.values(actions).forEach(a => a?.fadeOut(0.2));
+      actions[glbClip]!.reset().fadeIn(0.2).play();
+    } else if (!glbClip) {
+      // Custom animation mode — stop all clips so manual poses take over
+      Object.values(actions).forEach(a => a?.fadeOut(0.1));
+      // Play idle softly as base
+      const idleNames = ["idle", "Idle", "IDLE", "Stand", "stand"];
+      const idleClip = names.find(n => idleNames.includes(n));
+      if (idleClip && actions[idleClip]) {
+        actions[idleClip]!.reset().fadeIn(0.3).play();
+      }
+    }
+  }, [glbClip, actions, names]);
 
-  const refs: Record<JointName, RefObject<THREE.Group>> = {
-    Torso: torsoRef, Head: headRef,
-    LeftUpperArm: lUARef, LeftLowerArm: lLARef,
-    RightUpperArm: rUARef, RightLowerArm: rLARef,
-    LeftUpperLeg: lULRef, LeftLowerLeg: lLLRef,
-    RightUpperLeg: rULRef, RightLowerLeg: rLLRef,
-  };
-
-  // Apply FK rotations every frame
+  // Apply custom pose rotations to skeleton bones every frame
   useFrame(() => {
-    for (const name of JOINT_NAMES) {
-      const ref = refs[name];
-      if (!ref.current) continue;
-      const p = poses[name];
-      ref.current.rotation.set(
-        (p?.rx ?? 0) * DEG,
-        (p?.ry ?? 0) * DEG,
-        (p?.rz ?? 0) * DEG,
-        "XYZ",
-      );
+    if (!customPoses) return;
+    const DEG = Math.PI / 180;
+    for (const [joint, pose] of Object.entries(customPoses) as [JointName, JointPose][]) {
+      const bone = boneMap.get(joint);
+      if (bone && pose) {
+        bone.rotation.set(pose.rx * DEG, pose.ry * DEG, pose.rz * DEG, "XYZ");
+      }
     }
   });
 
-  const isSel = (j: JointName) => j === selectedJoint;
-  const click  = (j: JointName) => (e: { stopPropagation: () => void }) => { e.stopPropagation(); onJointClick(j); };
-  const hR     = (j: JointName) => (isSel(j) ? 0.072 : 0.050);
-
-  const handleMat = (j: JointName) => (
-    <meshStandardMaterial
-      color={isSel(j) ? "#f59e0b" : JOINT_COLOR[j]}
-      emissive={isSel(j) ? "#92400e" : "#000000"}
-      emissiveIntensity={isSel(j) ? 0.6 : 0}
-      roughness={0.25}
-      metalness={0.2}
-    />
-  );
-
-  const bodyMat = (base: string, j: JointName) => (
-    <meshStandardMaterial
-      color={isSel(j) ? "#818cf8" : base}
-      transparent
-      opacity={0.75}
-      roughness={0.5}
-      metalness={0.05}
-    />
-  );
+  // Toggle mesh visibility
+  useEffect(() => {
+    cloned.traverse(n => {
+      if (n instanceof THREE.Mesh) n.visible = showMesh;
+    });
+  }, [showMesh, cloned]);
 
   return (
-    /* Torso group at y=1.8 — all joints hang from this via FK */
-    <group ref={torsoRef} position={[0, 1.8, 0]}>
-
-      {/* Torso body + handle */}
-      {showBody && (
-        <mesh castShadow onClick={click("Torso")}>
-          <boxGeometry args={[0.9, 1.2, 0.5]} />
-          {bodyMat("#4b7bbf", "Torso")}
-        </mesh>
-      )}
-      <mesh onClick={click("Torso")}>
-        <sphereGeometry args={[hR("Torso"), 14, 10]} />
-        {handleMat("Torso")}
-      </mesh>
-
-      {/* Spine line up to neck */}
-      <BoneLine from={[0, 0, 0]} to={[0, 0.6, 0]} />
-
-      {/* HEAD */}
-      <group ref={headRef} position={[0, 0.6, 0]}>
-        <BoneLine from={[0, 0, 0]} to={[0, 0.38, 0]} />
-        {showBody && (
-          <mesh position={[0, 0.35, 0]} castShadow onClick={click("Head")}>
-            <sphereGeometry args={[0.3, 18, 14]} />
-            {bodyMat("#e8b88a", "Head")}
-          </mesh>
-        )}
-        <mesh onClick={click("Head")}>
-          <sphereGeometry args={[hR("Head"), 14, 10]} />
-          {handleMat("Head")}
-        </mesh>
-      </group>
-
-      {/* Shoulder crossbar lines */}
-      <BoneLine from={[0, 0.4, 0]} to={[-0.6, 0.4, 0]} />
-      <BoneLine from={[0, 0.4, 0]} to={[ 0.6, 0.4, 0]} />
-
-      {/* LEFT ARM */}
-      <group ref={lUARef} position={[-0.6, 0.4, 0]}>
-        <BoneLine from={[0, 0, 0]} to={[0, -0.6, 0]} />
-        {showBody && (
-          <mesh position={[0, -0.3, 0]} castShadow onClick={click("LeftUpperArm")}>
-            <cylinderGeometry args={[0.08, 0.1, 0.6, 10]} />
-            {bodyMat("#e8b88a", "LeftUpperArm")}
-          </mesh>
-        )}
-        <mesh onClick={click("LeftUpperArm")}>
-          <sphereGeometry args={[hR("LeftUpperArm"), 14, 10]} />
-          {handleMat("LeftUpperArm")}
-        </mesh>
-        <group ref={lLARef} position={[0, -0.6, 0]}>
-          <BoneLine from={[0, 0, 0]} to={[0, -0.5, 0]} />
-          {showBody && (
-            <mesh position={[0, -0.25, 0]} castShadow onClick={click("LeftLowerArm")}>
-              <cylinderGeometry args={[0.07, 0.08, 0.5, 10]} />
-              {bodyMat("#e8b88a", "LeftLowerArm")}
-            </mesh>
-          )}
-          <mesh onClick={click("LeftLowerArm")}>
-            <sphereGeometry args={[hR("LeftLowerArm"), 14, 10]} />
-            {handleMat("LeftLowerArm")}
-          </mesh>
-        </group>
-      </group>
-
-      {/* RIGHT ARM */}
-      <group ref={rUARef} position={[0.6, 0.4, 0]}>
-        <BoneLine from={[0, 0, 0]} to={[0, -0.6, 0]} />
-        {showBody && (
-          <mesh position={[0, -0.3, 0]} castShadow onClick={click("RightUpperArm")}>
-            <cylinderGeometry args={[0.08, 0.1, 0.6, 10]} />
-            {bodyMat("#e8b88a", "RightUpperArm")}
-          </mesh>
-        )}
-        <mesh onClick={click("RightUpperArm")}>
-          <sphereGeometry args={[hR("RightUpperArm"), 14, 10]} />
-          {handleMat("RightUpperArm")}
-        </mesh>
-        <group ref={rLARef} position={[0, -0.6, 0]}>
-          <BoneLine from={[0, 0, 0]} to={[0, -0.5, 0]} />
-          {showBody && (
-            <mesh position={[0, -0.25, 0]} castShadow onClick={click("RightLowerArm")}>
-              <cylinderGeometry args={[0.07, 0.08, 0.5, 10]} />
-              {bodyMat("#e8b88a", "RightLowerArm")}
-            </mesh>
-          )}
-          <mesh onClick={click("RightLowerArm")}>
-            <sphereGeometry args={[hR("RightLowerArm"), 14, 10]} />
-            {handleMat("RightLowerArm")}
-          </mesh>
-        </group>
-      </group>
-
-      {/* Hip crossbar */}
-      <BoneLine from={[0, -0.6, 0]} to={[-0.25, -0.6, 0]} />
-      <BoneLine from={[0, -0.6, 0]} to={[ 0.25, -0.6, 0]} />
-
-      {/* LEFT LEG */}
-      <group ref={lULRef} position={[-0.25, -0.6, 0]}>
-        <BoneLine from={[0, 0, 0]} to={[0, -0.65, 0]} />
-        {showBody && (
-          <mesh position={[0, -0.325, 0]} castShadow onClick={click("LeftUpperLeg")}>
-            <cylinderGeometry args={[0.11, 0.13, 0.65, 10]} />
-            {bodyMat("#3d5a80", "LeftUpperLeg")}
-          </mesh>
-        )}
-        <mesh onClick={click("LeftUpperLeg")}>
-          <sphereGeometry args={[hR("LeftUpperLeg"), 14, 10]} />
-          {handleMat("LeftUpperLeg")}
-        </mesh>
-        <group ref={lLLRef} position={[0, -0.65, 0]}>
-          <BoneLine from={[0, 0, 0]} to={[0, -0.55, 0]} />
-          {showBody && (
-            <mesh position={[0, -0.275, 0]} castShadow onClick={click("LeftLowerLeg")}>
-              <cylinderGeometry args={[0.09, 0.11, 0.55, 10]} />
-              {bodyMat("#3d5a80", "LeftLowerLeg")}
-            </mesh>
-          )}
-          <mesh onClick={click("LeftLowerLeg")}>
-            <sphereGeometry args={[hR("LeftLowerLeg"), 14, 10]} />
-            {handleMat("LeftLowerLeg")}
-          </mesh>
-        </group>
-      </group>
-
-      {/* RIGHT LEG */}
-      <group ref={rULRef} position={[0.25, -0.6, 0]}>
-        <BoneLine from={[0, 0, 0]} to={[0, -0.65, 0]} />
-        {showBody && (
-          <mesh position={[0, -0.325, 0]} castShadow onClick={click("RightUpperLeg")}>
-            <cylinderGeometry args={[0.11, 0.13, 0.65, 10]} />
-            {bodyMat("#3d5a80", "RightUpperLeg")}
-          </mesh>
-        )}
-        <mesh onClick={click("RightUpperLeg")}>
-          <sphereGeometry args={[hR("RightUpperLeg"), 14, 10]} />
-          {handleMat("RightUpperLeg")}
-        </mesh>
-        <group ref={rLLRef} position={[0, -0.65, 0]}>
-          <BoneLine from={[0, 0, 0]} to={[0, -0.55, 0]} />
-          {showBody && (
-            <mesh position={[0, -0.275, 0]} castShadow onClick={click("RightLowerLeg")}>
-              <cylinderGeometry args={[0.09, 0.11, 0.55, 10]} />
-              {bodyMat("#3d5a80", "RightLowerLeg")}
-            </mesh>
-          )}
-          <mesh onClick={click("RightLowerLeg")}>
-            <sphereGeometry args={[hR("RightLowerLeg"), 14, 10]} />
-            {handleMat("RightLowerLeg")}
-          </mesh>
-        </group>
-      </group>
+    <group ref={groupRef} position={[0, 0, 0]}>
+      <primitive object={cloned} />
     </group>
   );
 }
@@ -320,7 +181,7 @@ function BoneTreeNode({
   );
 }
 
-// ─── Floating rotation controls (appears when joint selected) ─────────────────
+// ─── Floating rotation controls ───────────────────────────────────────────────
 
 function BoneControls({
   joint, pose, onChange, onClear,
@@ -374,7 +235,7 @@ function BoneControls({
   );
 }
 
-// ─── Procreate-style frame chip ───────────────────────────────────────────────
+// ─── Frame chip ───────────────────────────────────────────────────────────────
 
 function FrameChip({
   index, isCurrent, hasData, onClick,
@@ -462,6 +323,31 @@ function GroupTab({
   );
 }
 
+// ─── Built-in GLB clip tab ────────────────────────────────────────────────────
+
+function GlbClipTab({
+  name, isActive, onSelect,
+}: {
+  name: string;
+  isActive: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2 h-6 rounded text-xs font-medium cursor-pointer shrink-0 transition-colors ${
+        isActive
+          ? "bg-teal-600 text-white"
+          : "bg-teal-900/40 text-teal-300 hover:bg-teal-800/60 hover:text-teal-100"
+      }`}
+      onClick={onSelect}
+      title={`Built-in GLB clip: ${name}`}
+    >
+      <span className="text-[9px] opacity-70 font-mono">▶</span>
+      <span className="max-w-[80px] truncate">{name}</span>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AnimationEditor({ gameId }: { gameId: string }) {
@@ -470,23 +356,40 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
     const saved = loadAnimations(gameId);
     return saved[0]?.id ?? "";
   });
+
+  // GLB clips loaded from the actual avatar file
+  const [glbClips, setGlbClips] = useState<string[]>([]);
+  // Which GLB clip is active (null = using a custom animation)
+  const [activeGlbClip, setActiveGlbClip] = useState<string | null>(null);
+
   const [currentFrame, setCurrentFrame]   = useState(0);
   const [selectedJoint, setSelectedJoint] = useState<JointName | null>(null);
-  const [showBody, setShowBody]           = useState(true);
+  const [showMesh, setShowMesh]           = useState(true);
   const [playing, setPlaying]             = useState(false);
 
-  // Undo / redo via refs (avoids stale closures in callbacks)
-  const histRef = useRef<RigAnimation[][]>([]);
-  const hPtrRef = useRef(-1);
-
-  const playTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stripRef      = useRef<HTMLDivElement>(null);
+  const histRef      = useRef<RigAnimation[][]>([]);
+  const hPtrRef      = useRef(-1);
+  const playTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stripRef     = useRef<HTMLDivElement>(null);
 
   // ── Derived ───────────────────────────────────────────────────
-  const activeAnim   = anims.find(a => a.id === activeAnimId) ?? anims[0];
-  const frameData    = activeAnim?.frames[currentFrame];
+  const activeAnim    = anims.find(a => a.id === activeAnimId) ?? anims[0];
+  const frameData     = activeAnim?.frames[currentFrame];
   const currentPoses: Partial<Record<JointName, JointPose>> = frameData?.joints ?? {};
-  const frameCount   = activeAnim?.frames.length ?? 0;
+  const frameCount    = activeAnim?.frames.length ?? 0;
+
+  // In GLB clip mode: pass clip name; in custom mode: pass current poses
+  const isGlbMode = activeGlbClip !== null;
+
+  // ── Callback to receive clip names from inside the Canvas ─────
+  const handleClipsLoaded = useCallback((names: string[]) => {
+    setGlbClips(names);
+    // Auto-select the first clip to show the avatar animated by default
+    if (names.length > 0) {
+      setActiveGlbClip(names[0]);
+      setActiveAnimId("");
+    }
+  }, []);
 
   // ── Persist helpers ───────────────────────────────────────────
   const persist = useCallback((next: RigAnimation[]) => {
@@ -528,19 +431,19 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       if ((e.metaKey || e.ctrlKey) && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
-      if (e.key === " ")          { e.preventDefault(); setPlaying(v => !v); }
+      if (e.key === " " && !isGlbMode)  { e.preventDefault(); setPlaying(v => !v); }
       if (e.key === "ArrowLeft")  { e.preventDefault(); setCurrentFrame(f => Math.max(0, f - 1)); }
       if (e.key === "ArrowRight") { e.preventDefault(); setCurrentFrame(f => Math.min(frameCount - 1, f + 1)); }
       if (e.key === "Escape")     setSelectedJoint(null);
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [undo, redo, frameCount]);
+  }, [undo, redo, frameCount, isGlbMode]);
 
   // ── Playback ──────────────────────────────────────────────────
   useEffect(() => {
     if (playTimerRef.current) clearInterval(playTimerRef.current);
-    if (!playing) return;
+    if (!playing || isGlbMode) return;
     const fps  = activeAnim?.frameRate ?? 24;
     const loop = activeAnim?.looping ?? true;
     playTimerRef.current = setInterval(() => {
@@ -555,7 +458,7 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       });
     }, 1000 / fps);
     return () => { if (playTimerRef.current) clearInterval(playTimerRef.current); };
-  }, [playing, activeAnim?.frameRate, activeAnim?.looping, frameCount]);
+  }, [playing, isGlbMode, activeAnim?.frameRate, activeAnim?.looping, frameCount]);
 
   // Auto-scroll timeline strip to show current frame
   useEffect(() => {
@@ -569,7 +472,15 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
   const selectGroup = useCallback((id: string) => {
     setPlaying(false);
     setActiveAnimId(id);
+    setActiveGlbClip(null);
     setCurrentFrame(0);
+    setSelectedJoint(null);
+  }, []);
+
+  const selectGlbClip = useCallback((name: string) => {
+    setPlaying(false);
+    setActiveGlbClip(name);
+    setActiveAnimId("");
     setSelectedJoint(null);
   }, []);
 
@@ -585,12 +496,13 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       const next = prev.filter(a => a.id !== id);
       persist(next);
       if (id === activeAnimId) {
-        setActiveAnimId(next[0].id);
+        setActiveAnimId(next[0]?.id ?? "");
         setCurrentFrame(0);
+        if (glbClips.length > 0) setActiveGlbClip(glbClips[0]);
       }
       return next;
     });
-  }, [activeAnimId, persist]);
+  }, [activeAnimId, persist, glbClips]);
 
   const renameGroup = useCallback((id: string, name: string) => {
     mutate(prev => prev.map(a => a.id === id ? { ...a, name } : a));
@@ -636,16 +548,16 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
 
   // ── Frame operations ──────────────────────────────────────────
   const addFrame = useCallback(() => {
-    if (!activeAnim) return;
+    if (!activeAnim || isGlbMode) return;
     mutate(prev => prev.map(a => {
       if (a.id !== activeAnimId) return a;
       return { ...a, frames: [...a.frames, emptyFrame(a.frames.length)] };
     }));
     setCurrentFrame(frameCount);
-  }, [activeAnim, activeAnimId, frameCount, mutate]);
+  }, [activeAnim, activeAnimId, frameCount, mutate, isGlbMode]);
 
   const duplicateFrame = useCallback(() => {
-    if (!activeAnim) return;
+    if (!activeAnim || isGlbMode) return;
     mutate(prev => prev.map(a => {
       if (a.id !== activeAnimId) return a;
       const src = a.frames[currentFrame];
@@ -654,10 +566,10 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       return { ...a, frames: [...a.frames, dup] };
     }));
     setCurrentFrame(frameCount);
-  }, [activeAnim, activeAnimId, currentFrame, frameCount, mutate]);
+  }, [activeAnim, activeAnimId, currentFrame, frameCount, mutate, isGlbMode]);
 
   const deleteFrame = useCallback(() => {
-    if (!activeAnim || frameCount <= 1) return;
+    if (!activeAnim || frameCount <= 1 || isGlbMode) return;
     mutate(prev => prev.map(a => {
       if (a.id !== activeAnimId) return a;
       return {
@@ -668,11 +580,11 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
       };
     }));
     setCurrentFrame(f => Math.min(f, frameCount - 2));
-  }, [activeAnim, activeAnimId, currentFrame, frameCount, mutate]);
+  }, [activeAnim, activeAnimId, currentFrame, frameCount, mutate, isGlbMode]);
 
   // ── Export ────────────────────────────────────────────────────
   const exportJSON = useCallback(() => {
-    if (!activeAnim) return;
+    if (!activeAnim || isGlbMode) return;
     const blob = new Blob([JSON.stringify(activeAnim, null, 2)], { type: "application/json" });
     const url  = URL.createObjectURL(blob);
     const el   = document.createElement("a");
@@ -680,7 +592,7 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
     el.download = `${activeAnim.name.replace(/\s+/g, "_")}.json`;
     el.click();
     URL.revokeObjectURL(url);
-  }, [activeAnim]);
+  }, [activeAnim, isGlbMode]);
 
   // ── Render ────────────────────────────────────────────────────
   return (
@@ -688,25 +600,23 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
 
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-1.5 h-9 px-2 border-b border-border bg-card/30 shrink-0">
-        {/* Toggle body mesh */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant={showBody ? "secondary" : "ghost"}
+              variant={showMesh ? "secondary" : "ghost"}
               size="sm"
               className="h-6 px-2 gap-1 text-xs"
-              onClick={() => setShowBody(v => !v)}
+              onClick={() => setShowMesh(v => !v)}
             >
-              {showBody ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+              {showMesh ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
               <User className="w-3 h-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Toggle avatar body</TooltipContent>
+          <TooltipContent side="bottom">Toggle avatar mesh</TooltipContent>
         </Tooltip>
 
         <div className="w-px h-4 bg-border" />
 
-        {/* Undo / Redo */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={undo}>
@@ -726,21 +636,29 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
 
         <div className="flex-1" />
 
-        {activeAnim && (
+        {isGlbMode ? (
+          <span className="text-[10px] text-teal-400 tabular-nums">
+            Built-in: {activeGlbClip}
+          </span>
+        ) : activeAnim ? (
           <span className="text-[10px] text-muted-foreground tabular-nums">
             {activeAnim.name} · {currentFrame + 1} / {frameCount}
           </span>
-        )}
+        ) : null}
 
         <div className="w-px h-4 bg-border" />
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={exportJSON}>
+            <Button
+              variant="ghost" size="sm" className="h-6 w-6 p-0"
+              onClick={exportJSON}
+              disabled={isGlbMode}
+            >
               <Download className="w-3 h-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Export animation JSON</TooltipContent>
+          <TooltipContent side="bottom">Export custom animation JSON</TooltipContent>
         </Tooltip>
       </div>
 
@@ -760,34 +678,39 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
                   joint={j}
                   depth={0}
                   selectedJoint={selectedJoint}
-                  frameJoints={currentPoses}
-                  onSelect={setSelectedJoint}
+                  frameJoints={isGlbMode ? {} : currentPoses}
+                  onSelect={j => {
+                    if (!isGlbMode) setSelectedJoint(j);
+                  }}
                 />
               ))}
             </div>
           </ScrollArea>
           <div className="border-t border-border p-2 shrink-0">
             <p className="text-[9px] text-muted-foreground leading-tight">
-              Click a bone in the tree or viewport to select &amp; pose it.
-              <br />Double-click a group tab to rename it.
+              {isGlbMode
+                ? "Built-in clips can't be edited. Add a custom animation to create new poses."
+                : "Select a bone to pose it. Double-click a tab to rename."}
             </p>
           </div>
         </div>
 
-        {/* 3D viewport — same look as Scene tab */}
+        {/* 3D viewport */}
         <div className="relative flex-1 min-h-0">
           <Canvas
             shadows
-            camera={{ position: [0, 2.6, 5], fov: 45 }}
+            camera={{ position: [0, 1.4, 4], fov: 45 }}
             onPointerMissed={() => setSelectedJoint(null)}
           >
-            <ambientLight intensity={0.45} />
+            <color attach="background" args={["#0d0d0d"]} />
+            <ambientLight intensity={0.55} />
             <directionalLight
               position={[5, 9, 4]}
-              intensity={0.9}
+              intensity={1.1}
               castShadow
               shadow-mapSize={[512, 512]}
             />
+            <directionalLight position={[-4, 3, -4]} intensity={0.3} color="#a0c8ff" />
             <Grid
               args={[20, 20]}
               cellSize={0.5}
@@ -800,17 +723,19 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
               fadeStrength={1}
               infiniteGrid
             />
-            <RigMesh
-              poses={currentPoses}
-              selectedJoint={selectedJoint}
-              onJointClick={setSelectedJoint}
-              showBody={showBody}
-            />
-            <OrbitControls makeDefault target={[0, 1.4, 0]} />
+            <Suspense fallback={null}>
+              <AvatarPreview
+                glbClip={activeGlbClip}
+                customPoses={isGlbMode ? null : currentPoses}
+                showMesh={showMesh}
+                onClipsLoaded={handleClipsLoaded}
+              />
+            </Suspense>
+            <OrbitControls makeDefault target={[0, 1.0, 0]} />
           </Canvas>
 
-          {/* Floating bone rotation controls */}
-          {selectedJoint && (
+          {/* Floating bone rotation controls (custom mode only) */}
+          {!isGlbMode && selectedJoint && (
             <div className="absolute top-3 right-3 z-10">
               <BoneControls
                 joint={selectedJoint}
@@ -821,34 +746,55 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
             </div>
           )}
 
-          {!selectedJoint && (
-            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
-              <span className="text-[10px] text-muted-foreground/70 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
-                Click a joint to pose · Space to play
+          {/* Hint overlay */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
+            {isGlbMode ? (
+              <span className="text-[10px] text-teal-400/80 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
+                Previewing built-in GLB animation · Add a custom clip to create new animations
               </span>
-            </div>
-          )}
+            ) : !selectedJoint ? (
+              <span className="text-[10px] text-muted-foreground/70 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
+                Click a bone in the tree to pose it · Space to play
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      {/* ── Timeline (Procreate-style) ── */}
-      <div className="h-[168px] border-t border-border bg-card/20 flex flex-col shrink-0">
+      {/* ── Timeline ── */}
+      <div className={`border-t border-border bg-card/20 flex flex-col shrink-0 ${isGlbMode ? "h-10" : "h-[168px]"}`}>
 
-        {/* Animation group tabs */}
+        {/* Animation tabs row */}
         <div
           className="flex items-center gap-1.5 px-2 h-9 border-b border-border shrink-0 overflow-x-auto"
           style={{ scrollbarWidth: "none" }}
         >
+          {/* Built-in GLB clips */}
+          {glbClips.map(clip => (
+            <GlbClipTab
+              key={clip}
+              name={clip}
+              isActive={activeGlbClip === clip}
+              onSelect={() => selectGlbClip(clip)}
+            />
+          ))}
+
+          {glbClips.length > 0 && anims.length > 0 && (
+            <div className="w-px h-4 bg-border shrink-0 mx-0.5" />
+          )}
+
+          {/* Custom animation clips */}
           {anims.map(a => (
             <GroupTab
               key={a.id}
               anim={a}
-              isActive={a.id === activeAnimId}
+              isActive={!isGlbMode && a.id === activeAnimId}
               onSelect={() => selectGroup(a.id)}
               onDelete={() => deleteGroup(a.id)}
               onRename={name => renameGroup(a.id, name)}
             />
           ))}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -858,158 +804,153 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
                 <Plus className="w-3 h-3" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top">New animation group</TooltipContent>
+            <TooltipContent side="top">New custom animation</TooltipContent>
           </Tooltip>
         </div>
 
-        {/* Frame filmstrip */}
-        <div
-          className="flex-1 overflow-x-auto overflow-y-hidden"
-          style={{ scrollbarWidth: "thin", scrollbarColor: "#2a2a2a transparent" }}
-        >
-          <div
-            ref={stripRef}
-            className="flex items-center gap-1.5 h-full px-2 py-1.5 min-w-max"
-          >
-            {(activeAnim?.frames ?? []).map((f, i) => (
-              <FrameChip
-                key={i}
-                index={i}
-                isCurrent={i === currentFrame}
-                hasData={Object.keys(f.joints).length > 0}
-                onClick={() => setCurrentFrame(i)}
-              />
-            ))}
-            {/* Ghost "+frame" chip at end */}
+        {/* Frame editor (only in custom animation mode) */}
+        {!isGlbMode && (
+          <>
+            {/* Frame filmstrip */}
             <div
-              onClick={addFrame}
-              className="w-10 h-14 flex-shrink-0 flex items-center justify-center cursor-pointer rounded border border-dashed border-border text-muted-foreground hover:border-indigo-500 hover:text-indigo-400 transition-colors"
+              className="flex-1 overflow-x-auto overflow-y-hidden"
+              style={{ scrollbarWidth: "thin", scrollbarColor: "#2a2a2a transparent" }}
             >
-              <Plus className="w-3.5 h-3.5" />
+              <div
+                ref={stripRef}
+                className="flex items-center gap-1.5 h-full px-2 py-1.5 min-w-max"
+              >
+                {(activeAnim?.frames ?? []).map((f, i) => (
+                  <FrameChip
+                    key={i}
+                    index={i}
+                    isCurrent={i === currentFrame}
+                    hasData={Object.keys(f.joints).length > 0}
+                    onClick={() => setCurrentFrame(i)}
+                  />
+                ))}
+                <div
+                  onClick={addFrame}
+                  className="w-10 h-14 flex-shrink-0 flex items-center justify-center cursor-pointer rounded border border-dashed border-border text-muted-foreground hover:border-indigo-500 hover:text-indigo-400 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Playback + frame controls */}
-        <div className="flex items-center gap-1.5 px-2 h-8 border-t border-border shrink-0">
-
-          {/* Step to first */}
-          <button
-            onClick={() => setCurrentFrame(0)}
-            className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
-            title="First frame"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-              <rect x="1" y="1" width="1.5" height="10" rx="0.4"/>
-              <polygon points="11,1 4.5,6 11,11"/>
-            </svg>
-          </button>
-
-          {/* Step back */}
-          <button
-            onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}
-            className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
-            title="Previous frame"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-              <polygon points="11,1 5,6 11,11"/>
-              <polygon points="6,1 0,6 6,11"/>
-            </svg>
-          </button>
-
-          {/* Play / Pause */}
-          <button
-            onClick={() => setPlaying(v => !v)}
-            className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
-              playing
-                ? "bg-indigo-600 text-white"
-                : "bg-white/10 text-foreground hover:bg-white/20"
-            }`}
-            title={playing ? "Pause (Space)" : "Play (Space)"}
-          >
-            {playing
-              ? <Pause className="w-3 h-3" />
-              : <Play  className="w-3 h-3 ml-0.5" />}
-          </button>
-
-          {/* Step forward */}
-          <button
-            onClick={() => setCurrentFrame(f => Math.min(frameCount - 1, f + 1))}
-            className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
-            title="Next frame"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-              <polygon points="1,1 7,6 1,11"/>
-              <polygon points="6,1 12,6 6,11"/>
-            </svg>
-          </button>
-
-          {/* Step to last */}
-          <button
-            onClick={() => setCurrentFrame(frameCount - 1)}
-            className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
-            title="Last frame"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-              <polygon points="1,1 7.5,6 1,11"/>
-              <rect x="9.5" y="1" width="1.5" height="10" rx="0.4"/>
-            </svg>
-          </button>
-
-          <div className="w-px h-4 bg-border mx-0.5" />
-
-          {/* Frame ops */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button onClick={addFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors">
-                <Plus className="w-3 h-3" />
+            {/* Playback + frame controls */}
+            <div className="flex items-center gap-1.5 px-2 h-8 border-t border-border shrink-0">
+              <button
+                onClick={() => setCurrentFrame(0)}
+                className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
+                title="First frame"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                  <rect x="1" y="1" width="1.5" height="10" rx="0.4"/>
+                  <polygon points="11,1 4.5,6 11,11"/>
+                </svg>
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Add frame</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button onClick={duplicateFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors">
-                <Copy className="w-3 h-3" />
+
+              <button
+                onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}
+                className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
+                title="Previous frame"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                  <polygon points="11,1 5,6 11,11"/>
+                  <polygon points="6,1 0,6 6,11"/>
+                </svg>
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Duplicate frame</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button onClick={deleteFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-red-400 rounded hover:bg-white/10 transition-colors">
-                <Trash2 className="w-3 h-3" />
+
+              <button
+                onClick={() => setPlaying(v => !v)}
+                className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+                  playing
+                    ? "bg-indigo-600 text-white"
+                    : "bg-white/10 text-foreground hover:bg-white/20"
+                }`}
+                title={playing ? "Pause (Space)" : "Play (Space)"}
+              >
+                {playing
+                  ? <Pause className="w-3 h-3" />
+                  : <Play  className="w-3 h-3 ml-0.5" />}
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">Delete frame</TooltipContent>
-          </Tooltip>
 
-          <div className="flex-1" />
+              <button
+                onClick={() => setCurrentFrame(f => Math.min(frameCount - 1, f + 1))}
+                className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
+                title="Next frame"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                  <polygon points="1,1 7,6 1,11"/>
+                  <polygon points="6,1 12,6 6,11"/>
+                </svg>
+              </button>
 
-          {/* Loop toggle */}
-          <button
-            onClick={toggleLoop}
-            className={`h-5 px-2 rounded text-[10px] font-medium border transition-colors ${
-              activeAnim?.looping
-                ? "bg-indigo-600/30 text-indigo-300 border-indigo-600/50"
-                : "text-muted-foreground border-border hover:text-foreground"
-            }`}
-          >
-            Loop
-          </button>
+              <button
+                onClick={() => setCurrentFrame(frameCount - 1)}
+                className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors"
+                title="Last frame"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
+                  <polygon points="1,1 7.5,6 1,11"/>
+                  <rect x="9.5" y="1" width="1.5" height="10" rx="0.4"/>
+                </svg>
+              </button>
 
-          {/* FPS */}
-          <span className="text-[10px] text-muted-foreground ml-1">FPS</span>
-          <select
-            value={activeAnim?.frameRate ?? 24}
-            onChange={e => setFps(Number(e.target.value))}
-            className="h-5 px-1 text-[10px] bg-muted border border-border rounded text-foreground cursor-pointer"
-          >
-            {[8, 12, 24, 30, 60].map(f => (
-              <option key={f} value={f}>{f}</option>
-            ))}
-          </select>
-        </div>
+              <div className="w-px h-4 bg-border mx-0.5" />
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button onClick={addFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors">
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Add frame</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button onClick={duplicateFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-foreground rounded hover:bg-white/10 transition-colors">
+                    <Copy className="w-3 h-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Duplicate frame</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button onClick={deleteFrame} className="w-6 h-6 flex items-center justify-center text-muted-foreground hover:text-red-400 rounded hover:bg-white/10 transition-colors">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Delete frame</TooltipContent>
+              </Tooltip>
+
+              <div className="flex-1" />
+
+              <button
+                onClick={toggleLoop}
+                className={`h-5 px-2 rounded text-[10px] font-medium border transition-colors ${
+                  activeAnim?.looping
+                    ? "bg-indigo-600/30 text-indigo-300 border-indigo-600/50"
+                    : "text-muted-foreground border-border hover:text-foreground"
+                }`}
+              >
+                Loop
+              </button>
+
+              <span className="text-[10px] text-muted-foreground ml-1">FPS</span>
+              <select
+                value={activeAnim?.frameRate ?? 24}
+                onChange={e => setFps(Number(e.target.value))}
+                className="h-5 px-1 text-[10px] bg-muted border border-border rounded text-foreground cursor-pointer"
+              >
+                {[8, 12, 24, 30, 60].map(f => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
