@@ -16,15 +16,21 @@ function genId(): string {
   return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
 }
 
+// Helper to ensure db is available
+function getDb() {
+  if (!db) throw new Error("Database not initialized - DATABASE_URL may not be set");
+  return db;
+}
+
 export class DatabaseStorage implements IStorage {
   // ── Users ─────────────────────────────────────────────────────────────────
   async getUser(id: string): Promise<User | undefined> {
-    const [u] = await db.select().from(users).where(eq(users.id, id));
+    const [u] = await getDb().select().from(users).where(eq(users.id, id));
     return u;
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const [u] = await db
+    const [u] = await getDb()
       .insert(users)
       .values({ ...userData, updatedAt: new Date() })
       .onConflictDoUpdate({
@@ -43,27 +49,27 @@ export class DatabaseStorage implements IStorage {
 
   // ── Games ─────────────────────────────────────────────────────────────────
   async createGame(game: InsertGame): Promise<Game> {
-    const [g] = await db.insert(games).values({ ...game, id: genId() } as any).returning();
+    const [g] = await getDb().insert(games).values({ ...game, id: genId() } as any).returning();
     return g;
   }
 
   async getGame(id: string): Promise<Game | undefined> {
-    const [g] = await db.select().from(games).where(eq(games.id, id));
+    const [g] = await getDb().select().from(games).where(eq(games.id, id));
     return g;
   }
 
   async getGamesByUserId(userId: string): Promise<Game[]> {
-    return db.select().from(games).where(eq(games.userId, userId)).orderBy(desc(games.updatedAt));
+    return getDb().select().from(games).where(eq(games.userId, userId)).orderBy(desc(games.updatedAt));
   }
 
   async getPublishedGames(): Promise<Game[]> {
-    return db.select().from(games)
+    return getDb().select().from(games)
       .where(and(eq(games.isPublished, true), eq(games.isPublic, true)))
       .orderBy(desc(games.updatedAt));
   }
 
   async updateGame(id: string, updates: Partial<InsertGame>): Promise<Game | undefined> {
-    const [g] = await db.update(games)
+    const [g] = await getDb().update(games)
       .set({ ...updates, updatedAt: new Date() })
       .where(eq(games.id, id))
       .returning();
@@ -71,33 +77,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteGame(id: string): Promise<void> {
-    await db.delete(games).where(eq(games.id, id));
+    await getDb().delete(games).where(eq(games.id, id));
   }
 
   async incrementGamePlays(id: string): Promise<void> {
-    const [g] = await db.select().from(games).where(eq(games.id, id));
+    const [g] = await getDb().select().from(games).where(eq(games.id, id));
     if (g) {
-      await db.update(games).set({ plays: (g.plays ?? 0) + 1 }).where(eq(games.id, id));
+      await getDb().update(games).set({ plays: (g.plays ?? 0) + 1 }).where(eq(games.id, id));
     }
   }
 
   // ── Game Objects ──────────────────────────────────────────────────────────
   async createGameObject(obj: InsertGameObject): Promise<GameObject> {
-    const [o] = await db.insert(gameObjects).values({ ...obj, id: genId() } as any).returning();
+    const [o] = await getDb().insert(gameObjects).values({ ...obj, id: genId() } as any).returning();
     return o;
   }
 
   async getGameObjects(gameId: string): Promise<GameObject[]> {
-    return db.select().from(gameObjects).where(eq(gameObjects.gameId, gameId));
+    return getDb().select().from(gameObjects).where(eq(gameObjects.gameId, gameId));
   }
 
   async getGameObject(id: string): Promise<GameObject | undefined> {
-    const [o] = await db.select().from(gameObjects).where(eq(gameObjects.id, id));
+    const [o] = await getDb().select().from(gameObjects).where(eq(gameObjects.id, id));
     return o;
   }
 
   async updateGameObject(id: string, updates: Partial<InsertGameObject>): Promise<GameObject | undefined> {
-    const [o] = await db.update(gameObjects)
+    const [o] = await getDb().update(gameObjects)
       .set({ ...updates, updatedAt: new Date() } as any)
       .where(eq(gameObjects.id, id))
       .returning();
@@ -105,26 +111,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteGameObject(id: string): Promise<void> {
-    await db.delete(gameObjects).where(eq(gameObjects.id, id));
+    await getDb().delete(gameObjects).where(eq(gameObjects.id, id));
   }
 
   // ── Scripts ───────────────────────────────────────────────────────────────
   async createScript(script: InsertScript): Promise<Script> {
-    const [s] = await db.insert(scripts).values({ ...script, id: genId() } as any).returning();
+    const [s] = await getDb().insert(scripts).values({ ...script, id: genId() } as any).returning();
     return s;
   }
 
   async getScripts(gameId: string): Promise<Script[]> {
-    return db.select().from(scripts).where(eq(scripts.gameId, gameId));
+    return getDb().select().from(scripts).where(eq(scripts.gameId, gameId));
   }
 
   async getScript(id: string): Promise<Script | undefined> {
-    const [s] = await db.select().from(scripts).where(eq(scripts.id, id));
+    const [s] = await getDb().select().from(scripts).where(eq(scripts.id, id));
     return s;
   }
 
   async updateScript(id: string, updates: Partial<InsertScript>): Promise<Script | undefined> {
-    const [s] = await db.update(scripts)
+    const [s] = await getDb().update(scripts)
       .set({ ...updates, updatedAt: new Date() } as any)
       .where(eq(scripts.id, id))
       .returning();
@@ -132,31 +138,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteScript(id: string): Promise<void> {
-    await db.delete(scripts).where(eq(scripts.id, id));
+    await getDb().delete(scripts).where(eq(scripts.id, id));
   }
 
   // ── Assets ────────────────────────────────────────────────────────────────
   async createAsset(asset: InsertAsset): Promise<Asset> {
-    const [a] = await db.insert(assets).values({ ...asset, id: genId() } as any).returning();
+    const [a] = await getDb().insert(assets).values({ ...asset, id: genId() } as any).returning();
     return a;
   }
 
   async getAssets(userId?: string): Promise<Asset[]> {
-    if (userId) return db.select().from(assets).where(eq(assets.userId, userId));
-    return db.select().from(assets).where(eq(assets.isPublic, true));
+    if (userId) return getDb().select().from(assets).where(eq(assets.userId, userId));
+    return getDb().select().from(assets).where(eq(assets.isPublic, true));
   }
 
   async getBuiltInAssets(): Promise<Asset[]> {
-    return db.select().from(assets).where(eq(assets.isBuiltIn, true));
+    return getDb().select().from(assets).where(eq(assets.isBuiltIn, true));
   }
 
   async getAsset(id: string): Promise<Asset | undefined> {
-    const [a] = await db.select().from(assets).where(eq(assets.id, id));
+    const [a] = await getDb().select().from(assets).where(eq(assets.id, id));
     return a;
   }
 
   async deleteAsset(id: string): Promise<void> {
-    await db.delete(assets).where(eq(assets.id, id));
+    await getDb().delete(assets).where(eq(assets.id, id));
   }
 
   // ── Multiplayer (stub — not wired yet) ────────────────────────────────────

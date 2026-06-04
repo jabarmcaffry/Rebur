@@ -394,6 +394,17 @@ export default function PlayMode({
   // Use predicted player (client-side physics) for local rendering, fall back to server state.
   // Never fall back to a hard-coded mid-air position — wait for the server's first state packet.
   const player = predictedPlayer ?? localPlayer ?? null;
+  
+  // Debug: Log player state to understand why avatar might not render
+  useEffect(() => {
+    console.log("[v0] PlayMode player state:", { 
+      predictedPlayer: predictedPlayer ? { pos: predictedPlayer.position } : null,
+      localPlayer: localPlayer ? { pos: localPlayer.position } : null,
+      player: player ? { pos: player.position } : null,
+      mpConnected,
+      renderPlayersCount: renderPlayers.length
+    });
+  }, [predictedPlayer, localPlayer, player, mpConnected, renderPlayers.length]);
 
   const totalPlayers = 1 + renderPlayers.length;
 
