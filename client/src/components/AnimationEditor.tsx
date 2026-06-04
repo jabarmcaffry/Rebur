@@ -393,12 +393,17 @@ function GroupTab({
 // ─── Built-in GLB clip tab ────────────────────────────────────────────────────
 
 function GlbClipTab({
-  name, isActive, onSelect,
+  name, isActive, onSelect, clipIndex, totalClips,
 }: {
   name: string;
   isActive: boolean;
   onSelect: () => void;
+  clipIndex: number;
+  totalClips: number;
 }) {
+  // Show a warning badge if there's only one clip (likely a combined animation)
+  const isSingleClip = totalClips === 1;
+  
   return (
     <div
       className={`flex items-center gap-1.5 px-2 h-6 rounded text-xs font-medium cursor-pointer shrink-0 transition-colors ${
@@ -407,10 +412,16 @@ function GlbClipTab({
           : "bg-teal-900/40 text-teal-300 hover:bg-teal-800/60 hover:text-teal-100"
       }`}
       onClick={onSelect}
-      title={`Built-in GLB clip: ${name}`}
+      title={isSingleClip 
+        ? `Single GLB clip "${name}" - This may contain multiple animations merged together. Create custom animations below to separate them.`
+        : `Built-in GLB clip: ${name} (${clipIndex + 1}/${totalClips})`
+      }
     >
-      <span className="text-[9px] opacity-70 font-mono">▶</span>
+      <span className="text-[9px] opacity-70 font-mono">{clipIndex + 1}</span>
       <span className="max-w-[80px] truncate">{name}</span>
+      {isSingleClip && (
+        <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0" title="Combined clip" />
+      )}
     </div>
   );
 }
@@ -836,7 +847,10 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 pointer-events-none">
             {isGlbMode ? (
               <span className="text-[10px] text-teal-400/80 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
-                Previewing built-in GLB animation · Add a custom clip to create new animations
+                {glbClips.length === 1 
+                  ? "Single GLB clip detected · Animations may be merged · Add custom clips below to create separate animations"
+                  : `Previewing built-in animation "${activeGlbClip}" · Add custom clips to create new animations`
+                }
               </span>
             ) : !selectedJoint ? (
               <span className="text-[10px] text-muted-foreground/70 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
@@ -855,13 +869,25 @@ export default function AnimationEditor({ gameId }: { gameId: string }) {
           className="flex items-center gap-1.5 px-2 h-9 border-b border-border shrink-0 overflow-x-auto"
           style={{ scrollbarWidth: "none" }}
         >
-          {/* Built-in GLB clips */}
-          {glbClips.map(clip => (
+          {/* Built-in GLB clips - shown with index */}
+          {glbClips.length === 1 && (
+            <span className="text-[9px] text-yellow-400/70 px-1 shrink-0" title="The GLB contains only one animation clip. If it has multiple animations merged, create custom animations to separate them.">
+              Combined:
+            </span>
+          )}
+          {glbClips.length > 1 && (
+            <span className="text-[9px] text-teal-400/70 px-1 shrink-0">
+              Built-in ({glbClips.length}):
+            </span>
+          )}
+          {glbClips.map((clip, index) => (
             <GlbClipTab
               key={clip}
               name={clip}
               isActive={activeGlbClip === clip}
               onSelect={() => selectGlbClip(clip)}
+              clipIndex={index}
+              totalClips={glbClips.length}
             />
           ))}
 
