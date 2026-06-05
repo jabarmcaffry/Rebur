@@ -395,6 +395,21 @@ export default function PlayMode({
           <Canvas
             shadows
             camera={{ position: [0, 4, 8], fov: 60 }}
+            gl={{
+              powerPreference: "high-performance",
+              antialias: false,
+              failIfMajorPerformanceCaveat: false,
+            }}
+            onCreated={({ gl }) => {
+              const canvas = gl.domElement;
+              canvas.addEventListener("webglcontextlost", (e) => {
+                e.preventDefault();
+                console.warn("[rebur] WebGL context lost — attempting restore");
+              });
+              canvas.addEventListener("webglcontextrestored", () => {
+                console.log("[rebur] WebGL context restored");
+              });
+            }}
           >
             <color attach="background" args={["#0a0a0a"]} />
             <ambientLight intensity={0.4} />

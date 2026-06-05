@@ -462,6 +462,7 @@ export default function EditorPage() {
   const pendingTransform = useRef<Partial<GameObject> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const reburInputRef = useRef<HTMLInputElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [publishDest, setPublishDest] = useState<"platform" | "embed" | "both">("platform");
@@ -778,6 +779,48 @@ export default function EditorPage() {
     } as Partial<GameObject>);
     toast({ title: "Audio imported", description: `${file.name} added to Scene` });
     if (audioInputRef.current) audioInputRef.current.value = "";
+  };
+
+  /** Handle importing a .rebur or .fbx file — .fbx is parsed and converted to .rebur in-browser */
+  const handleImportRebur = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (reburInputRef.current) reburInputRef.current.value = "";
+
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".rebur")) {
+      try {
+        const text = await file.text();
+        const { parseReburFile } = await import("@/lib/rebur");
+        const asset = parseReburFile(text);
+        toast({ title: ".rebur imported", description: `Loaded "${asset.name}" with ${asset.animations.length} animation(s)` });
+      } catch (err) {
+        toast({ title: "Import failed", description: String(err), variant: "destructive" });
+      }
+    } else if (name.endsWith(".fbx")) {
+      try {
+        toast({ title: "Converting FBX → .rebur…", description: "Please wait" });
+        const { importFbxFile, buildReburAsset, exportReburAsset } = await import("@/lib/rebur");
+        const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
+        const buf = await file.arrayBuffer();
+        const loader = new FBXLoader();
+        const group = loader.parse(buf, "") as any;
+        const asset = buildReburAsset(file.name.replace(/\.fbx$/i, ""), group, []);
+        exportReburAsset(asset, file.name.replace(/\.fbx$/i, "") + ".rebur");
+        toast({ title: "FBX converted", description: `Saved as ${asset.name}.rebur` });
+      } catch (err) {
+        toast({ title: "Conversion failed", description: String(err), variant: "destructive" });
+      }
+    } else {
+      toast({ title: "Unsupported file", description: "Please select a .rebur or .fbx file", variant: "destructive" });
+    }
+  };
+
+  /** Export the compiled avatar .rebur asset */
+  const handleExportAvatarRebur = async () => {
+    const { downloadAvatarRebur } = await import("@/components/play/Avatar");
+    downloadAvatarRebur();
+    toast({ title: "Avatar exported", description: "avatar.rebur downloaded" });
   };
 
   /** Objects that should appear in the 3D viewport — only Workspace + Lighting. */
@@ -1874,6 +1917,20 @@ export default function EditorPage() {
                 <Upload className="w-3.5 h-3.5 text-muted-foreground" />
                 <span>Import Audio</span>
               </button>
+              <button
+                onClick={() => reburInputRef.current?.click()}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
+              >
+                <Upload className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Import .rebur / .fbx</span>
+              </button>
+              <button
+                onClick={handleExportAvatarRebur}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
+              >
+                <Archive className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Export Avatar .rebur</span>
+              </button>
               <div className="my-1 border-t border-border" />
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
                 Publish
@@ -1917,6 +1974,14 @@ export default function EditorPage() {
             onChange={handleImportAudio}
             className="hidden"
             data-testid="input-import-audio"
+          />
+          <input
+            ref={reburInputRef}
+            type="file"
+            accept=".rebur,.fbx"
+            onChange={handleImportRebur}
+            className="hidden"
+            data-testid="input-import-rebur"
           />
           <Link href="/dashboard">
             <Button size="sm" variant="ghost" data-testid="button-back-dashboard">
