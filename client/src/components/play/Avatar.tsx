@@ -87,7 +87,7 @@ export default function Avatar({
   const currentAnim   = useRef<string>("");
 
   // ── Load all FBX files (cached by useLoader) ─────────────────────────────
-  const baseFbx = useLoader(FBXLoader, "/Aavatar_all_animations_unity.fbx") as LoadedFbx;
+  const baseFbx = useLoader(FBXLoader, "/Aavatar.fbx") as LoadedFbx;
   const idleFbx = useLoader(FBXLoader, "/Idle.fbx")    as LoadedFbx;
   const walkFbx = useLoader(FBXLoader, "/Walking.fbx") as LoadedFbx;
   const runFbx  = useLoader(FBXLoader, "/Running.fbx") as LoadedFbx;
