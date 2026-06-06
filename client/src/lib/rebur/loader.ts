@@ -8,6 +8,13 @@ export interface ReburLoaded {
   clips: THREE.AnimationClip[];
   /** Root bone to add to the scene alongside the mesh */
   rootBone: THREE.Bone;
+  /**
+   * The uniform scale factor that FBXLoader originally applied to the root
+   * group (captured during buildReburAsset).  Apply this as the wrapper
+   * group scale in the scene so the skinning math is correct.
+   * Defaults to 0.01 for legacy assets that predate this field.
+   */
+  modelScale: number;
 }
 
 function buildSkeleton(boneData: ReburBone[], inverseArrays: number[][]): {
@@ -79,6 +86,10 @@ export function instantiateReburAsset(asset: ReburAsset): ReburLoaded {
   const mesh = new THREE.SkinnedMesh(geometry, material);
   mesh.castShadow = false;
   mesh.receiveShadow = false;
+  // Skinned meshes must have frustum culling disabled — their bounding box is
+  // computed in bind pose and rarely encloses the animated range, causing the
+  // GPU to skip the draw call entirely even when the avatar is fully on screen.
+  mesh.frustumCulled = false;
   mesh.normalizeSkinWeights();
 
   mesh.add(rootBone);
@@ -89,7 +100,10 @@ export function instantiateReburAsset(asset: ReburAsset): ReburLoaded {
     THREE.AnimationClip.parse(a.clipJson as any),
   );
 
-  return { mesh, skeleton, clips, rootBone };
+  const modelScale = typeof asset.modelScale === "number" ? asset.modelScale : 0.01;
+  console.log(`[rebur] instantiateReburAsset: restoring modelScale=${modelScale}`);
+
+  return { mesh, skeleton, clips, rootBone, modelScale };
 }
 
 /**

@@ -4,3 +4,5 @@
 - [Gui.bind enforcement](gui-bind-enforcement.md) — calling Gui.text/bar/image/button on a bound ID throws in dev, warns in prod; guiBoundIds is closure-scoped inside run() in script-runner.ts.
 - [SkeletonUtils import](skeletonutilsimport.md) — three/examples/jsm/utils/SkeletonUtils.js has NO named SkeletonUtils export; use `import * as SkeletonUtils` then call SkeletonUtils.clone().
 - [.rebur format](rebur-format.md) — custom asset format at client/src/lib/rebur/; wraps THREE.js geo.toJSON()+AnimationClip.toJSON(); Avatar.tsx compiles it on first mount; export via downloadAvatarRebur().
+- [SkinnedMesh frustumCulled](skinned-mesh-culling.md) — always set frustumCulled=false on SkinnedMesh; bind-pose bbox causes GPU to skip draw calls when avatar animates out of rest position.
+- [FBX model scale](fbx-model-scale.md) — store baseGroup.scale.x from FBXLoader as modelScale in ReburAsset; restore at render time as wrapper group scale; never hardcode 0.01.

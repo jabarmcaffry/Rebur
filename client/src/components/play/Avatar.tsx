@@ -34,7 +34,7 @@ import jumpFbxUrl    from "./Jumping.fbx?url";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
 // Bump the version suffix any time Avatar.fbx or an animation file is updated.
-const REBUR_CACHE_KEY = "rebur:avatar:v6";
+const REBUR_CACHE_KEY = "rebur:avatar:v7";
 const IDB_DB_NAME     = "rebur-cache";
 const IDB_STORE       = "assets";
 const LABEL_HEIGHT    = 2.4;
@@ -159,8 +159,14 @@ async function ensureAvatarLoaded(): Promise<boolean> {
   }
 }
 
-// ── Placeholder shown while loading (name label only, no capsule) ─────────────
-function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
+// ── Placeholder shown while loading (simple capsule + name label) ─────────────
+function AvatarPlaceholder({
+  player,
+  error = false,
+}: {
+  player: RenderPlayer;
+  error?: boolean;
+}) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
     const g = ref.current;
@@ -170,6 +176,16 @@ function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
   });
   return (
     <group ref={ref}>
+      {/* Body */}
+      <mesh position={[0, 0.9, 0]} frustumCulled={false}>
+        <capsuleGeometry args={[0.3, 1.2, 4, 8]} />
+        <meshStandardMaterial color={error ? "#ff4444" : "#4488ff"} />
+      </mesh>
+      {/* Head */}
+      <mesh position={[0, 1.75, 0]} frustumCulled={false}>
+        <sphereGeometry args={[0.25, 8, 8]} />
+        <meshStandardMaterial color={error ? "#ff4444" : "#4488ff"} />
+      </mesh>
       <Html
         position={[0, LABEL_HEIGHT, 0]}
         center
@@ -279,17 +295,16 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   return (
     <group ref={groupRef}>
       {/*
-        FBX assets from Mixamo/standard exporters use centimetre units.
-        Three.js FBXLoader compensates by setting scale 0.01 on the root
-        group — but we stripped that group when we serialised the asset.
-        The boneInverses were computed in the original 0.01-scaled world
-        space, so we must restore that scale on the mesh wrapper or the
-        skinning math will produce a 100× oversized, deformed avatar.
+        FBXLoader sets a scale on the root group based on the FBX file's
+        unit system (0.01 for cm exports, 1.0 for metre exports, etc.).
+        We capture that scale in buildReburAsset() and restore it here so
+        the skinning math — bone-inverse matrices recomputed fresh on bind —
+        is consistent with the mesh's vertex positions.
         The outer groupRef keeps world-space position/rotation; the inner
-        group applies the cm→m scale so the Html label stays correctly
-        positioned at world scale.
+        group applies only the unit-conversion scale so the Html label stays
+        correctly positioned at world scale.
       */}
-      <group scale={[0.01, 0.01, 0.01]}>
+      <group scale={[inst.modelScale, inst.modelScale, inst.modelScale]}>
         <primitive object={inst.mesh} />
       </group>
       <Html
@@ -315,18 +330,21 @@ export default function Avatar({
   player:   RenderPlayer;
   isLocal?: boolean;
 }) {
-  const [ready, setReady] = useState(_state === "ready");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    _state === "ready" ? "ready" : "loading",
+  );
 
   useEffect(() => {
     if (_state === "ready") {
-      setReady(true);
+      setStatus("ready");
       return;
     }
     ensureAvatarLoaded().then((ok) => {
-      if (ok) setReady(true);
+      setStatus(ok ? "ready" : "error");
     });
   }, []);
 
-  if (!ready) return <AvatarPlaceholder player={player} />;
+  if (status === "error") return <AvatarPlaceholder player={player} error />;
+  if (status !== "ready") return <AvatarPlaceholder player={player} />;
   return <AvatarMesh player={player} />;
 }
