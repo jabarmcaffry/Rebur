@@ -20,6 +20,14 @@ export interface ReburAsset {
   version: typeof REBUR_VERSION;
   format: "rebur";
   name: string;
+  /**
+   * The uniform scale factor FBXLoader applied to the root group when the
+   * original FBX was loaded (e.g. 0.01 for centimetre exports, 1.0 for metre
+   * exports).  We restore this as the wrapper group scale at render time so
+   * the bone-inverse matrices — recomputed fresh on bind — are consistent
+   * with the mesh vertex positions.  Defaults to 0.01 for legacy assets.
+   */
+  modelScale: number;
   geometryJson: Record<string, unknown>;
   skeleton: {
     bones: ReburBone[];

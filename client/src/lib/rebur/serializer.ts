@@ -12,6 +12,13 @@ export function buildReburAsset(
   baseGroup: THREE.Group,
   animSources: Array<{ name: string; group: THREE.Group }>,
 ): ReburAsset {
+  // ── Capture the FBXLoader scale (0.01 for cm, 1.0 for m, etc.) ───────────
+  // FBXLoader sets a uniform scale on the root group based on the FBX file's
+  // unit info.  We must restore this scale at render time so the skinning
+  // math (bone-inverse matrices recomputed fresh on bind) is consistent.
+  const modelScale = baseGroup.scale.x;
+  console.log(`[rebur] FBX root group scale: ${modelScale}`);
+
   // ── Find the primary SkinnedMesh ──────────────────────────────────────────
   let skinnedMesh: THREE.SkinnedMesh | null = null;
   baseGroup.traverse((child) => {
@@ -26,6 +33,13 @@ export function buildReburAsset(
 
   const geo = (skinnedMesh as THREE.SkinnedMesh).geometry;
   const skeleton = (skinnedMesh as THREE.SkinnedMesh).skeleton;
+
+  if (!skeleton || skeleton.bones.length === 0) {
+    throw new Error("[rebur] SkinnedMesh has no skeleton / bones");
+  }
+
+  console.log(`[rebur] Found SkinnedMesh with ${skeleton.bones.length} bones, geo vertices: ${geo.attributes.position?.count ?? "?"}`);
+  console.log(`[rebur] Bone names (first 5): ${skeleton.bones.slice(0, 5).map(b => b.name).join(", ")}`);
 
   // ── Serialize geometry ────────────────────────────────────────────────────
   const geometryJson = geo.toJSON() as Record<string, unknown>;
@@ -51,18 +65,27 @@ export function buildReburAsset(
   const animations: ReburAnimation[] = [];
   for (const { name, group } of animSources) {
     const srcClips = group.animations;
-    if (!srcClips || srcClips.length === 0) continue;
+    if (!srcClips || srcClips.length === 0) {
+      console.warn(`[rebur] Animation "${name}" FBX has no clips — skipping`);
+      continue;
+    }
     const clip = srcClips[0].clone();
     clip.name = name;
 
+    // Log the first few track names so we can verify they match the skeleton
+    console.log(`[rebur] Anim "${name}" — sample tracks: ${clip.tracks.slice(0, 3).map(t => t.name).join(", ")}`);
+
     // Filter out tracks whose target bone doesn't exist in the base skeleton.
     // Common culprit: "root" root-motion tracks from game-engine FBX exports.
+    const beforeCount = clip.tracks.length;
     clip.tracks = clip.tracks.filter((track) => {
       // Track name format: "BoneName.property" or "BoneName.property[index]"
       const dot = track.name.indexOf(".");
       const boneName = dot >= 0 ? track.name.slice(0, dot) : track.name;
       return boneNames.has(boneName);
     });
+
+    console.log(`[rebur] Anim "${name}": ${beforeCount} tracks → ${clip.tracks.length} after bone-name filter`);
 
     if (clip.tracks.length === 0) {
       console.warn(`[rebur] Animation "${name}" has no matching tracks for the base skeleton — skipping`);
@@ -80,6 +103,7 @@ export function buildReburAsset(
     version: REBUR_VERSION,
     format: "rebur",
     name: assetName,
+    modelScale,
     geometryJson,
     skeleton: { bones, boneInverses },
     animations,
