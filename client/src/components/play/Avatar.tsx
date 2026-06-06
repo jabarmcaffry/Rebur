@@ -151,7 +151,7 @@ async function ensureAvatarLoaded(): Promise<boolean> {
   }
 }
 
-// ── Placeholder capsule shown while loading ───────────────────────────────────
+// ── Placeholder shown while loading (name label only, no capsule) ─────────────
 function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
@@ -162,10 +162,6 @@ function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
   });
   return (
     <group ref={ref}>
-      <mesh position={[0, 0.95, 0]}>
-        <capsuleGeometry args={[0.3, 1.0, 4, 8]} />
-        <meshStandardMaterial color="#4a90d9" />
-      </mesh>
       <Html
         position={[0, LABEL_HEIGHT, 0]}
         center
@@ -275,11 +271,19 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   return (
     <group ref={groupRef}>
       {/*
-        rootBone is already inside inst.mesh as a child (mesh.add(rootBone) in
-        instantiateReburAsset). Do NOT add it here as a separate <primitive> —
-        that would detach it from the mesh's scene graph and break skinning.
+        FBX assets from Mixamo/standard exporters use centimetre units.
+        Three.js FBXLoader compensates by setting scale 0.01 on the root
+        group — but we stripped that group when we serialised the asset.
+        The boneInverses were computed in the original 0.01-scaled world
+        space, so we must restore that scale on the mesh wrapper or the
+        skinning math will produce a 100× oversized, deformed avatar.
+        The outer groupRef keeps world-space position/rotation; the inner
+        group applies the cm→m scale so the Html label stays correctly
+        positioned at world scale.
       */}
-      <primitive object={inst.mesh} />
+      <group scale={[0.01, 0.01, 0.01]}>
+        <primitive object={inst.mesh} />
+      </group>
       <Html
         position={[0, LABEL_HEIGHT, 0]}
         center
