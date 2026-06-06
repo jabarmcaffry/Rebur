@@ -24,9 +24,17 @@ import type { RenderPlayer } from "@shared/render-types";
 import { buildReburAsset, instantiateReburAsset, parseReburFile } from "@/lib/rebur";
 import type { ReburAsset } from "@/lib/rebur";
 
+// Import FBX files directly from the play folder — Vite resolves these as
+// hashed asset URLs so the play folder is the single source of truth.
+import avatarFbxUrl  from "./Avatar.fbx?url";
+import idleFbxUrl    from "./Idle.fbx?url";
+import walkFbxUrl    from "./Walking.fbx?url";
+import runFbxUrl     from "./Running.fbx?url";
+import jumpFbxUrl    from "./Jumping.fbx?url";
+
 // ── Cache config ──────────────────────────────────────────────────────────────
 // Bump the version suffix any time Avatar.fbx or an animation file is updated.
-const REBUR_CACHE_KEY = "rebur:avatar:v5";
+const REBUR_CACHE_KEY = "rebur:avatar:v6";
 const IDB_DB_NAME     = "rebur-cache";
 const IDB_STORE       = "assets";
 const LABEL_HEIGHT    = 2.4;
@@ -114,11 +122,11 @@ async function ensureAvatarLoaded(): Promise<boolean> {
     console.log("[rebur] Loading FBX files…");
 
     const [baseFbx, idleFbx, walkFbx, runFbx, jumpFbx] = await Promise.all([
-      loader.loadAsync("/Avatar.fbx"),
-      loader.loadAsync("/Idle.fbx"),
-      loader.loadAsync("/Walking.fbx"),
-      loader.loadAsync("/Running.fbx"),
-      loader.loadAsync("/Jump.fbx"),
+      loader.loadAsync(avatarFbxUrl),
+      loader.loadAsync(idleFbxUrl),
+      loader.loadAsync(walkFbxUrl),
+      loader.loadAsync(runFbxUrl),
+      loader.loadAsync(jumpFbxUrl),
     ]);
 
     console.log("[rebur] FBX files loaded, compiling .rebur asset…");
