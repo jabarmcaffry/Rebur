@@ -430,33 +430,10 @@ export default function PlayMode({
             {renderableObjects.map((o) => (
               <Primitive key={o.id} obj={o} />
             ))}
-            <Suspense fallback={
-              <mesh position={[player.position.x, player.position.y, player.position.z]}>
-                <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
-                <meshStandardMaterial color="#4a90d9" />
-              </mesh>
-            }>
-              <AvatarErrorBoundary fallback={
-                <mesh position={[player.position.x, player.position.y, player.position.z]}>
-                  <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
-                  <meshStandardMaterial color="#4a90d9" />
-                </mesh>
-              }>
-                <Avatar player={player} isLocal={true} />
-              </AvatarErrorBoundary>
-              {renderPlayers.map((rp) => (
-                <Suspense key={rp.id} fallback={null}>
-                  <AvatarErrorBoundary fallback={
-                    <mesh position={[rp.position.x, rp.position.y, rp.position.z]}>
-                      <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
-                      <meshStandardMaterial color="#d94a4a" />
-                    </mesh>
-                  }>
-                    <Avatar player={rp} isLocal={false} />
-                  </AvatarErrorBoundary>
-                </Suspense>
-              ))}
-            </Suspense>
+            <Avatar player={player} isLocal={true} />
+            {renderPlayers.map((rp) => (
+              <Avatar key={rp.id} player={rp} isLocal={false} />
+            ))}
             <ChaseCameraRig 
               player={player} 
               shiftLock={shiftLock}

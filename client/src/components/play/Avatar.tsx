@@ -1,25 +1,178 @@
 /**
  * Avatar.tsx
  *
- * Procedural avatar — capsule torso, sphere head, animated arms and legs.
- * Driven entirely by RenderPlayer state from the server so it works in
- * every WebGL environment without loading any external FBX/GLB files.
+ * Loads Avatar.fbx (mesh + skeleton) and the four animation FBX files
+ * using a non-blocking approach: THREE.FBXLoader.loadAsync() runs in
+ * useEffect so the Canvas renders immediately with a capsule placeholder,
+ * then the real model swaps in once all files are ready.
+ *
+ * This avoids the WebGL context loss that `useLoader` / Suspense caused
+ * by blocking the whole Canvas render tree during a heavy async load.
  */
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
+import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import * as THREE from "three";
 import type { RenderPlayer } from "@shared/render-types";
 
-const SKIN  = "#f5c5a3";
-const HAIR  = "#3b2314";
-const SHIRT = "#2563eb";
-const PANTS = "#1e293b";
-const SHOE  = "#1a1a1a";
+const AVATAR_SCALE = 0.022;
+const LABEL_HEIGHT = 2.4;
+const FADE_TIME    = 0.2;
 
-function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+// Shared cache — load once, reuse per instance
+let _cachedBase:  THREE.Group | null = null;
+let _cachedClips: Record<string, THREE.AnimationClip> | null = null;
+let _loadPromise: Promise<void> | null = null;
 
+async function loadAvatarAssets(): Promise<void> {
+  if (_cachedClips) return; // already loaded
+  if (_loadPromise) return _loadPromise;
+
+  const loader = new FBXLoader();
+  _loadPromise = (async () => {
+    try {
+      const [base, idle, walk, run, jump] = await Promise.all([
+        loader.loadAsync("/Avatar.fbx"),
+        loader.loadAsync("/Idle.fbx"),
+        loader.loadAsync("/Walking.fbx"),
+        loader.loadAsync("/Running.fbx"),
+        loader.loadAsync("/Jump.fbx"),
+      ]);
+
+      base.scale.setScalar(AVATAR_SCALE);
+      base.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.castShadow    = true;
+          mesh.receiveShadow = true;
+        }
+      });
+      _cachedBase = base;
+
+      const map: Record<string, THREE.AnimationClip> = {};
+      for (const { key, fbx } of [
+        { key: "idle", fbx: idle },
+        { key: "walk", fbx: walk },
+        { key: "run",  fbx: run  },
+        { key: "jump", fbx: jump },
+      ] as const) {
+        if ((fbx as THREE.Group & { animations: THREE.AnimationClip[] }).animations?.length) {
+          const clip = (fbx as THREE.Group & { animations: THREE.AnimationClip[] }).animations[0].clone();
+          clip.name = key;
+          map[key]  = clip;
+        }
+      }
+      _cachedClips = map;
+    } catch (err) {
+      console.warn("[Avatar] FBX load failed:", err);
+      _loadPromise = null; // allow retry
+    }
+  })();
+
+  return _loadPromise;
+}
+
+// ── Capsule placeholder shown while FBX loads ─────────────────────────────────
+function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(() => {
+    const g = ref.current;
+    if (!g) return;
+    g.position.set(player.position.x, player.position.y, player.position.z);
+    g.rotation.y = player.rotation.y;
+  });
+  return (
+    <group ref={ref}>
+      <mesh position={[0, 0.95, 0]}>
+        <capsuleGeometry args={[0.3, 1.0, 4, 8]} />
+        <meshStandardMaterial color="#4a90d9" />
+      </mesh>
+      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
+        <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
+          {player.name}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+// ── Fully loaded FBX avatar ───────────────────────────────────────────────────
+function AvatarFBX({ player }: { player: RenderPlayer }) {
+  const groupRef    = useRef<THREE.Group>(null);
+  const mixerRef    = useRef<THREE.AnimationMixer | null>(null);
+  const actionsRef  = useRef<Record<string, THREE.AnimationAction>>({});
+  const currentAnim = useRef<string>("");
+
+  // Clone the cached base once per instance
+  const sceneRef = useRef<THREE.Group | null>(null);
+  if (!sceneRef.current && _cachedBase) {
+    sceneRef.current = SkeletonUtils.clone(_cachedBase) as THREE.Group;
+  }
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !_cachedClips) return;
+
+    const mixer = new THREE.AnimationMixer(scene);
+    mixerRef.current   = mixer;
+    actionsRef.current = {};
+    currentAnim.current = "";
+
+    for (const [name, clip] of Object.entries(_cachedClips)) {
+      const action = mixer.clipAction(clip);
+      action.setLoop(name === "jump" ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
+      action.clampWhenFinished = name === "jump";
+      actionsRef.current[name] = action;
+    }
+
+    const idle = actionsRef.current["idle"];
+    if (idle) { idle.play(); currentAnim.current = "idle"; }
+
+    return () => { mixer.stopAllAction(); mixer.uncacheRoot(scene); };
+  }, []);
+
+  // Animation state machine
+  useEffect(() => {
+    let target = player.animation || "idle";
+    if (target === "fall" || target === "ragdoll") target = "idle";
+    if (!actionsRef.current[target]) target = "idle";
+    if (target === currentAnim.current) return;
+
+    const next = actionsRef.current[target];
+    const prev = actionsRef.current[currentAnim.current];
+    if (next && prev && prev !== next) { next.reset().fadeIn(FADE_TIME).play(); prev.fadeOut(FADE_TIME); }
+    else if (next) { next.reset().play(); }
+    currentAnim.current = target;
+  }, [player.animation]);
+
+  useFrame((_, rawDelta) => {
+    const dt = Math.min(rawDelta, 0.066);
+    mixerRef.current?.update(dt);
+    const g = groupRef.current;
+    if (!g) return;
+    g.position.set(player.position.x, player.position.y, player.position.z);
+    g.rotation.y = player.rotation.y;
+  });
+
+  const scene = sceneRef.current;
+  if (!scene) return <AvatarPlaceholder player={player} />;
+
+  return (
+    <group ref={groupRef}>
+      <primitive object={scene} />
+      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
+        <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
+          {player.name}
+        </div>
+      </Html>
+    </group>
+  );
+}
+
+// ── Public component ──────────────────────────────────────────────────────────
 export default function Avatar({
   player,
   isLocal = false,
@@ -27,137 +180,15 @@ export default function Avatar({
   player:   RenderPlayer;
   isLocal?: boolean;
 }) {
-  const groupRef   = useRef<THREE.Group>(null);
-  const lArmRef    = useRef<THREE.Group>(null);
-  const rArmRef    = useRef<THREE.Group>(null);
-  const lLegRef    = useRef<THREE.Group>(null);
-  const rLegRef    = useRef<THREE.Group>(null);
-  const phaseRef   = useRef(0);
+  const [ready, setReady] = useState(!!(_cachedClips && _cachedBase));
 
-  useFrame((_, rawDt) => {
-    const dt = Math.min(rawDt, 0.066);
-    const g  = groupRef.current;
-    if (!g) return;
+  useEffect(() => {
+    if (ready) return;
+    loadAvatarAssets().then(() => {
+      if (_cachedClips && _cachedBase) setReady(true);
+    });
+  }, [ready]);
 
-    g.position.set(player.position.x, player.position.y, player.position.z);
-    g.rotation.y = player.rotation.y;
-
-    const spd = Math.hypot(
-      player.velocity?.x ?? 0,
-      player.velocity?.z ?? 0,
-    );
-
-    const anim = player.animation ?? "idle";
-    const freq = anim === "run" ? 8 : anim === "walk" ? 4 : 0.8;
-    const amp  = anim === "idle" ? 0.08 : 0.55;
-
-    phaseRef.current += dt * freq;
-    const sw = Math.sin(phaseRef.current) * amp;
-
-    if (lArmRef.current) lArmRef.current.rotation.x =  sw;
-    if (rArmRef.current) rArmRef.current.rotation.x = -sw;
-    if (lLegRef.current) lLegRef.current.rotation.x = -sw;
-    if (rLegRef.current) rLegRef.current.rotation.x =  sw;
-  });
-
-  const shirtColor = player.colors?.shirt ?? SHIRT;
-  const skinColor  = player.colors?.skin  ?? SKIN;
-  const pantsColor = player.colors?.pants ?? PANTS;
-
-  return (
-    <group ref={groupRef}>
-      {/* ── Torso ────────────────────────────────────────────────────── */}
-      <mesh position={[0, 0.9, 0]} castShadow>
-        <capsuleGeometry args={[0.28, 0.55, 4, 8]} />
-        <meshStandardMaterial color={shirtColor} />
-      </mesh>
-
-      {/* ── Head ─────────────────────────────────────────────────────── */}
-      <mesh position={[0, 1.62, 0]} castShadow>
-        <sphereGeometry args={[0.22, 16, 16]} />
-        <meshStandardMaterial color={skinColor} />
-      </mesh>
-
-      {/* ── Hair cap ─────────────────────────────────────────────────── */}
-      <mesh position={[0, 1.78, 0]}>
-        <sphereGeometry args={[0.225, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
-        <meshStandardMaterial color={HAIR} />
-      </mesh>
-
-      {/* ── Eyes ─────────────────────────────────────────────────────── */}
-      <mesh position={[-0.08, 1.65, 0.2]}>
-        <sphereGeometry args={[0.035, 8, 8]} />
-        <meshStandardMaterial color="#111" />
-      </mesh>
-      <mesh position={[0.08, 1.65, 0.2]}>
-        <sphereGeometry args={[0.035, 8, 8]} />
-        <meshStandardMaterial color="#111" />
-      </mesh>
-
-      {/* ── Left arm ─────────────────────────────────────────────────── */}
-      <group ref={lArmRef} position={[-0.36, 1.1, 0]}>
-        <mesh position={[0, -0.22, 0]} castShadow>
-          <capsuleGeometry args={[0.09, 0.35, 4, 8]} />
-          <meshStandardMaterial color={shirtColor} />
-        </mesh>
-        {/* hand */}
-        <mesh position={[0, -0.48, 0]}>
-          <sphereGeometry args={[0.1, 8, 8]} />
-          <meshStandardMaterial color={skinColor} />
-        </mesh>
-      </group>
-
-      {/* ── Right arm ────────────────────────────────────────────────── */}
-      <group ref={rArmRef} position={[0.36, 1.1, 0]}>
-        <mesh position={[0, -0.22, 0]} castShadow>
-          <capsuleGeometry args={[0.09, 0.35, 4, 8]} />
-          <meshStandardMaterial color={shirtColor} />
-        </mesh>
-        {/* hand */}
-        <mesh position={[0, -0.48, 0]}>
-          <sphereGeometry args={[0.1, 8, 8]} />
-          <meshStandardMaterial color={skinColor} />
-        </mesh>
-      </group>
-
-      {/* ── Left leg ─────────────────────────────────────────────────── */}
-      <group ref={lLegRef} position={[-0.15, 0.52, 0]}>
-        <mesh position={[0, -0.27, 0]} castShadow>
-          <capsuleGeometry args={[0.11, 0.4, 4, 8]} />
-          <meshStandardMaterial color={pantsColor} />
-        </mesh>
-        {/* shoe */}
-        <mesh position={[0, -0.56, 0.05]}>
-          <boxGeometry args={[0.18, 0.1, 0.26]} />
-          <meshStandardMaterial color={SHOE} />
-        </mesh>
-      </group>
-
-      {/* ── Right leg ────────────────────────────────────────────────── */}
-      <group ref={rLegRef} position={[0.15, 0.52, 0]}>
-        <mesh position={[0, -0.27, 0]} castShadow>
-          <capsuleGeometry args={[0.11, 0.4, 4, 8]} />
-          <meshStandardMaterial color={pantsColor} />
-        </mesh>
-        {/* shoe */}
-        <mesh position={[0, -0.56, 0.05]}>
-          <boxGeometry args={[0.18, 0.1, 0.26]} />
-          <meshStandardMaterial color={SHOE} />
-        </mesh>
-      </group>
-
-      {/* ── Username label ───────────────────────────────────────────── */}
-      <Html
-        position={[0, 2.1, 0]}
-        center
-        distanceFactor={8}
-        zIndexRange={[100, 0]}
-        sprite
-      >
-        <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
-          {player.name}
-        </div>
-      </Html>
-    </group>
-  );
+  if (!ready) return <AvatarPlaceholder player={player} />;
+  return <AvatarFBX player={player} />;
 }
