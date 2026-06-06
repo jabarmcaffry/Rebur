@@ -10,7 +10,7 @@ import { getAvatarConfig } from "@/lib/avatarConfig";
 import type { GameObject, Script } from "@shared/schema";
 import SVGScene from "@/components/SVGScene";
 import { isWebGLAvailable } from "@/lib/webgl";
-import PlayCanvasErrorBoundary from "@/components/play/PlayCanvasErrorBoundary";
+import PlayCanvasErrorBoundary, { AvatarErrorBoundary } from "@/components/play/PlayCanvasErrorBoundary";
 import GuiOverlay from "@/components/play/GuiOverlay";
 import VirtualJoystick from "@/components/play/VirtualJoystick";
 import Primitive from "@/components/play/Primitive";
@@ -396,7 +396,7 @@ export default function PlayMode({
             shadows
             camera={{ position: [0, 4, 8], fov: 60 }}
             gl={{
-              powerPreference: "high-performance",
+              powerPreference: "default",
               antialias: false,
               failIfMajorPerformanceCaveat: false,
             }}
@@ -413,7 +413,7 @@ export default function PlayMode({
           >
             <color attach="background" args={["#0a0a0a"]} />
             <ambientLight intensity={0.4} />
-            <directionalLight position={[10, 14, 6]} intensity={0.9} castShadow shadow-mapSize={[2048, 2048]} />
+            <directionalLight position={[10, 14, 6]} intensity={0.9} castShadow shadow-mapSize={[512, 512]} />
             <hemisphereLight args={["#e5e5e5", "#262626", 0.4]} />
             <Grid
               args={[80, 80]}
@@ -430,10 +430,31 @@ export default function PlayMode({
             {renderableObjects.map((o) => (
               <Primitive key={o.id} obj={o} />
             ))}
-            <Suspense fallback={null}>
-              <Avatar player={player} isLocal={true} />
+            <Suspense fallback={
+              <mesh position={[player.position.x, player.position.y, player.position.z]}>
+                <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
+                <meshStandardMaterial color="#4a90d9" />
+              </mesh>
+            }>
+              <AvatarErrorBoundary fallback={
+                <mesh position={[player.position.x, player.position.y, player.position.z]}>
+                  <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
+                  <meshStandardMaterial color="#4a90d9" />
+                </mesh>
+              }>
+                <Avatar player={player} isLocal={true} />
+              </AvatarErrorBoundary>
               {renderPlayers.map((rp) => (
-                <Avatar key={rp.id} player={rp} isLocal={false} />
+                <Suspense key={rp.id} fallback={null}>
+                  <AvatarErrorBoundary fallback={
+                    <mesh position={[rp.position.x, rp.position.y, rp.position.z]}>
+                      <capsuleGeometry args={[0.4, 1.0, 4, 8]} />
+                      <meshStandardMaterial color="#d94a4a" />
+                    </mesh>
+                  }>
+                    <Avatar player={rp} isLocal={false} />
+                  </AvatarErrorBoundary>
+                </Suspense>
               ))}
             </Suspense>
             <ChaseCameraRig 
