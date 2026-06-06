@@ -44,6 +44,9 @@ export function buildReburAsset(
 
   const boneInverses = skeleton.boneInverses.map((m) => [...m.elements] as number[]);
 
+  // ── Collect valid bone names from the base skeleton ──────────────────────
+  const boneNames = new Set(skeleton.bones.map((b) => b.name));
+
   // ── Serialize animations from separate FBX files ──────────────────────────
   const animations: ReburAnimation[] = [];
   for (const { name, group } of animSources) {
@@ -51,6 +54,21 @@ export function buildReburAsset(
     if (!srcClips || srcClips.length === 0) continue;
     const clip = srcClips[0].clone();
     clip.name = name;
+
+    // Filter out tracks whose target bone doesn't exist in the base skeleton.
+    // Common culprit: "root" root-motion tracks from game-engine FBX exports.
+    clip.tracks = clip.tracks.filter((track) => {
+      // Track name format: "BoneName.property" or "BoneName.property[index]"
+      const dot = track.name.indexOf(".");
+      const boneName = dot >= 0 ? track.name.slice(0, dot) : track.name;
+      return boneNames.has(boneName);
+    });
+
+    if (clip.tracks.length === 0) {
+      console.warn(`[rebur] Animation "${name}" has no matching tracks for the base skeleton — skipping`);
+      continue;
+    }
+
     animations.push({
       name,
       duration: clip.duration,

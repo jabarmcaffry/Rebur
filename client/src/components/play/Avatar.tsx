@@ -1,81 +1,157 @@
 /**
- * Avatar.tsx
+ * Avatar.tsx — Full .rebur pipeline
  *
- * Loads Avatar.fbx (mesh + skeleton) and the four animation FBX files
- * using a non-blocking approach: THREE.FBXLoader.loadAsync() runs in
- * useEffect so the Canvas renders immediately with a capsule placeholder,
- * then the real model swaps in once all files are ready.
+ *  1. Load Avatar.fbx (mesh + skeleton) + Idle / Walking / Running / Jump.fbx
+ *  2. Compile to a ReburAsset via buildReburAsset()
+ *     • Normalises skin weights to ≤4 per vertex
+ *     • Filters out root-motion tracks that don't exist in Avatar.fbx's skeleton
+ *     • Serialises geometry + skeleton + clips to plain JSON
+ *  3. Cache the compiled JSON in IndexedDB (no size limit; key = REBUR_CACHE_KEY)
+ *     so FBX files are only parsed once; subsequent page loads skip straight to 4.
+ *  4. Instantiate via instantiateReburAsset() → SkinnedMesh + AnimationMixer
  *
- * This avoids the WebGL context loss that `useLoader` / Suspense caused
- * by blocking the whole Canvas render tree during a heavy async load.
+ * A blue capsule placeholder is shown while the asset is loading/compiling.
+ * Cache key is intentionally versioned — bump REBUR_CACHE_KEY whenever Avatar.fbx
+ * or any animation file changes so old compiled data is discarded.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
-import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import * as THREE from "three";
 import type { RenderPlayer } from "@shared/render-types";
+import { buildReburAsset, instantiateReburAsset, parseReburFile } from "@/lib/rebur";
+import type { ReburAsset } from "@/lib/rebur";
 
-const AVATAR_SCALE = 0.022;
-const LABEL_HEIGHT = 2.4;
-const FADE_TIME    = 0.2;
+// ── Cache config ──────────────────────────────────────────────────────────────
+// Bump the version suffix any time Avatar.fbx or an animation file is updated.
+const REBUR_CACHE_KEY = "rebur:avatar:v3";
+const IDB_DB_NAME     = "rebur-cache";
+const IDB_STORE       = "assets";
+const LABEL_HEIGHT    = 2.4;
+const FADE_TIME       = 0.2;
 
-// Shared cache — load once, reuse per instance
-let _cachedBase:  THREE.Group | null = null;
-let _cachedClips: Record<string, THREE.AnimationClip> | null = null;
-let _loadPromise: Promise<void> | null = null;
-
-async function loadAvatarAssets(): Promise<void> {
-  if (_cachedClips) return; // already loaded
-  if (_loadPromise) return _loadPromise;
-
-  const loader = new FBXLoader();
-  _loadPromise = (async () => {
-    try {
-      const [base, idle, walk, run, jump] = await Promise.all([
-        loader.loadAsync("/Avatar.fbx"),
-        loader.loadAsync("/Idle.fbx"),
-        loader.loadAsync("/Walking.fbx"),
-        loader.loadAsync("/Running.fbx"),
-        loader.loadAsync("/Jump.fbx"),
-      ]);
-
-      base.scale.setScalar(AVATAR_SCALE);
-      base.traverse((child) => {
-        const mesh = child as THREE.Mesh;
-        if (mesh.isMesh) {
-          mesh.castShadow    = true;
-          mesh.receiveShadow = true;
-        }
-      });
-      _cachedBase = base;
-
-      const map: Record<string, THREE.AnimationClip> = {};
-      for (const { key, fbx } of [
-        { key: "idle", fbx: idle },
-        { key: "walk", fbx: walk },
-        { key: "run",  fbx: run  },
-        { key: "jump", fbx: jump },
-      ] as const) {
-        if ((fbx as THREE.Group & { animations: THREE.AnimationClip[] }).animations?.length) {
-          const clip = (fbx as THREE.Group & { animations: THREE.AnimationClip[] }).animations[0].clone();
-          clip.name = key;
-          map[key]  = clip;
-        }
-      }
-      _cachedClips = map;
-    } catch (err) {
-      console.warn("[Avatar] FBX load failed:", err);
-      _loadPromise = null; // allow retry
-    }
-  })();
-
-  return _loadPromise;
+// ── IndexedDB helpers ─────────────────────────────────────────────────────────
+function openIdb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
 }
 
-// ── Capsule placeholder shown while FBX loads ─────────────────────────────────
+async function idbGet(key: string): Promise<string | undefined> {
+  try {
+    const db = await openIdb();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result as string | undefined);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+async function idbSet(key: string, value: string): Promise<void> {
+  try {
+    const db = await openIdb();
+    await new Promise<void>((resolve, reject) => {
+      const tx  = db.transaction(IDB_STORE, "readwrite");
+      const req = tx.objectStore(IDB_STORE).put(value, key);
+      req.onsuccess = () => resolve();
+      req.onerror   = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("[rebur] IndexedDB write failed:", e);
+  }
+}
+
+// ── Module-level shared compile state (single compile for all Avatar instances)
+type LoadState = "idle" | "loading" | "ready" | "error";
+let _state: LoadState = "idle";
+let _asset: ReburAsset | null = null;
+let _listeners: Array<(ok: boolean) => void> = [];
+
+function notifyListeners(ok: boolean) {
+  _listeners.forEach((fn) => fn(ok));
+  _listeners = [];
+}
+
+async function ensureAvatarLoaded(): Promise<boolean> {
+  if (_state === "ready") return true;
+  if (_state === "error") return false;
+
+  if (_state === "loading") {
+    return new Promise((resolve) => _listeners.push(resolve));
+  }
+
+  _state = "loading";
+
+  // ── 1. Try IndexedDB cache ────────────────────────────────────────────────
+  try {
+    const cached = await idbGet(REBUR_CACHE_KEY);
+    if (cached) {
+      const asset = parseReburFile(cached);
+      _asset = asset;
+      _state = "ready";
+      notifyListeners(true);
+      console.log("[rebur] Avatar loaded from IndexedDB cache ✓");
+      return true;
+    }
+  } catch (e) {
+    console.warn("[rebur] IDB cache read failed, re-compiling:", e);
+  }
+
+  // ── 2. Load FBX files and compile ────────────────────────────────────────
+  try {
+    const loader = new FBXLoader();
+    console.log("[rebur] Loading FBX files…");
+
+    const [baseFbx, idleFbx, walkFbx, runFbx, jumpFbx] = await Promise.all([
+      loader.loadAsync("/Avatar.fbx"),
+      loader.loadAsync("/Idle.fbx"),
+      loader.loadAsync("/Walking.fbx"),
+      loader.loadAsync("/Running.fbx"),
+      loader.loadAsync("/Jump.fbx"),
+    ]);
+
+    console.log("[rebur] FBX files loaded, compiling .rebur asset…");
+
+    const asset = buildReburAsset("avatar", baseFbx as THREE.Group, [
+      { name: "idle", group: idleFbx  as THREE.Group },
+      { name: "walk", group: walkFbx  as THREE.Group },
+      { name: "run",  group: runFbx   as THREE.Group },
+      { name: "jump", group: jumpFbx  as THREE.Group },
+    ]);
+
+    console.log(
+      `[rebur] Compiled: ${asset.animations.length} animations`,
+      asset.animations.map((a) => `${a.name}(${a.duration.toFixed(2)}s)`).join(", "),
+    );
+
+    // ── 3. Store in IndexedDB ────────────────────────────────────────────
+    await idbSet(REBUR_CACHE_KEY, JSON.stringify(asset));
+    console.log("[rebur] Avatar cached to IndexedDB ✓");
+
+    _asset = asset;
+    _state = "ready";
+    notifyListeners(true);
+    return true;
+  } catch (err) {
+    console.error("[rebur] Avatar compile failed:", err);
+    _state = "error";
+    notifyListeners(false);
+    return false;
+  }
+}
+
+// ── Placeholder capsule shown while loading ───────────────────────────────────
 function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
@@ -90,7 +166,13 @@ function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
         <capsuleGeometry args={[0.3, 1.0, 4, 8]} />
         <meshStandardMaterial color="#4a90d9" />
       </mesh>
-      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
+      <Html
+        position={[0, LABEL_HEIGHT, 0]}
+        center
+        distanceFactor={8}
+        zIndexRange={[100, 0]}
+        sprite
+      >
         <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
           {player.name}
         </div>
@@ -99,52 +181,82 @@ function AvatarPlaceholder({ player }: { player: RenderPlayer }) {
   );
 }
 
-// ── Fully loaded FBX avatar ───────────────────────────────────────────────────
-function AvatarFBX({ player }: { player: RenderPlayer }) {
+// ── The real skinned avatar (rendered via .rebur instantiation) ───────────────
+function AvatarMesh({ player }: { player: RenderPlayer }) {
   const groupRef    = useRef<THREE.Group>(null);
   const mixerRef    = useRef<THREE.AnimationMixer | null>(null);
   const actionsRef  = useRef<Record<string, THREE.AnimationAction>>({});
-  const currentAnim = useRef<string>("");
+  const currentAnim = useRef<string>("idle");
 
-  // Clone the cached base once per instance
-  const sceneRef = useRef<THREE.Group | null>(null);
-  if (!sceneRef.current && _cachedBase) {
-    sceneRef.current = SkeletonUtils.clone(_cachedBase) as THREE.Group;
+  // Instantiate once — creates a normalised SkinnedMesh from the .rebur asset
+  const instanceRef = useRef<ReturnType<typeof instantiateReburAsset> | null>(null);
+  if (!instanceRef.current && _asset) {
+    try {
+      instanceRef.current = instantiateReburAsset(_asset);
+    } catch (e) {
+      console.error("[rebur] instantiateReburAsset failed:", e);
+    }
   }
 
+  // Set up AnimationMixer once the mesh is ready
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene || !_cachedClips) return;
+    const inst = instanceRef.current;
+    if (!inst) return;
 
-    const mixer = new THREE.AnimationMixer(scene);
-    mixerRef.current   = mixer;
-    actionsRef.current = {};
-    currentAnim.current = "";
+    const mixer = new THREE.AnimationMixer(inst.mesh);
+    mixerRef.current    = mixer;
+    actionsRef.current  = {};
+    currentAnim.current = "idle";
 
-    for (const [name, clip] of Object.entries(_cachedClips)) {
+    for (const clip of inst.clips) {
       const action = mixer.clipAction(clip);
-      action.setLoop(name === "jump" ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
-      action.clampWhenFinished = name === "jump";
-      actionsRef.current[name] = action;
+      action.setLoop(
+        clip.name === "jump" ? THREE.LoopOnce : THREE.LoopRepeat,
+        Infinity,
+      );
+      action.clampWhenFinished = clip.name === "jump";
+      actionsRef.current[clip.name] = action;
     }
 
+    // Start idle
     const idle = actionsRef.current["idle"];
-    if (idle) { idle.play(); currentAnim.current = "idle"; }
+    if (idle) {
+      idle.play();
+    } else {
+      // Fall back to first available clip
+      const first = inst.clips[0];
+      if (first) { mixer.clipAction(first).play(); currentAnim.current = first.name; }
+    }
 
-    return () => { mixer.stopAllAction(); mixer.uncacheRoot(scene); };
+    return () => {
+      mixer.stopAllAction();
+      mixer.uncacheRoot(inst.mesh);
+    };
   }, []);
 
-  // Animation state machine
+  // Animation state machine — react to server-sent animation name
   useEffect(() => {
-    let target = player.animation || "idle";
+    // Map server names → our clip names
+    let target = player.animation ?? "idle";
     if (target === "fall" || target === "ragdoll") target = "idle";
+    // Ensure the clip exists
     if (!actionsRef.current[target]) target = "idle";
+    if (!actionsRef.current[target]) {
+      // Still missing — try any available clip
+      const fallback = Object.keys(actionsRef.current)[0];
+      if (!fallback) return;
+      target = fallback;
+    }
     if (target === currentAnim.current) return;
 
     const next = actionsRef.current[target];
     const prev = actionsRef.current[currentAnim.current];
-    if (next && prev && prev !== next) { next.reset().fadeIn(FADE_TIME).play(); prev.fadeOut(FADE_TIME); }
-    else if (next) { next.reset().play(); }
+    if (next && prev && prev !== next) {
+      next.reset().fadeIn(FADE_TIME).play();
+      prev.fadeOut(FADE_TIME);
+    } else if (next) {
+      next.reset().play();
+    }
     currentAnim.current = target;
   }, [player.animation]);
 
@@ -157,13 +269,24 @@ function AvatarFBX({ player }: { player: RenderPlayer }) {
     g.rotation.y = player.rotation.y;
   });
 
-  const scene = sceneRef.current;
-  if (!scene) return <AvatarPlaceholder player={player} />;
+  const inst = instanceRef.current;
+  if (!inst) return <AvatarPlaceholder player={player} />;
 
   return (
     <group ref={groupRef}>
-      <primitive object={scene} />
-      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
+      {/*
+        rootBone is already inside inst.mesh as a child (mesh.add(rootBone) in
+        instantiateReburAsset). Do NOT add it here as a separate <primitive> —
+        that would detach it from the mesh's scene graph and break skinning.
+      */}
+      <primitive object={inst.mesh} />
+      <Html
+        position={[0, LABEL_HEIGHT, 0]}
+        center
+        distanceFactor={8}
+        zIndexRange={[100, 0]}
+        sprite
+      >
         <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
           {player.name}
         </div>
@@ -172,7 +295,7 @@ function AvatarFBX({ player }: { player: RenderPlayer }) {
   );
 }
 
-// ── Public component ──────────────────────────────────────────────────────────
+// ── Public Avatar component ───────────────────────────────────────────────────
 export default function Avatar({
   player,
   isLocal = false,
@@ -180,15 +303,18 @@ export default function Avatar({
   player:   RenderPlayer;
   isLocal?: boolean;
 }) {
-  const [ready, setReady] = useState(!!(_cachedClips && _cachedBase));
+  const [ready, setReady] = useState(_state === "ready");
 
   useEffect(() => {
-    if (ready) return;
-    loadAvatarAssets().then(() => {
-      if (_cachedClips && _cachedBase) setReady(true);
+    if (_state === "ready") {
+      setReady(true);
+      return;
+    }
+    ensureAvatarLoaded().then((ok) => {
+      if (ok) setReady(true);
     });
-  }, [ready]);
+  }, []);
 
   if (!ready) return <AvatarPlaceholder player={player} />;
-  return <AvatarFBX player={player} />;
+  return <AvatarMesh player={player} />;
 }

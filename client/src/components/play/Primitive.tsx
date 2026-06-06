@@ -141,7 +141,7 @@ export default function Primitive({ obj, onClick }: { obj: RenderObject; onClick
   }
 
   return (
-    <mesh position={position} rotation={rotation} scale={scale} castShadow receiveShadow onClick={onClick}>
+    <mesh position={position} rotation={rotation} scale={scale} onClick={onClick}>
       {geometry}
       <meshStandardMaterial color={color} transparent={isTransparent} opacity={opacity} />
     </mesh>

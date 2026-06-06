@@ -2173,7 +2173,8 @@ export default function EditorPage() {
 
             <TabsContent value="scene" className="flex-1 m-0 min-h-0">
               <div className="w-full h-full bg-[#0a0a0a] relative">
-                {webglAvailable ? (
+                {/* Unmount editor Canvas while PlayMode is active to free GPU memory */}
+                {webglAvailable && !playing ? (
                   <ViewportErrorBoundary
                     fallback={
                       <SVGScene
@@ -2240,6 +2241,9 @@ export default function EditorPage() {
                       </GizmoHelper>
                     </Canvas>
                   </ViewportErrorBoundary>
+                ) : playing ? (
+                  // PlayMode is fullscreen — nothing needed here
+                  <div className="w-full h-full bg-[#0a0a0a]" />
                 ) : (
                   <>
                     <SVGScene

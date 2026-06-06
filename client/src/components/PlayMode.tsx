@@ -66,7 +66,10 @@ export default function PlayMode({
   const [isMobile] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches
   );
-  const webglAvailable = useMemo(() => isWebGLAvailable(), []);
+  const webglAvailableInitial = useMemo(() => isWebGLAvailable(), []);
+  // Runtime context-loss tracking — if WebGL crashes after startup, fall back to SVGScene
+  const [webglContextLost, setWebglContextLost] = useState(false);
+  const webglAvailable = webglAvailableInitial && !webglContextLost;
 
   // Menu / settings state
   const [menuOpen, setMenuOpen] = useState(false);
@@ -393,30 +396,37 @@ export default function PlayMode({
           }
         >
           <Canvas
-            shadows
             camera={{ position: [0, 4, 8], fov: 60 }}
             gl={{
-              powerPreference: "default",
+              powerPreference: "low-power",
               antialias: false,
               failIfMajorPerformanceCaveat: false,
             }}
             onCreated={({ gl }) => {
+              gl.shadowMap.enabled = false;
               const canvas = gl.domElement;
+              let lostTimer: ReturnType<typeof setTimeout> | null = null;
               canvas.addEventListener("webglcontextlost", (e) => {
                 e.preventDefault();
                 console.warn("[rebur] WebGL context lost — attempting restore");
+                // Give the browser 3 seconds to restore; if it doesn't, switch to SVG
+                lostTimer = setTimeout(() => {
+                  console.warn("[rebur] Context not restored after 3s — switching to SVG fallback");
+                  setWebglContextLost(true);
+                }, 3000);
               });
               canvas.addEventListener("webglcontextrestored", () => {
+                if (lostTimer) { clearTimeout(lostTimer); lostTimer = null; }
                 console.log("[rebur] WebGL context restored");
+                setWebglContextLost(false);
               });
             }}
           >
             <color attach="background" args={["#0a0a0a"]} />
-            <ambientLight intensity={0.4} />
-            <directionalLight position={[10, 14, 6]} intensity={0.9} castShadow shadow-mapSize={[512, 512]} />
-            <hemisphereLight args={["#e5e5e5", "#262626", 0.4]} />
+            <ambientLight intensity={0.7} />
+            <directionalLight position={[10, 14, 6]} intensity={0.8} />
             <Grid
-              args={[80, 80]}
+              args={[40, 40]}
               position={[0, 0, 0]}
               cellSize={1}
               cellThickness={0.5}
@@ -424,8 +434,7 @@ export default function PlayMode({
               sectionSize={5}
               sectionThickness={1}
               sectionColor="#404040"
-              fadeDistance={60}
-              infiniteGrid
+              fadeDistance={30}
             />
             {renderableObjects.map((o) => (
               <Primitive key={o.id} obj={o} />

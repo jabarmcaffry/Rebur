@@ -67,17 +67,18 @@ export function instantiateReburAsset(asset: ReburAsset): ReburLoaded {
   const skeleton = new THREE.Skeleton(bones, boneInverses);
 
   // ── Material ──────────────────────────────────────────────────────────────
+  // Note: `skinning` was removed from MeshStandardMaterial in Three.js r152+;
+  // SkinnedMesh handles GPU skinning automatically.
   const material = new THREE.MeshStandardMaterial({
     color: 0xddccbb,
     roughness: 0.6,
     metalness: 0.0,
-    skinning: true,
   });
 
   // ── Skinned Mesh ──────────────────────────────────────────────────────────
   const mesh = new THREE.SkinnedMesh(geometry, material);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
   mesh.normalizeSkinWeights();
 
   mesh.add(rootBone);
