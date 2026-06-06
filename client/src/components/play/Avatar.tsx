@@ -26,7 +26,7 @@ import type { ReburAsset } from "@/lib/rebur";
 
 // ── Cache config ──────────────────────────────────────────────────────────────
 // Bump the version suffix any time Avatar.fbx or an animation file is updated.
-const REBUR_CACHE_KEY = "rebur:avatar:v3";
+const REBUR_CACHE_KEY = "rebur:avatar:v5";
 const IDB_DB_NAME     = "rebur-cache";
 const IDB_STORE       = "assets";
 const LABEL_HEIGHT    = 2.4;
@@ -118,7 +118,7 @@ async function ensureAvatarLoaded(): Promise<boolean> {
       loader.loadAsync("/Idle.fbx"),
       loader.loadAsync("/Walking.fbx"),
       loader.loadAsync("/Running.fbx"),
-      loader.loadAsync("/Jumping.fbx"),
+      loader.loadAsync("/Jump.fbx"),
     ]);
 
     console.log("[rebur] FBX files loaded, compiling .rebur asset…");
