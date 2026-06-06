@@ -118,7 +118,7 @@ async function ensureAvatarLoaded(): Promise<boolean> {
       loader.loadAsync("/Idle.fbx"),
       loader.loadAsync("/Walking.fbx"),
       loader.loadAsync("/Running.fbx"),
-      loader.loadAsync("/Jump.fbx"),
+      loader.loadAsync("/Jumping.fbx"),
     ]);
 
     console.log("[rebur] FBX files loaded, compiling .rebur asset…");
