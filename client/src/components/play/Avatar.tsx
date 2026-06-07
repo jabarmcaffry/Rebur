@@ -58,11 +58,28 @@ function notifyWaiters(ok: boolean) {
 }
 
 /**
+ * Returns true if a bone name is an end / leaf bone that should never drive
+ * mesh deformation.  End bones are purely structural (they mark the tip of a
+ * bone chain) and carry no skinned vertices — animating them pulls any
+ * accidentally-weighted vertices to wild positions.
+ *
+ * Matches names that end with (case-insensitive):
+ *   _end  .end  End   (e.g. handL_end, head_end, lowerlegR_end, Toe_End)
+ */
+function isEndBone(boneName: string): boolean {
+  return /_end$/i.test(boneName) || /\.end$/i.test(boneName) || /End$/i.test(boneName);
+}
+
+/**
  * Remap animation clip track names so they reference bones that actually exist
  * in the target skeleton.  Animation FBX exports from some tools prefix bone
  * names with an armature name (e.g. "Armature|mixamorig:Hips.position") while
  * the base mesh may use just "mixamorig:Hips.position".  We strip any prefix
  * up to and including the first "|" so clips can drive any standard skeleton.
+ *
+ * End/leaf bones (_end suffix) are always dropped regardless of whether they
+ * exist in the skeleton — they have no geometry influence and should never
+ * be driven by animation tracks.
  */
 function remapClip(
   clip: THREE.AnimationClip,
@@ -76,6 +93,9 @@ function remapClip(
       const rawBone = dotIdx >= 0 ? track.name.slice(0, dotIdx) : track.name;
       const prop    = dotIdx >= 0 ? track.name.slice(dotIdx)    : "";
 
+      // Always drop end/leaf bone tracks — they deform vertices if driven
+      if (isEndBone(rawBone)) return null;
+
       // Already matches — keep as-is
       if (boneNames.has(rawBone)) return track;
 
@@ -83,6 +103,8 @@ function remapClip(
       const pipeIdx = rawBone.indexOf("|");
       if (pipeIdx >= 0) {
         const stripped = rawBone.slice(pipeIdx + 1);
+        // Also drop if the stripped name is an end bone
+        if (isEndBone(stripped)) return null;
         if (boneNames.has(stripped)) {
           const clonedTrack = track.clone();
           clonedTrack.name  = stripped + prop;
