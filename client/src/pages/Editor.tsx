@@ -816,13 +816,6 @@ export default function EditorPage() {
     }
   };
 
-  /** Export the compiled avatar .rebur asset */
-  const handleExportAvatarRebur = async () => {
-    const { downloadAvatarRebur } = await import("@/components/play/Avatar");
-    downloadAvatarRebur();
-    toast({ title: "Avatar exported", description: "avatar.rebur downloaded" });
-  };
-
   /** Objects that should appear in the 3D viewport — only Workspace + Lighting. */
   const renderableObjects = useMemo(
     () => objects.filter((o) => {
@@ -1923,13 +1916,6 @@ export default function EditorPage() {
               >
                 <Upload className="w-3.5 h-3.5 text-muted-foreground" />
                 <span>Import .rebur / .fbx</span>
-              </button>
-              <button
-                onClick={handleExportAvatarRebur}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-md hover-elevate text-left"
-              >
-                <Archive className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Export Avatar .rebur</span>
               </button>
               <div className="my-1 border-t border-border" />
               <div className="text-[10px] uppercase tracking-wide text-muted-foreground px-2 py-1">
