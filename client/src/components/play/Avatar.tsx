@@ -30,12 +30,21 @@ import jumpFbxUrl    from "./Jumping.fbx?url";
 const LABEL_HEIGHT = 2.4;
 const FADE_TIME    = 0.2;
 
+// Target character height in world units.  The base group is scaled so the
+// avatar's bounding box height matches this value exactly.
+const TARGET_HEIGHT = 1.8;
+
 // ── Shared load state (FBX files parsed once, shared across all instances) ────
 interface AvatarLibrary {
   /** The original FBX group — clone this per instance, never use it directly */
   baseGroup: THREE.Group;
   /** Named animation clips extracted from the animation FBX files */
   clips: Record<string, THREE.AnimationClip>;
+  /**
+   * Uniform scale to apply to each clone so the avatar matches TARGET_HEIGHT.
+   * Computed once from the bounding box of the base group.
+   */
+  displayScale: number;
 }
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -153,7 +162,18 @@ async function ensureLibraryLoaded(): Promise<boolean> {
       clips[name] = remapped;
     }
 
-    _library    = { baseGroup: baseFbx, clips };
+    // ── Compute display scale from bounding box ──────────────────────────
+    // Measure the base group's axis-aligned bounding box in its own local
+    // space and derive a uniform scale so the avatar stands TARGET_HEIGHT
+    // units tall in the game world.
+    const box = new THREE.Box3().setFromObject(baseFbx);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const meshHeight = size.y;
+    const displayScale = meshHeight > 0 ? TARGET_HEIGHT / meshHeight : 1;
+    console.log(`[avatar] Mesh height=${meshHeight.toFixed(3)}, displayScale=${displayScale.toFixed(5)}`);
+
+    _library    = { baseGroup: baseFbx, clips, displayScale };
     _loadState  = "ready";
     notifyWaiters(true);
     return true;
@@ -299,15 +319,14 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   const clone = cloneRef.current;
   if (!clone) return <AvatarPlaceholder player={player} />;
 
+  const s = _library?.displayScale ?? 1;
+
   return (
     <group ref={outerRef}>
-      {/*
-        FBXLoader already bakes the unit-scale into the group's own .scale
-        (0.01 for cm exports, 1.0 for m exports).  We render the clone
-        directly — SkeletonUtils.clone preserves that scale — so we don't
-        need to wrap it in an extra scaled group.
-      */}
-      <primitive object={clone} />
+      {/* Scale the clone so the avatar is exactly TARGET_HEIGHT units tall */}
+      <group scale={[s, s, s]}>
+        <primitive object={clone} />
+      </group>
       <Html
         position={[0, LABEL_HEIGHT, 0]}
         center
