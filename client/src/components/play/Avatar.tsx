@@ -262,37 +262,6 @@ function AvatarPlaceholder({
   );
 }
 
-// ── Upper-arm spread helpers ──────────────────────────────────────────────────
-// After mixer.update() the bone quaternions are fully set by the animation.
-// We then multiply a small outward-rotation offset onto each upper-arm bone so
-// the arms sit slightly away from the body, preventing mesh self-intersection.
-// The offset is applied every frame — it is not cumulative because the mixer
-// resets the quaternion on the next mixer.update() call.
-
-// How many radians to spread each upper arm outward from the body.
-const ARM_SPREAD_RAD = THREE.MathUtils.degToRad(15);
-
-/**
- * Find a bone whose name *contains* any of the given substrings (case-insensitive).
- * Skips bones whose name contains any of the `exclude` substrings so we don't
- * accidentally grab the ForeArm or Hand bones.
- */
-function findBoneByPattern(
-  root: THREE.Object3D,
-  include: string[],
-  exclude: string[] = [],
-): THREE.Bone | null {
-  let found: THREE.Bone | null = null;
-  root.traverse((child) => {
-    if (found) return;
-    if (!(child as THREE.Bone).isBone) return;
-    const lower = child.name.toLowerCase();
-    const hit   = include.some((s) => lower.includes(s.toLowerCase()));
-    const skip  = exclude.some((s) => lower.includes(s.toLowerCase()));
-    if (hit && !skip) found = child as THREE.Bone;
-  });
-  return found;
-}
 
 // ── The live skinned avatar ───────────────────────────────────────────────────
 function AvatarMesh({ player }: { player: RenderPlayer }) {
@@ -300,19 +269,6 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   const mixerRef    = useRef<THREE.AnimationMixer | null>(null);
   const actionsRef  = useRef<Record<string, THREE.AnimationAction>>({});
   const currentAnim = useRef<string>("");
-
-  // Upper-arm bone refs — populated once after the clone is built
-  const leftArmBoneRef  = useRef<THREE.Bone | null>(null);
-  const rightArmBoneRef = useRef<THREE.Bone | null>(null);
-
-  // Pre-computed offset quaternions: rotate outward around the bone's local Z axis.
-  // Left arm rotates +Z (spreads down/away on the left), right arm rotates -Z.
-  const leftOffsetQ  = useRef(
-    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), ARM_SPREAD_RAD),
-  );
-  const rightOffsetQ = useRef(
-    new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, -1), ARM_SPREAD_RAD),
-  );
 
   // Clone base group once per instance so each avatar has its own skeleton
   const cloneRef = useRef<THREE.Group | null>(null);
@@ -327,29 +283,6 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
         (child as THREE.SkinnedMesh).castShadow    = false;
       }
     });
-
-    // Locate upper-arm bones.
-    // Patterns cover the most common naming styles:
-    //   upperarmL / upperarmR  (this rig)
-    //   LeftArm / RightArm     (Mixamo)
-    //   upper_arm_l / upper_arm_r
-    //   arm_l / arm_r
-    // We exclude "lower" and "fore" so forearm bones are never matched.
-    leftArmBoneRef.current = findBoneByPattern(
-      cloneRef.current,
-      ["upperarml", "upper_arm_l", "upperarm.l", "leftarm", "left_arm", "arm_l"],
-      ["lower", "fore", "hand"],
-    );
-    rightArmBoneRef.current = findBoneByPattern(
-      cloneRef.current,
-      ["upperarmr", "upper_arm_r", "upperarm.r", "rightarm", "right_arm", "arm_r"],
-      ["lower", "fore", "hand"],
-    );
-
-    console.log(
-      `[avatar] Arm bones → left: ${leftArmBoneRef.current?.name ?? "not found"}, ` +
-      `right: ${rightArmBoneRef.current?.name ?? "not found"}`,
-    );
   }
 
   // Set up AnimationMixer once the clone exists
@@ -414,16 +347,6 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   useFrame((_, rawDelta) => {
     const dt = Math.min(rawDelta, 0.066);
     mixerRef.current?.update(dt);
-
-    // After mixer.update() the bones are at their animation-driven rotation.
-    // Multiply the pre-computed outward-spread quaternion onto each upper arm
-    // so the arms sit a fixed angle away from the torso regardless of animation.
-    if (leftArmBoneRef.current) {
-      leftArmBoneRef.current.quaternion.multiply(leftOffsetQ.current);
-    }
-    if (rightArmBoneRef.current) {
-      rightArmBoneRef.current.quaternion.multiply(rightOffsetQ.current);
-    }
 
     const g = outerRef.current;
     if (!g) return;

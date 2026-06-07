@@ -6,3 +6,5 @@
 - [.rebur format](rebur-format.md) — custom asset format at client/src/lib/rebur/; wraps THREE.js geo.toJSON()+AnimationClip.toJSON(); Avatar.tsx compiles it on first mount; export via downloadAvatarRebur().
 - [SkinnedMesh frustumCulled](skinned-mesh-culling.md) — always set frustumCulled=false on SkinnedMesh; bind-pose bbox causes GPU to skip draw calls when avatar animates out of rest position.
 - [FBX model scale](fbx-model-scale.md) — store baseGroup.scale.x from FBXLoader as modelScale in ReburAsset; restore at render time as wrapper group scale; never hardcode 0.01.
+- [FBX end bones not in skeleton](fbx-end-bones.md) — end/leaf bones (_end suffix) are hierarchy-only; FBXLoader does NOT include them in SkinnedMesh.skeleton.bones; skin weight zeroing for end bones is always a no-op; only strip their animation tracks.
+- [Avatar arm spread anti-pattern](avatar-arm-spread.md) — do NOT post-multiply a fixed quaternion on upper-arm bones after mixer.update(); the local bone axis direction is rig-specific and almost always wrong, causing arms to rotate downward (flop) instead of outward.
