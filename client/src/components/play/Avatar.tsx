@@ -162,16 +162,30 @@ async function ensureLibraryLoaded(): Promise<boolean> {
       clips[name] = remapped;
     }
 
-    // ── Compute display scale from bounding box ──────────────────────────
-    // Measure the base group's axis-aligned bounding box in its own local
-    // space and derive a uniform scale so the avatar stands TARGET_HEIGHT
-    // units tall in the game world.
-    const box = new THREE.Box3().setFromObject(baseFbx);
+    // ── Compute display scale from geometry vertices only ────────────────
+    // We deliberately avoid setFromObject(baseFbx) because that traverses
+    // the full scene graph including end/leaf bones, which stick out past
+    // the actual mesh surface and inflate the measured height.
+    // Instead we collect bounding boxes from SkinnedMesh geometries only —
+    // these are computed from real vertex positions in the mesh's local
+    // space, then expanded into a single world-space box.
+    const box = new THREE.Box3();
+    baseFbx.updateWorldMatrix(true, true);
+    baseFbx.traverse((child) => {
+      const sm = child as THREE.SkinnedMesh;
+      if (!sm.isSkinnedMesh) return;
+      sm.geometry.computeBoundingBox();
+      const geoBB = sm.geometry.boundingBox;
+      if (!geoBB) return;
+      const worldBB = geoBB.clone().applyMatrix4(sm.matrixWorld);
+      box.union(worldBB);
+    });
+
     const size = new THREE.Vector3();
     box.getSize(size);
     const meshHeight = size.y;
     const displayScale = meshHeight > 0 ? TARGET_HEIGHT / meshHeight : 1;
-    console.log(`[avatar] Mesh height=${meshHeight.toFixed(3)}, displayScale=${displayScale.toFixed(5)}`);
+    console.log(`[avatar] Geometry height=${meshHeight.toFixed(3)}, displayScale=${displayScale.toFixed(5)}`);
 
     _library    = { baseGroup: baseFbx, clips, displayScale };
     _loadState  = "ready";
