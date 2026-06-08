@@ -97,47 +97,88 @@ async function ensureLibraryLoaded(): Promise<boolean> {
   }
 }
 
-// ── Bone lookup helpers ──────────────────────────────────────────────────────
-// Match bones by case-insensitive substring; works for "mixamorig:LeftArm",
-// "LeftArm", "Arm.L", etc. The first regex that matches a bone wins.
-function findBone(root: THREE.Object3D, patterns: RegExp[]): THREE.Bone | null {
-  let found: THREE.Bone | null = null;
-  for (const re of patterns) {
-    root.traverse((c) => {
-      if (found) return;
-      if (!(c as THREE.Bone).isBone) return;
-      if (re.test(c.name)) found = c as THREE.Bone;
-    });
-    if (found) return found;
+// ── Bone lookup ──────────────────────────────────────────────────────────────
+// Score each bone for a (side, part) target and pick the best match. Handles
+// all common naming schemes:
+//   Mixamo:   mixamorig:LeftArm, mixamorig:LeftForeArm, mixamorig:LeftUpLeg
+//   Blender:  Arm.L, ForeArm.L, UpLeg.L
+//   Unreal:   upperarm_l, lowerarm_l, thigh_l, calf_l
+//   Plain:    L_Arm, LeftArm, leftShoulder
+type Side = "left" | "right" | "center";
+type Part = "spine" | "head" | "upperArm" | "foreArm" | "upperLeg" | "lowerLeg";
+
+const SIDE_RE: Record<Side, RegExp> = {
+  left:  /(^|[^a-z])(left|l)([^a-z]|$)|\.l$|_l$|^l_/i,
+  right: /(^|[^a-z])(right|r)([^a-z]|$)|\.r$|_r$|^r_/i,
+  center: /.^/, // never matches; center parts are matched by part keyword only
+};
+
+// Higher score wins. End bones are excluded outright.
+function partScore(name: string, part: Part): number {
+  const n = name.toLowerCase();
+  switch (part) {
+    case "spine":    return /spine2$/.test(n) ? 6 : /spine1$/.test(n) ? 5 : /(^|[^a-z])spine($|[^a-z])/.test(n) ? 4 : /chest|torso/.test(n) ? 3 : 0;
+    case "head":     return /(^|[^a-z])head($|[^a-z])/.test(n) ? 5 : 0;
+    case "upperArm": return /(forearm|lowerarm|elbow)/.test(n) ? 0
+                          : /upperarm/.test(n) ? 6
+                          : /(^|[^a-z])arm($|[^a-z])/.test(n) ? 5
+                          : /shoulder/.test(n) ? 3 : 0;
+    case "foreArm":  return /(forearm|lowerarm)/.test(n) ? 6 : /elbow/.test(n) ? 4 : 0;
+    case "upperLeg": return /(lowerleg|shin|calf|knee)/.test(n) ? 0
+                          : /(upleg|upperleg|thigh)/.test(n) ? 6
+                          : /(^|[^a-z])leg($|[^a-z])/.test(n) ? 4
+                          : /hip(?!s$)/.test(n) ? 3 : 0;
+    case "lowerLeg": return /(lowerleg|shin|calf)/.test(n) ? 6 : /knee/.test(n) ? 4 : 0;
   }
-  return null;
+}
+
+function isEnd(name: string) {
+  return /_end$|\.end$|end$/i.test(name);
+}
+
+function findBone(root: THREE.Object3D, side: Side, part: Part): THREE.Bone | null {
+  let best: THREE.Bone | null = null;
+  let bestScore = 0;
+  root.traverse((c) => {
+    if (!(c as THREE.Bone).isBone) return;
+    if (isEnd(c.name)) return;
+    const ps = partScore(c.name, part);
+    if (ps === 0) return;
+    if (side !== "center" && !SIDE_RE[side].test(c.name)) return;
+    if (side === "center") {
+      // Reject if name looks side-tagged
+      if (SIDE_RE.left.test(c.name) || SIDE_RE.right.test(c.name)) return;
+    }
+    if (ps > bestScore) { bestScore = ps; best = c as THREE.Bone; }
+  });
+  return best;
 }
 
 interface RigBones {
   spine: THREE.Bone | null;
   head: THREE.Bone | null;
-  leftArm: THREE.Bone | null; // shoulder
+  leftArm: THREE.Bone | null;
   rightArm: THREE.Bone | null;
   leftForeArm: THREE.Bone | null;
   rightForeArm: THREE.Bone | null;
-  leftUpLeg: THREE.Bone | null; // hip
+  leftUpLeg: THREE.Bone | null;
   rightUpLeg: THREE.Bone | null;
-  leftLeg: THREE.Bone | null; // knee
+  leftLeg: THREE.Bone | null;
   rightLeg: THREE.Bone | null;
 }
 
 function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
   const rig: RigBones = {
-    spine: findBone(root, [/spine2?$/i, /spine$/i, /chest/i]),
-    head: findBone(root, [/head$/i]),
-    leftArm: findBone(root, [/left.?arm$/i, /l.?upperarm/i, /shoulder.?l/i]),
-    rightArm: findBone(root, [/right.?arm$/i, /r.?upperarm/i, /shoulder.?r/i]),
-    leftForeArm: findBone(root, [/left.?fore.?arm/i, /l.?forearm/i, /elbow.?l/i]),
-    rightForeArm: findBone(root, [/right.?fore.?arm/i, /r.?forearm/i, /elbow.?r/i]),
-    leftUpLeg: findBone(root, [/left.?up.?leg/i, /l.?thigh/i, /hip.?l/i, /upleg.?l/i]),
-    rightUpLeg: findBone(root, [/right.?up.?leg/i, /r.?thigh/i, /hip.?r/i, /upleg.?r/i]),
-    leftLeg: findBone(root, [/left.?leg$/i, /l.?shin/i, /knee.?l/i]),
-    rightLeg: findBone(root, [/right.?leg$/i, /r.?shin/i, /knee.?r/i]),
+    spine:        findBone(root, "center", "spine"),
+    head:         findBone(root, "center", "head"),
+    leftArm:      findBone(root, "left",  "upperArm"),
+    rightArm:     findBone(root, "right", "upperArm"),
+    leftForeArm:  findBone(root, "left",  "foreArm"),
+    rightForeArm: findBone(root, "right", "foreArm"),
+    leftUpLeg:    findBone(root, "left",  "upperLeg"),
+    rightUpLeg:   findBone(root, "right", "upperLeg"),
+    leftLeg:      findBone(root, "left",  "lowerLeg"),
+    rightLeg:     findBone(root, "right", "lowerLeg"),
   };
 
   const bindQ = new Map<THREE.Bone, THREE.Quaternion>();
