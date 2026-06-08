@@ -171,6 +171,56 @@ interface RigBones {
   rightLeg: THREE.Bone | null;
 }
 
+// ── T-pose correction ────────────────────────────────────────────────────────
+// When the FBX ships in T-pose (arms pointing straight out sideways) the
+// bind quaternions will be horizontal. We detect that and rotate each upper-arm
+// bone so the "rest" position is arms-at-sides before snapping the bindQ.
+//
+// All math is in world space; we convert back to the bone's local space via the
+// parent chain's world quaternion.
+
+function getBoneAlongWorldDir(bone: THREE.Bone): THREE.Vector3 {
+  bone.updateWorldMatrix(true, false);
+  const boneWorldQ = new THREE.Quaternion();
+  bone.getWorldQuaternion(boneWorldQ);
+  // Try +Y (Blender/FBX standard along-bone axis) and +X; pick whichever is
+  // more horizontal — that's the real "along" axis for a T-posed arm.
+  const yDir = new THREE.Vector3(0, 1, 0).applyQuaternion(boneWorldQ);
+  const xDir = new THREE.Vector3(1, 0, 0).applyQuaternion(boneWorldQ);
+  const yH = Math.abs(yDir.x) + Math.abs(yDir.z);
+  const xH = Math.abs(xDir.x) + Math.abs(xDir.z);
+  return xH > yH ? xDir : yDir;
+}
+
+function correctArmTpose(bone: THREE.Bone, isLeft: boolean): void {
+  const currentDir = getBoneAlongWorldDir(bone);
+  // Only act if the arm is substantially horizontal (T-pose criterion).
+  if (Math.abs(currentDir.x) < 0.45) return;
+
+  // Desired world-space direction: arm hanging at side with a slight outward angle.
+  const target = new THREE.Vector3(isLeft ? -0.15 : 0.15, -0.98, 0).normalize();
+
+  // World-space rotation that maps currentDir → target.
+  const worldCorrection = new THREE.Quaternion().setFromUnitVectors(currentDir, target);
+
+  // Express that world-space correction in the bone's LOCAL space so we can
+  // premultiply it onto bone.quaternion.
+  //   newBoneWorldQ = worldCorrection * oldBoneWorldQ
+  //                 = worldCorrection * parentWorldQ * oldBoneLocalQ
+  //   newBoneLocalQ = parentWorldQ⁻¹ * worldCorrection * parentWorldQ * oldBoneLocalQ
+  // → localCorrection = parentWorldQ⁻¹ * worldCorrection * parentWorldQ
+  const parentWorldQ = new THREE.Quaternion();
+  if (bone.parent) bone.parent.getWorldQuaternion(parentWorldQ);
+  // THREE.js: .multiply(q) = this * q, .premultiply(q) = q * this
+  // We want: pWQ⁻¹ * worldCorrection * pWQ
+  const localCorrection = parentWorldQ.clone().invert() // pWQ⁻¹
+    .multiply(worldCorrection)                          // pWQ⁻¹ * worldCorrection
+    .multiply(parentWorldQ);                            // pWQ⁻¹ * worldCorrection * pWQ
+
+  bone.quaternion.premultiply(localCorrection);
+  bone.updateMatrixWorld(true);
+}
+
 function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
   const rig: RigBones = {
     spine:        findBone(root, "center", "spine"),
@@ -185,6 +235,14 @@ function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone,
     rightLeg:     findBone(root, "right", "lowerLeg"),
   };
 
+  // Ensure world matrices are up to date before sampling directions.
+  root.updateMatrixWorld(true);
+
+  // Correct T-pose on upper arms so the bind ("rest") pose is arms-at-sides.
+  if (rig.leftArm)  correctArmTpose(rig.leftArm,  true);
+  if (rig.rightArm) correctArmTpose(rig.rightArm, false);
+
+  // Snap bind quaternions AFTER any corrections.
   const bindQ = new Map<THREE.Bone, THREE.Quaternion>();
   for (const b of Object.values(rig)) {
     if (b) bindQ.set(b, b.quaternion.clone());
