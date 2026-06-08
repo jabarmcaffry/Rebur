@@ -273,42 +273,75 @@ function poseFor(state: string, phase: number, intensity: number): PoseTargets {
   const s = Math.sin(phase);
   const c = Math.cos(phase);
 
-  if (state === "jump" || state === "fall") {
-    // Arms up + slight, legs tucked.
+  // ── JUMP ──────────────────────────────────────────────────────────────────
+  // Arms raise high outward (+Z), elbows bend, legs tuck up.
+  // Convention (confirmed via debug):
+  //   arm local+X → world LEFT  →  positive X = arm swings backward
+  //   arm local+Z → world FORWARD  →  positive Z = arm raises outward
+  //   leg local+X → world LEFT  →  positive X = foot swings forward
+  if (state === "jump") {
     return {
-      leftArm:  new THREE.Euler(0, 0,  1.1 * intensity),
-      rightArm: new THREE.Euler(0, 0, -1.1 * intensity),
-      leftUpLeg:  new THREE.Euler( 0.5 * intensity, 0, 0),
-      rightUpLeg: new THREE.Euler( 0.5 * intensity, 0, 0),
-      leftLeg:    new THREE.Euler(-0.9 * intensity, 0, 0),
-      rightLeg:   new THREE.Euler(-0.9 * intensity, 0, 0),
-      spine: new THREE.Euler(0.15 * intensity, 0, 0),
+      leftArm:       new THREE.Euler(-0.4 * intensity, 0,  1.6 * intensity),
+      rightArm:      new THREE.Euler(-0.4 * intensity, 0, -1.6 * intensity),
+      leftForeArm:   new THREE.Euler( 0.6 * intensity, 0, 0),
+      rightForeArm:  new THREE.Euler( 0.6 * intensity, 0, 0),
+      leftUpLeg:     new THREE.Euler( 0.65 * intensity, 0, 0),
+      rightUpLeg:    new THREE.Euler( 0.65 * intensity, 0, 0),
+      leftLeg:       new THREE.Euler(-1.1 * intensity, 0, 0),
+      rightLeg:      new THREE.Euler(-1.1 * intensity, 0, 0),
+      spine:         new THREE.Euler( 0.15 * intensity, 0, 0),
+    };
+  }
+
+  // ── FALL ──────────────────────────────────────────────────────────────────
+  // Arms spread even wider for a "falling / bracing" look, legs trail loosely.
+  if (state === "fall") {
+    return {
+      leftArm:       new THREE.Euler( 0.2 * intensity, 0,  1.9 * intensity),
+      rightArm:      new THREE.Euler( 0.2 * intensity, 0, -1.9 * intensity),
+      leftForeArm:   new THREE.Euler( 0.3 * intensity, 0, 0),
+      rightForeArm:  new THREE.Euler( 0.3 * intensity, 0, 0),
+      leftUpLeg:     new THREE.Euler(-0.25 * intensity, 0, 0),
+      rightUpLeg:    new THREE.Euler(-0.25 * intensity, 0, 0),
+      leftLeg:       new THREE.Euler(-0.35 * intensity, 0, 0),
+      rightLeg:      new THREE.Euler(-0.35 * intensity, 0, 0),
+      spine:         new THREE.Euler(-0.1  * intensity, 0, 0),
     };
   }
 
   if (state === "walk" || state === "run") {
     // Opposite-side arms/legs swing. Stronger swing for run.
-    const swing = (state === "run" ? 1.1 : 0.7) * intensity;
+    const swing    = (state === "run" ? 1.1 : 0.7) * intensity;
     const armSwing = (state === "run" ? 1.3 : 0.9) * intensity;
-    const bob = (state === "run" ? 0.10 : 0.06) * intensity;
+    const bob      = (state === "run" ? 0.10 : 0.06) * intensity;
     return {
-      // Arms swing opposite to legs
-      leftArm:  new THREE.Euler( s * armSwing, 0, 0),
-      rightArm: new THREE.Euler(-s * armSwing, 0, 0),
-      leftForeArm:  new THREE.Euler(Math.max(0, -s * 0.4) * intensity, 0, 0),
-      rightForeArm: new THREE.Euler(Math.max(0,  s * 0.4) * intensity, 0, 0),
-      // Legs
+      // ── Arms ──────────────────────────────────────────────────────────────
+      // leftArm/rightArm are opposite so they counter-swing the legs.
+      // Positive X = arm swings backward, negative X = arm swings forward.
+      leftArm:       new THREE.Euler( s * armSwing, 0, 0),
+      rightArm:      new THREE.Euler(-s * armSwing, 0, 0),
+      // Elbow flexes when the arm swings BACKWARD (s > 0 for left).
+      leftForeArm:   new THREE.Euler(Math.max(0,  s * 0.45) * intensity, 0, 0),
+      rightForeArm:  new THREE.Euler(Math.max(0, -s * 0.45) * intensity, 0, 0),
+      // ── Legs ──────────────────────────────────────────────────────────────
+      // leftUpLeg/rightUpLeg are opposite (left-back when right-forward).
+      // Positive X = foot swings forward.
       leftUpLeg:  new THREE.Euler(-s * swing, 0, 0),
       rightUpLeg: new THREE.Euler( s * swing, 0, 0),
-      leftLeg:    new THREE.Euler(Math.max(0,  s * swing * 0.9), 0, 0),
-      rightLeg:   new THREE.Euler(Math.max(0, -s * swing * 0.9), 0, 0),
+      // Lower leg: knee bends (negative X, curling the shin back) during the
+      // FORWARD swing phase — NOT during the push-off phase.
+      // left forward = s < 0  →  leftLeg = Math.min(0,  s * …) = negative  ✓
+      // right forward = s > 0  →  rightLeg = Math.min(0, -s * …) = negative ✓
+      leftLeg:    new THREE.Euler(Math.min(0,  s * swing * 0.65), 0, 0),
+      rightLeg:   new THREE.Euler(Math.min(0, -s * swing * 0.65), 0, 0),
       // Subtle torso counter-rotation + bob
       spine: new THREE.Euler(bob * 0.5, -s * 0.08 * intensity, 0),
-      head:  new THREE.Euler(0,  s * 0.05 * intensity, 0),
+      head:  new THREE.Euler(0,          s * 0.05 * intensity, 0),
     };
   }
 
-  // idle — gentle breathing
+  // ── IDLE ─────────────────────────────────────────────────────────────────
+  // Gentle breathing — arms hang with a very slight outward tilt.
   const breath = 0.04 * intensity;
   return {
     spine: new THREE.Euler(c * breath, 0, 0),
