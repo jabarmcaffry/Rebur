@@ -197,12 +197,40 @@ function computeCorrectedArmBindQ(
   bone: THREE.Bone,
   isLeft: boolean,
 ): THREE.Quaternion {
+  // Log every local-space axis in world coordinates so we can see exactly
+  // which way this bone is pointing at rest (check browser console in Play).
+  const wq = new THREE.Quaternion();
+  bone.getWorldQuaternion(wq);
+  const axes = ["+X","+Y","+Z","-X","-Y","-Z"];
+  const dirs = [
+    new THREE.Vector3( 1, 0, 0).applyQuaternion(wq),
+    new THREE.Vector3( 0, 1, 0).applyQuaternion(wq),
+    new THREE.Vector3( 0, 0, 1).applyQuaternion(wq),
+    new THREE.Vector3(-1, 0, 0).applyQuaternion(wq),
+    new THREE.Vector3( 0,-1, 0).applyQuaternion(wq),
+    new THREE.Vector3( 0, 0,-1).applyQuaternion(wq),
+  ];
+  const fmt = (v: THREE.Vector3) =>
+    `(${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)})`;
+  console.log(
+    `[arm-debug] ${bone.name} (${isLeft?"left":"right"}) axes in world:\n` +
+    axes.map((a,i) => `  local${a} → world${fmt(dirs[i])}`).join("\n")
+  );
+
   const currentDir = getBoneAlongWorldDir(bone);
+  console.log(
+    `[arm-debug] ${bone.name} detected along-dir: ${fmt(currentDir)}  |x|=${Math.abs(currentDir.x).toFixed(3)}`
+  );
+
   // Only correct if the arm is substantially horizontal (T-pose criterion).
-  if (Math.abs(currentDir.x) < 0.45) return bone.quaternion.clone();
+  if (Math.abs(currentDir.x) < 0.45) {
+    console.log(`[arm-debug] ${bone.name}: NOT in T-pose, skipping correction`);
+    return bone.quaternion.clone();
+  }
 
   // Desired world-space direction: arm hanging at side with a slight outward lean.
   const target = new THREE.Vector3(isLeft ? -0.15 : 0.15, -0.98, 0).normalize();
+  console.log(`[arm-debug] ${bone.name}: correcting from ${fmt(currentDir)} → ${fmt(target)}`);
 
   // World-space rotation that maps currentDir → target.
   const worldCorrection = new THREE.Quaternion().setFromUnitVectors(currentDir, target);
@@ -221,7 +249,14 @@ function computeCorrectedArmBindQ(
 
   // Return corrected bindQ = localCorrection * originalBindQ
   // (do NOT write back to bone.quaternion — that would break boneInverse skinning)
-  return localCorrection.multiply(bone.quaternion.clone());
+  const result = localCorrection.multiply(bone.quaternion.clone());
+
+  // Verify: apply the resulting quaternion and check where local +Y now points
+  const checkWq = parentWorldQ.clone().multiply(result);
+  const checkDir = new THREE.Vector3(0, 1, 0).applyQuaternion(checkWq);
+  console.log(`[arm-debug] ${bone.name}: after correction, +Y → world${fmt(checkDir)} (should be near ${fmt(target)})`);
+
+  return result;
 }
 
 function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
