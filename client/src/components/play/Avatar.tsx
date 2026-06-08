@@ -107,10 +107,14 @@ async function ensureLibraryLoaded(): Promise<boolean> {
 type Side = "left" | "right" | "center";
 type Part = "spine" | "head" | "upperArm" | "foreArm" | "upperLeg" | "lowerLeg";
 
-const SIDE_RE: Record<Side, RegExp> = {
-  left:  /(^|[^a-z])(left|l)([^a-z]|$)|\.l$|_l$|^l_/i,
-  right: /(^|[^a-z])(right|r)([^a-z]|$)|\.r$|_r$|^r_/i,
-  center: /.^/, // never matches; center parts are matched by part keyword only
+const SIDE_RE: Record<Side, (n: string) => boolean> = {
+  // Case-sensitive trailing L/R (e.g. upperarmL, lowerlegR) PLUS the usual
+  // "left"/"right" words, .L/.R, _l/_r, l_/r_ prefixes. Case-insensitive
+  // "l"/"r" alone would false-match every word containing those letters, so
+  // we keep the single-letter form strictly case-sensitive.
+  left:   (n) => /L$/.test(n) || /(^|[^a-zA-Z])left([^a-zA-Z]|$)/i.test(n) || /\.L$/.test(n) || /_l$/i.test(n) || /^L_/.test(n) || /^left/i.test(n),
+  right:  (n) => /R$/.test(n) || /(^|[^a-zA-Z])right([^a-zA-Z]|$)/i.test(n) || /\.R$/.test(n) || /_r$/i.test(n) || /^R_/.test(n) || /^right/i.test(n),
+  center: (_) => false,
 };
 
 // Higher score wins. End bones are excluded outright.
@@ -144,10 +148,10 @@ function findBone(root: THREE.Object3D, side: Side, part: Part): THREE.Bone | nu
     if (isEnd(c.name)) return;
     const ps = partScore(c.name, part);
     if (ps === 0) return;
-    if (side !== "center" && !SIDE_RE[side].test(c.name)) return;
+    if (side !== "center" && !SIDE_RE[side](c.name)) return;
     if (side === "center") {
       // Reject if name looks side-tagged
-      if (SIDE_RE.left.test(c.name) || SIDE_RE.right.test(c.name)) return;
+      if (SIDE_RE.left(c.name) || SIDE_RE.right(c.name)) return;
     }
     if (ps > bestScore) { bestScore = ps; best = c as THREE.Bone; }
   });
