@@ -148,10 +148,10 @@ function findBone(root: THREE.Object3D, side: Side, part: Part): THREE.Bone | nu
     if (isEnd(c.name)) return;
     const ps = partScore(c.name, part);
     if (ps === 0) return;
-    if (side !== "center" && !SIDE_RE[side].test(c.name)) return;
+    if (side !== "center" && !SIDE_RE[side](c.name)) return;
     if (side === "center") {
       // Reject if name looks side-tagged
-      if (SIDE_RE.left.test(c.name) || SIDE_RE.right.test(c.name)) return;
+      if (SIDE_RE.left(c.name) || SIDE_RE.right(c.name)) return;
     }
     if (ps > bestScore) { bestScore = ps; best = c as THREE.Bone; }
   });
