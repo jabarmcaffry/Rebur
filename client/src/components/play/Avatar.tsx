@@ -1,18 +1,22 @@
 /**
- * Avatar.tsx — Direct FBX loading (no rebur serialisation pipeline)
+ * Avatar.tsx — Procedural / motor-driven avatar.
  *
- *  1. Load Avatar.fbx once (mesh + skeleton + skin weights)
- *  2. Load Idle / Walking / Running / Jumping.fbx once (animation clips only)
- *  3. For each avatar instance, SkeletonUtils.clone() the base group so every
- *     player gets their own independent skeleton without re-parsing the FBX.
- *  4. Attach an AnimationMixer to the cloned group and play clips from the
- *     shared animation library.
+ * Loads ONLY Avatar.fbx (mesh + skeleton, no animations) and drives bones
+ * directly each frame, the way Roblox motors drive R15 limbs. There is no
+ * AnimationMixer and no .fbx animation clip.
  *
- * This avoids every class of deformation bug caused by manually reconstructing
- * skeletons from serialised bone transforms / boneInverses.
+ * Per-instance flow:
+ *   1. SkeletonUtils.clone() the shared base group so each player has their
+ *      own independent skeleton.
+ *   2. Walk the skeleton, locate the named bones we care about (arms, legs,
+ *      spine, head), and snapshot their bind-pose quaternions.
+ *   3. Every frame, build a target quaternion = bind * additive(state, phase)
+ *      and slerp toward it. State (idle / walk / run / jump) is read from
+ *      player.animation. Phase is a per-instance clock advanced by dt and
+ *      scaled by movement speed so the cycle matches stride.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
@@ -20,31 +24,16 @@ import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import * as THREE from "three";
 import type { RenderPlayer } from "@shared/render-types";
 
-// FBX asset URLs — Vite resolves these to hashed public paths
-import avatarFbxUrl  from "./Avatar.fbx?url";
-import idleFbxUrl    from "./Idle.fbx?url";
-import walkFbxUrl    from "./Walking.fbx?url";
-import runFbxUrl     from "./Running.fbx?url";
-import jumpFbxUrl    from "./Jumping.fbx?url";
+import avatarFbxUrl from "./Avatar.fbx?url";
 
 const LABEL_HEIGHT = 2.4;
-const FADE_TIME    = 0.2;
-
-// Target character height in world units.  The base group is scaled so the
-// avatar's bounding box height matches this value exactly.
 const TARGET_HEIGHT = 1.8;
 
-// ── Shared load state (FBX files parsed once, shared across all instances) ────
+// ── Shared library (parsed once) ─────────────────────────────────────────────
 interface AvatarLibrary {
-  /** The original FBX group — clone this per instance, never use it directly */
   baseGroup: THREE.Group;
-  /** Named animation clips extracted from the animation FBX files */
-  clips: Record<string, THREE.AnimationClip>;
-  /**
-   * Uniform scale to apply to each clone so the avatar matches TARGET_HEIGHT.
-   * Computed once from the bounding box of the base group.
-   */
   displayScale: number;
+  boneNames: string[];
 }
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -57,141 +46,31 @@ function notifyWaiters(ok: boolean) {
   _waiters = [];
 }
 
-/**
- * Returns true if a bone name is an end / leaf bone that should never drive
- * mesh deformation.  End bones are purely structural (they mark the tip of a
- * bone chain) and carry no skinned vertices — animating them pulls any
- * accidentally-weighted vertices to wild positions.
- *
- * Matches names that end with (case-insensitive):
- *   _end  .end  End   (e.g. handL_end, head_end, lowerlegR_end, Toe_End)
- */
-function isEndBone(boneName: string): boolean {
-  return /_end$/i.test(boneName) || /\.end$/i.test(boneName) || /End$/i.test(boneName);
-}
-
-/**
- * Remap animation clip track names so they reference bones that actually exist
- * in the target skeleton.  Animation FBX exports from some tools prefix bone
- * names with an armature name (e.g. "Armature|mixamorig:Hips.position") while
- * the base mesh may use just "mixamorig:Hips.position".  We strip any prefix
- * up to and including the first "|" so clips can drive any standard skeleton.
- *
- * End/leaf bones (_end suffix) are always dropped regardless of whether they
- * exist in the skeleton — they have no geometry influence and should never
- * be driven by animation tracks.
- */
-function remapClip(
-  clip: THREE.AnimationClip,
-  boneNames: Set<string>,
-): THREE.AnimationClip {
-  const cloned = clip.clone();
-  cloned.tracks = cloned.tracks
-    .map((track) => {
-      // Track name format: "BoneName.property"
-      const dotIdx  = track.name.lastIndexOf(".");
-      const rawBone = dotIdx >= 0 ? track.name.slice(0, dotIdx) : track.name;
-      const prop    = dotIdx >= 0 ? track.name.slice(dotIdx)    : "";
-
-      // Always drop end/leaf bone tracks — they deform vertices if driven
-      if (isEndBone(rawBone)) return null;
-
-      // Already matches — keep as-is
-      if (boneNames.has(rawBone)) return track;
-
-      // Strip "ArmatureName|" prefix (Blender / Mixamo exports)
-      const pipeIdx = rawBone.indexOf("|");
-      if (pipeIdx >= 0) {
-        const stripped = rawBone.slice(pipeIdx + 1);
-        // Also drop if the stripped name is an end bone
-        if (isEndBone(stripped)) return null;
-        if (boneNames.has(stripped)) {
-          const clonedTrack = track.clone();
-          clonedTrack.name  = stripped + prop;
-          return clonedTrack;
-        }
-      }
-
-      // No matching bone — drop this track
-      return null;
-    })
-    .filter((t): t is THREE.KeyframeTrack => t !== null);
-
-  return cloned;
-}
-
 async function ensureLibraryLoaded(): Promise<boolean> {
-  if (_loadState === "ready")   return true;
-  if (_loadState === "error")   return false;
+  if (_loadState === "ready") return true;
+  if (_loadState === "error") return false;
   if (_loadState === "loading") {
     return new Promise((resolve) => _waiters.push(resolve));
   }
-
   _loadState = "loading";
-
   try {
     const loader = new FBXLoader();
+    const baseFbx = await loader.loadAsync(avatarFbxUrl);
 
-    console.log("[avatar] Loading FBX files…");
-    const [baseFbx, idleFbx, walkFbx, runFbx, jumpFbx] = await Promise.all([
-      loader.loadAsync(avatarFbxUrl),
-      loader.loadAsync(idleFbxUrl),
-      loader.loadAsync(walkFbxUrl),
-      loader.loadAsync(runFbxUrl),
-      loader.loadAsync(jumpFbxUrl),
-    ]);
-    console.log("[avatar] All FBX files loaded ✓");
+    // Strip any embedded clips — we drive bones procedurally.
+    baseFbx.animations = [];
 
-    // Collect all bone names from the base skeleton for remapping + logging
-    const boneNames = new Set<string>();
-    baseFbx.traverse((child) => {
-      if ((child as THREE.Bone).isBone) boneNames.add(child.name);
-    });
-    console.log(`[avatar] Base skeleton: ${boneNames.size} bones`);
-    console.log(`[avatar] Bone names: ${[...boneNames].join(", ")}`);
-
-    // Disable frustum culling on every SkinnedMesh in the base group
-    // (bind-pose bounding box is too small once animations run)
-    baseFbx.traverse((child) => {
-      if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
-        (child as THREE.SkinnedMesh).frustumCulled = false;
+    const boneNames: string[] = [];
+    baseFbx.traverse((c) => {
+      if ((c as THREE.Bone).isBone) boneNames.push(c.name);
+      if ((c as THREE.SkinnedMesh).isSkinnedMesh) {
+        (c as THREE.SkinnedMesh).frustumCulled = false;
       }
     });
+    console.log(`[avatar] Loaded Avatar.fbx — ${boneNames.length} bones`);
+    console.log(`[avatar] Bones: ${boneNames.join(", ")}`);
 
-    // Extract and remap one clip per animation source
-    const animSources: Array<{ name: string; fbx: THREE.Group }> = [
-      { name: "idle", fbx: idleFbx },
-      { name: "walk", fbx: walkFbx },
-      { name: "run",  fbx: runFbx  },
-      { name: "jump", fbx: jumpFbx },
-    ];
-
-    const clips: Record<string, THREE.AnimationClip> = {};
-    for (const { name, fbx } of animSources) {
-      if (!fbx.animations || fbx.animations.length === 0) {
-        console.warn(`[avatar] "${name}" FBX has no animations — skipping`);
-        continue;
-      }
-      const raw    = fbx.animations[0];
-      const remapped = remapClip(raw, boneNames);
-      remapped.name  = name;
-
-      if (remapped.tracks.length === 0) {
-        console.warn(`[avatar] "${name}" has 0 matching tracks after remap — skipping`);
-        continue;
-      }
-
-      console.log(`[avatar] "${name}": ${remapped.tracks.length} tracks, ${remapped.duration.toFixed(2)}s`);
-      clips[name] = remapped;
-    }
-
-    // ── Compute display scale from geometry vertices only ────────────────
-    // We deliberately avoid setFromObject(baseFbx) because that traverses
-    // the full scene graph including end/leaf bones, which stick out past
-    // the actual mesh surface and inflate the measured height.
-    // Instead we collect bounding boxes from SkinnedMesh geometries only —
-    // these are computed from real vertex positions in the mesh's local
-    // space, then expanded into a single world-space box.
+    // Compute displayScale from skinned-mesh geometry only.
     const box = new THREE.Box3();
     baseFbx.updateWorldMatrix(true, true);
     baseFbx.traverse((child) => {
@@ -200,36 +79,141 @@ async function ensureLibraryLoaded(): Promise<boolean> {
       sm.geometry.computeBoundingBox();
       const geoBB = sm.geometry.boundingBox;
       if (!geoBB) return;
-      const worldBB = geoBB.clone().applyMatrix4(sm.matrixWorld);
-      box.union(worldBB);
+      box.union(geoBB.clone().applyMatrix4(sm.matrixWorld));
     });
-
     const size = new THREE.Vector3();
     box.getSize(size);
-    const meshHeight = size.y;
-    const displayScale = meshHeight > 0 ? TARGET_HEIGHT / meshHeight : 1;
-    console.log(`[avatar] Geometry height=${meshHeight.toFixed(3)}, displayScale=${displayScale.toFixed(5)}`);
+    const displayScale = size.y > 0 ? TARGET_HEIGHT / size.y : 1;
 
-    _library    = { baseGroup: baseFbx, clips, displayScale };
-    _loadState  = "ready";
+    _library = { baseGroup: baseFbx, displayScale, boneNames };
+    _loadState = "ready";
     notifyWaiters(true);
     return true;
   } catch (err) {
-    console.error("[avatar] Failed to load FBX files:", err);
+    console.error("[avatar] Failed to load Avatar.fbx:", err);
     _loadState = "error";
     notifyWaiters(false);
     return false;
   }
 }
 
-// ── Placeholder shown while loading ──────────────────────────────────────────
-function AvatarPlaceholder({
-  player,
-  error = false,
-}: {
-  player: RenderPlayer;
-  error?: boolean;
-}) {
+// ── Bone lookup helpers ──────────────────────────────────────────────────────
+// Match bones by case-insensitive substring; works for "mixamorig:LeftArm",
+// "LeftArm", "Arm.L", etc. The first regex that matches a bone wins.
+function findBone(root: THREE.Object3D, patterns: RegExp[]): THREE.Bone | null {
+  let found: THREE.Bone | null = null;
+  for (const re of patterns) {
+    root.traverse((c) => {
+      if (found) return;
+      if (!(c as THREE.Bone).isBone) return;
+      if (re.test(c.name)) found = c as THREE.Bone;
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
+interface RigBones {
+  spine: THREE.Bone | null;
+  head: THREE.Bone | null;
+  leftArm: THREE.Bone | null; // shoulder
+  rightArm: THREE.Bone | null;
+  leftForeArm: THREE.Bone | null;
+  rightForeArm: THREE.Bone | null;
+  leftUpLeg: THREE.Bone | null; // hip
+  rightUpLeg: THREE.Bone | null;
+  leftLeg: THREE.Bone | null; // knee
+  rightLeg: THREE.Bone | null;
+}
+
+function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
+  const rig: RigBones = {
+    spine: findBone(root, [/spine2?$/i, /spine$/i, /chest/i]),
+    head: findBone(root, [/head$/i]),
+    leftArm: findBone(root, [/left.?arm$/i, /l.?upperarm/i, /shoulder.?l/i]),
+    rightArm: findBone(root, [/right.?arm$/i, /r.?upperarm/i, /shoulder.?r/i]),
+    leftForeArm: findBone(root, [/left.?fore.?arm/i, /l.?forearm/i, /elbow.?l/i]),
+    rightForeArm: findBone(root, [/right.?fore.?arm/i, /r.?forearm/i, /elbow.?r/i]),
+    leftUpLeg: findBone(root, [/left.?up.?leg/i, /l.?thigh/i, /hip.?l/i, /upleg.?l/i]),
+    rightUpLeg: findBone(root, [/right.?up.?leg/i, /r.?thigh/i, /hip.?r/i, /upleg.?r/i]),
+    leftLeg: findBone(root, [/left.?leg$/i, /l.?shin/i, /knee.?l/i]),
+    rightLeg: findBone(root, [/right.?leg$/i, /r.?shin/i, /knee.?r/i]),
+  };
+
+  const bindQ = new Map<THREE.Bone, THREE.Quaternion>();
+  for (const b of Object.values(rig)) {
+    if (b) bindQ.set(b, b.quaternion.clone());
+  }
+  return { rig, bindQ };
+}
+
+// ── Procedural pose ──────────────────────────────────────────────────────────
+// Returns additive Euler (x,y,z) rotations per bone for a given state + phase.
+// Phase is in radians; the caller advances phase = phase + dt * stepRate.
+interface PoseTargets {
+  spine?: THREE.Euler;
+  head?: THREE.Euler;
+  leftArm?: THREE.Euler;
+  rightArm?: THREE.Euler;
+  leftForeArm?: THREE.Euler;
+  rightForeArm?: THREE.Euler;
+  leftUpLeg?: THREE.Euler;
+  rightUpLeg?: THREE.Euler;
+  leftLeg?: THREE.Euler;
+  rightLeg?: THREE.Euler;
+}
+
+function poseFor(state: string, phase: number, intensity: number): PoseTargets {
+  const s = Math.sin(phase);
+  const c = Math.cos(phase);
+
+  if (state === "jump" || state === "fall") {
+    // Arms up + slight, legs tucked.
+    return {
+      leftArm:  new THREE.Euler(0, 0,  1.1 * intensity),
+      rightArm: new THREE.Euler(0, 0, -1.1 * intensity),
+      leftUpLeg:  new THREE.Euler( 0.5 * intensity, 0, 0),
+      rightUpLeg: new THREE.Euler( 0.5 * intensity, 0, 0),
+      leftLeg:    new THREE.Euler(-0.9 * intensity, 0, 0),
+      rightLeg:   new THREE.Euler(-0.9 * intensity, 0, 0),
+      spine: new THREE.Euler(0.15 * intensity, 0, 0),
+    };
+  }
+
+  if (state === "walk" || state === "run") {
+    // Opposite-side arms/legs swing. Stronger swing for run.
+    const swing = (state === "run" ? 1.1 : 0.7) * intensity;
+    const armSwing = (state === "run" ? 1.3 : 0.9) * intensity;
+    const bob = (state === "run" ? 0.10 : 0.06) * intensity;
+    return {
+      // Arms swing opposite to legs
+      leftArm:  new THREE.Euler( s * armSwing, 0, 0),
+      rightArm: new THREE.Euler(-s * armSwing, 0, 0),
+      leftForeArm:  new THREE.Euler(Math.max(0, -s * 0.4) * intensity, 0, 0),
+      rightForeArm: new THREE.Euler(Math.max(0,  s * 0.4) * intensity, 0, 0),
+      // Legs
+      leftUpLeg:  new THREE.Euler(-s * swing, 0, 0),
+      rightUpLeg: new THREE.Euler( s * swing, 0, 0),
+      leftLeg:    new THREE.Euler(Math.max(0,  s * swing * 0.9), 0, 0),
+      rightLeg:   new THREE.Euler(Math.max(0, -s * swing * 0.9), 0, 0),
+      // Subtle torso counter-rotation + bob
+      spine: new THREE.Euler(bob * 0.5, -s * 0.08 * intensity, 0),
+      head:  new THREE.Euler(0,  s * 0.05 * intensity, 0),
+    };
+  }
+
+  // idle — gentle breathing
+  const breath = 0.04 * intensity;
+  return {
+    spine: new THREE.Euler(c * breath, 0, 0),
+    head:  new THREE.Euler(c * breath * 0.5, 0, 0),
+    leftArm:  new THREE.Euler(0, 0,  0.06 + c * 0.02),
+    rightArm: new THREE.Euler(0, 0, -0.06 - c * 0.02),
+  };
+}
+
+// ── Placeholder ──────────────────────────────────────────────────────────────
+function AvatarPlaceholder({ player, error = false }: { player: RenderPlayer; error?: boolean }) {
   const ref = useRef<THREE.Group>(null);
   useFrame(() => {
     const g = ref.current;
@@ -241,19 +225,13 @@ function AvatarPlaceholder({
     <group ref={ref}>
       <mesh position={[0, 0.9, 0]} frustumCulled={false}>
         <capsuleGeometry args={[0.3, 1.2, 4, 8]} />
-        <meshStandardMaterial color={error ? "#ff4444" : "#4488ff"} />
+        <meshStandardMaterial color={error ? "#ff4444" : "#888888"} />
       </mesh>
       <mesh position={[0, 1.75, 0]} frustumCulled={false}>
         <sphereGeometry args={[0.25, 8, 8]} />
-        <meshStandardMaterial color={error ? "#ff4444" : "#4488ff"} />
+        <meshStandardMaterial color={error ? "#ff4444" : "#888888"} />
       </mesh>
-      <Html
-        position={[0, LABEL_HEIGHT, 0]}
-        center
-        distanceFactor={8}
-        zIndexRange={[100, 0]}
-        sprite
-      >
+      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
         <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
           {player.name}
         </div>
@@ -262,116 +240,123 @@ function AvatarPlaceholder({
   );
 }
 
-
-// ── The live skinned avatar ───────────────────────────────────────────────────
+// ── Live procedural avatar ───────────────────────────────────────────────────
 function AvatarMesh({ player }: { player: RenderPlayer }) {
-  const outerRef    = useRef<THREE.Group>(null);
-  const mixerRef    = useRef<THREE.AnimationMixer | null>(null);
-  const actionsRef  = useRef<Record<string, THREE.AnimationAction>>({});
-  const currentAnim = useRef<string>("");
+  const outerRef = useRef<THREE.Group>(null);
 
-  // Clone base group once per instance so each avatar has its own skeleton
-  const cloneRef = useRef<THREE.Group | null>(null);
-  if (!cloneRef.current && _library) {
-    // SkeletonUtils.clone deep-copies bones + skin weights correctly
-    cloneRef.current = (SkeletonUtils as any).clone(_library.baseGroup) as THREE.Group;
-
-    // Ensure frustum culling is off on the clone's skinned meshes too
-    cloneRef.current.traverse((child) => {
-      if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
-        (child as THREE.SkinnedMesh).frustumCulled = false;
-        (child as THREE.SkinnedMesh).castShadow    = false;
+  // Clone base group once per instance.
+  const { clone, rig, bindQ } = useMemo(() => {
+    if (!_library) return { clone: null, rig: null as RigBones | null, bindQ: new Map() };
+    const c = (SkeletonUtils as any).clone(_library.baseGroup) as THREE.Group;
+    c.traverse((child) => {
+      const sm = child as THREE.SkinnedMesh;
+      if (sm.isSkinnedMesh) {
+        sm.frustumCulled = false;
+        sm.castShadow = false;
       }
     });
-  }
-
-  // Set up AnimationMixer once the clone exists
-  useEffect(() => {
-    const clone = cloneRef.current;
-    const lib   = _library;
-    if (!clone || !lib) return;
-
-    const mixer = new THREE.AnimationMixer(clone);
-    mixerRef.current   = mixer;
-    actionsRef.current = {};
-    currentAnim.current = "";
-
-    for (const [name, clip] of Object.entries(lib.clips)) {
-      const action = mixer.clipAction(clip, clone);
-      action.setLoop(
-        name === "jump" ? THREE.LoopOnce : THREE.LoopRepeat,
-        Infinity,
-      );
-      action.clampWhenFinished = name === "jump";
-      actionsRef.current[name] = action;
-    }
-
-    // Start idle (or first available clip)
-    const startClip = actionsRef.current["idle"] ?? Object.values(actionsRef.current)[0];
-    if (startClip) {
-      startClip.play();
-      currentAnim.current = startClip.getClip().name;
-    }
-
-    return () => {
-      mixer.stopAllAction();
-      mixer.uncacheRoot(clone);
-    };
+    const built = buildRig(c);
+    return { clone: c, rig: built.rig, bindQ: built.bindQ };
   }, []);
 
-  // Animation state machine — respond to player.animation changes
-  useEffect(() => {
-    let target = player.animation ?? "idle";
-    if (target === "fall" || target === "ragdoll") target = "idle";
-    if (!actionsRef.current[target]) target = "idle";
-    if (!actionsRef.current[target]) {
-      const first = Object.keys(actionsRef.current)[0];
-      if (!first) return;
-      target = first;
-    }
-    if (target === currentAnim.current) return;
-
-    const next = actionsRef.current[target];
-    const prev = actionsRef.current[currentAnim.current];
-
-    if (next && prev && prev !== next) {
-      next.reset().fadeIn(FADE_TIME).play();
-      prev.fadeOut(FADE_TIME);
-    } else if (next) {
-      next.reset().play();
-    }
-
-    currentAnim.current = target;
-  }, [player.animation]);
+  // Per-frame state.
+  const phaseRef = useRef(0);
+  const lastPosRef = useRef<{ x: number; z: number } | null>(null);
+  const tmpQ = useMemo(() => new THREE.Quaternion(), []);
+  const targetQ = useMemo(() => new THREE.Quaternion(), []);
+  const addQ = useMemo(() => new THREE.Quaternion(), []);
 
   useFrame((_, rawDelta) => {
     const dt = Math.min(rawDelta, 0.066);
-    mixerRef.current?.update(dt);
-
     const g = outerRef.current;
     if (!g) return;
     g.position.set(player.position.x, player.position.y, player.position.z);
     g.rotation.y = player.rotation.y;
+
+    if (!rig || !clone) return;
+
+    // Estimate planar speed from position delta — drives stride frequency.
+    const prev = lastPosRef.current;
+    const cur = { x: player.position.x, z: player.position.z };
+    let speed = 0;
+    if (prev) {
+      const dx = cur.x - prev.x;
+      const dz = cur.z - prev.z;
+      speed = Math.sqrt(dx * dx + dz * dz) / Math.max(dt, 1e-4);
+    }
+    lastPosRef.current = cur;
+
+    let state = player.animation ?? "idle";
+    if (state !== "jump" && state !== "fall") {
+      // Disambiguate idle/walk/run from measured speed; trust state if it
+      // already says walk/run (server may set it explicitly).
+      if (state !== "walk" && state !== "run") {
+        if (speed > 6) state = "run";
+        else if (speed > 0.4) state = "walk";
+        else state = "idle";
+      }
+    }
+
+    // Phase rate: idle slow, walk medium scaled by speed, run fast.
+    let rate = 1.2;
+    if (state === "walk") rate = 3.0 + Math.min(speed, 6) * 0.5;
+    else if (state === "run") rate = 6.5 + Math.min(speed, 12) * 0.4;
+    else if (state === "jump" || state === "fall") rate = 0;
+
+    phaseRef.current += dt * rate;
+    const intensity = state === "idle" ? 1 : Math.min(1, 0.4 + speed * 0.15);
+
+    const pose = poseFor(state, phaseRef.current, intensity);
+    const blend = 1 - Math.pow(0.001, dt); // ~exp slerp, frame-rate independent
+
+    const apply = (bone: THREE.Bone | null, e: THREE.Euler | undefined) => {
+      if (!bone) return;
+      const bq = bindQ.get(bone);
+      if (!bq) return;
+      if (!e) {
+        // Settle back to bind pose.
+        bone.quaternion.slerp(bq, blend);
+        return;
+      }
+      addQ.setFromEuler(e);
+      targetQ.copy(bq).multiply(addQ);
+      tmpQ.copy(bone.quaternion).slerp(targetQ, blend);
+      bone.quaternion.copy(tmpQ);
+    };
+
+    apply(rig.spine, pose.spine);
+    apply(rig.head, pose.head);
+    apply(rig.leftArm, pose.leftArm);
+    apply(rig.rightArm, pose.rightArm);
+    apply(rig.leftForeArm, pose.leftForeArm);
+    apply(rig.rightForeArm, pose.rightForeArm);
+    apply(rig.leftUpLeg, pose.leftUpLeg);
+    apply(rig.rightUpLeg, pose.rightUpLeg);
+    apply(rig.leftLeg, pose.leftLeg);
+    apply(rig.rightLeg, pose.rightLeg);
   });
 
-  const clone = cloneRef.current;
-  if (!clone) return <AvatarPlaceholder player={player} />;
+  // Log rig once for debugging.
+  useEffect(() => {
+    if (!rig) return;
+    const found: string[] = [];
+    const missing: string[] = [];
+    (Object.entries(rig) as [string, THREE.Bone | null][]).forEach(([k, b]) => {
+      (b ? found : missing).push(b ? `${k}=${b.name}` : k);
+    });
+    console.log(`[avatar/rig] found: ${found.join(", ")}`);
+    if (missing.length) console.warn(`[avatar/rig] missing: ${missing.join(", ")}`);
+  }, [rig]);
 
+  if (!clone) return <AvatarPlaceholder player={player} />;
   const s = _library?.displayScale ?? 1;
 
   return (
     <group ref={outerRef}>
-      {/* Scale the clone so the avatar is exactly TARGET_HEIGHT units tall */}
       <group scale={[s, s, s]}>
         <primitive object={clone} />
       </group>
-      <Html
-        position={[0, LABEL_HEIGHT, 0]}
-        center
-        distanceFactor={8}
-        zIndexRange={[100, 0]}
-        sprite
-      >
+      <Html position={[0, LABEL_HEIGHT, 0]} center distanceFactor={8} zIndexRange={[100, 0]} sprite>
         <div className="px-2 py-0.5 rounded-md bg-black/70 text-white text-xs font-medium whitespace-nowrap pointer-events-none select-none">
           {player.name}
         </div>
@@ -380,12 +365,12 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
   );
 }
 
-// ── Public component ──────────────────────────────────────────────────────────
+// ── Public component ─────────────────────────────────────────────────────────
 export default function Avatar({
   player,
   isLocal = false,
 }: {
-  player:   RenderPlayer;
+  player: RenderPlayer;
   isLocal?: boolean;
 }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
