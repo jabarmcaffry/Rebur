@@ -39,10 +39,23 @@ export type ContainerName =
   | "Players/StarterInventory"
   | "Players/StarterData"
   | "Players/StarterCharacter"
-  | "Players/StarterGui"
+  | "UI"
+  | "UI/Player"
+  | "UI/Global"
+  | "UI/Components"
   | "Assets"
   | "Assets/Shared"
+  | "Assets/Shared/Models"
+  | "Assets/Shared/Audio"
+  | "Assets/Shared/Textures"
+  | "Assets/Shared/Animations"
+  | "Assets/Shared/Data"
   | "Assets/Server"
+  | "Assets/Server/Models"
+  | "Assets/Server/Audio"
+  | "Assets/Server/Textures"
+  | "Assets/Server/Animations"
+  | "Assets/Server/Data"
   | "Data"
   | "Data/Session"
   | "Data/Store"
@@ -52,7 +65,7 @@ export type ContainerName =
   | "Scripts/Shared"
   | "Teams"
   | "Chat"
-  | "Sound";
+  | "Network";
 
 export type ObjectProperties = {
   anchored: boolean;
@@ -260,9 +273,10 @@ export type GameAPI = {
   objects: Record<string, RuntimeObject>;
   workspace: Record<string, RuntimeObject>;
   lighting: Record<string, RuntimeObject>;
-  replicatedStorage: Record<string, RuntimeObject>;
-  serverScriptService: Record<string, RuntimeObject>;
-  starterPlayer: Record<string, RuntimeObject>;
+  assets: {
+    shared: Record<string, RuntimeObject>;
+    server: Record<string, RuntimeObject>;
+  };
   players: Record<string, RuntimeObject>;
   player: RuntimePlayer;
   input: RuntimeInput;

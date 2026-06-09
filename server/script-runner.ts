@@ -899,6 +899,28 @@ export class ScriptRunner {
       const c = o.container ?? "Workspace";
       return c === "Workspace" || c === "Scene" || c === "";
     };
+
+    // Helper — true for any Assets/Shared sub-container
+    const isAssetsSharedObj = (c: string | null | undefined) => {
+      if (!c) return false;
+      return c === "Assets/Shared" ||
+        c === "Assets/Shared/Models" ||
+        c === "Assets/Shared/Audio" ||
+        c === "Assets/Shared/Textures" ||
+        c === "Assets/Shared/Animations" ||
+        c === "Assets/Shared/Data";
+    };
+
+    // Helper — true for any Assets/Server sub-container
+    const isAssetsServerObj = (c: string | null | undefined) => {
+      if (!c) return false;
+      return c === "Assets/Server" ||
+        c === "Assets/Server/Models" ||
+        c === "Assets/Server/Audio" ||
+        c === "Assets/Server/Textures" ||
+        c === "Assets/Server/Animations" ||
+        c === "Assets/Server/Data";
+    };
     const reburWorkspace = {
       find(name: string) {
         const obj = runner.objects.get(name);
@@ -1230,44 +1252,44 @@ export class ScriptRunner {
       },
     };
 
-    // ── Rebur.ReplicatedStorage — shared templates visible to all scripts ─
+    // ── Rebur.Assets.Shared — shared templates visible to all scripts ─────
     // WARNING: Do NOT store secret/server-only data here — it replicates to
-    // all clients, just like Roblox's ReplicatedStorage. Use ServerStorage instead.
-    const reburReplicatedStorage = {
+    // all clients. Use Assets.Server for server-only data.
+    const reburAssetsShared = {
       find(name: string) {
         const obj = runner.objects.get(name);
-        return (obj && !obj._destroyed && obj.container === "ReplicatedStorage") ? makeEntityProxy(obj) : null;
+        return (obj && !obj._destroyed && isAssetsSharedObj(obj.container)) ? makeEntityProxy(obj) : null;
       },
       get(id: string) {
         for (const obj of runner.objects.values()) {
-          if (obj.id === id && !obj._destroyed && obj.container === "ReplicatedStorage") return makeEntityProxy(obj);
+          if (obj.id === id && !obj._destroyed && isAssetsSharedObj(obj.container)) return makeEntityProxy(obj);
         }
         return null;
       },
       all() {
         return Array.from(runner.objects.values())
-          .filter(o => !o._destroyed && o.container === "ReplicatedStorage")
+          .filter(o => !o._destroyed && isAssetsSharedObj(o.container))
           .map(o => makeEntityProxy(o));
       },
     };
 
-    // ── Rebur.ServerStorage — server-only templates/data ──────────────────
-    // Safe for server-only data. Never replicated to clients, similar to
-    // Roblox's ServerStorage. Only accessible from server scripts.
-    const reburServerStorage = {
+    // ── Rebur.Assets.Server — server-only templates/data ──────────────────
+    // Safe for server-only data. Never replicated to clients.
+    // Only accessible from server scripts.
+    const reburAssetsServer = {
       find(name: string) {
         const obj = runner.objects.get(name);
-        return (obj && !obj._destroyed && obj.container === "ServerStorage") ? makeEntityProxy(obj) : null;
+        return (obj && !obj._destroyed && isAssetsServerObj(obj.container)) ? makeEntityProxy(obj) : null;
       },
       get(id: string) {
         for (const obj of runner.objects.values()) {
-          if (obj.id === id && !obj._destroyed && obj.container === "ServerStorage") return makeEntityProxy(obj);
+          if (obj.id === id && !obj._destroyed && isAssetsServerObj(obj.container)) return makeEntityProxy(obj);
         }
         return null;
       },
       all() {
         return Array.from(runner.objects.values())
-          .filter(o => !o._destroyed && o.container === "ServerStorage")
+          .filter(o => !o._destroyed && isAssetsServerObj(o.container))
           .map(o => makeEntityProxy(o));
       },
     };
@@ -1286,10 +1308,12 @@ export class ScriptRunner {
         runner.globalHandlers.set(key, (runner.globalHandlers.get(key)??[]).filter(h=>h!==fn));
       },
 
-      Workspace:         reburWorkspace,
-      Lighting:          reburLighting,
-      ReplicatedStorage: reburReplicatedStorage,
-      ServerStorage:     reburServerStorage,
+      Workspace:  reburWorkspace,
+      Lighting:   reburLighting,
+      Assets: {
+        Shared: reburAssetsShared,
+        Server: reburAssetsServer,
+      },
       Players:    reburPlayers,
       State:      reburState,
       DataStore:  reburDataStore,

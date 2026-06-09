@@ -257,9 +257,18 @@ interface TweenFn {
   (target: any, to: Record<string, any>, duration: number, easing?: string, onDone?: () => void): () => void;
 }
 
+interface AssetsSharedAPI extends SceneContainer {}
+interface AssetsServerAPI extends SceneContainer {}
+interface AssetsContainer {
+  readonly Shared: AssetsSharedAPI;
+  readonly Server: AssetsServerAPI;
+}
+
 // ─── Root global ──────────────────────────────────────────────────────────────
 interface ReburAPI {
-  readonly Scene: SceneContainer;
+  readonly Workspace: SceneContainer;
+  readonly Lighting: SceneContainer;
+  readonly Assets: AssetsContainer;
   readonly Players: PlayersContainer;
   readonly State: StateAPI;
   readonly DataStore: DataStoreAPI;
@@ -305,7 +314,7 @@ const COMPLETIONS: CompletionDef[] = [
     label: "Rebur",
     kind: K.Variable,
     detail: "ReburAPI — the only global",
-    doc: "The single global entry point for the Rebur engine. All subsystems hang off it:\n\n- Rebur.Workspace — live 3D entity container (rendered + simulated)\n- Rebur.Lighting — lighting entity container\n- Rebur.ReplicatedStorage — shared templates visible to all (⚠️ not for secrets)\n- Rebur.ServerStorage — server-only storage, never replicated to clients\n- Rebur.Players — player entity container\n- Rebur.State — shared key-value store\n- Rebur.Gui — HUD overlay\n- Rebur.Sound — audio\n- Rebur.Tween — property animation\n- Rebur.Camera — camera control\n- Rebur.Input — keyboard & mouse\n- Rebur.Physics — global physics settings\n- Rebur.RunService — game loop phases\n- Rebur.Network — multiplayer messaging\n- Rebur.Tags — entity tag queries",
+    doc: "The single global entry point for the Rebur engine. All subsystems hang off it:\n\n- Rebur.Workspace — live 3D entity container (rendered + simulated)\n- Rebur.Lighting — lighting entity container\n- Rebur.Assets.Shared — shared templates visible to all clients\n- Rebur.Assets.Server — server-only storage, never replicated to clients\n- Rebur.Players — player entity container\n- Rebur.State — shared key-value store (session)\n- Rebur.DataStore — persistent cross-session storage\n- Rebur.Gui — HUD overlay\n- Rebur.Sound — audio\n- Rebur.Tween — property animation\n- Rebur.Camera — camera control\n- Rebur.Input — keyboard & mouse\n- Rebur.Physics — global physics settings\n- Rebur.RunService — game loop phases\n- Rebur.Network — multiplayer messaging\n- Rebur.Tags — entity tag queries",
     insert: "Rebur",
   },
 
@@ -407,52 +416,75 @@ const COMPLETIONS: CompletionDef[] = [
     insert: "Rebur.Lighting.all()",
   },
 
-  // ─── Rebur.ReplicatedStorage ──────────────────────────────────────────────
+  // ─── Rebur.Assets ────────────────────────────────────────────────────────
   {
-    label: "Rebur.ReplicatedStorage",
+    label: "Rebur.Assets",
     kind: K.Variable,
-    detail: "ReplicatedStorage — shared templates (visible to all)",
-    doc: "Query API for entities in ReplicatedStorage.\n\n⚠️ Do NOT store sensitive server-only data here — this container is visible to all clients, just like Roblox's ReplicatedStorage.\n\nUse Rebur.ServerStorage for data that should stay server-side.\n\nMethods:\n- find(name) — look up a template by name\n- get(id) — look up by immutable id\n- all() — all templates",
-    insert: "Rebur.ReplicatedStorage",
+    detail: "AssetsContainer — { Shared, Server }",
+    doc: "The Assets namespace groups reusable game content into two sub-containers:\n\n- Rebur.Assets.Shared — replicated to all clients (models, audio, textures, animations)\n- Rebur.Assets.Server — server-only assets, never sent to clients",
+    insert: "Rebur.Assets",
   },
   {
-    label: "Rebur.ReplicatedStorage.find",
+    label: "Rebur.Assets.Shared",
+    kind: K.Variable,
+    detail: "AssetsSharedAPI — shared templates (visible to all clients)",
+    doc: "Query API for assets in Assets/Shared and its sub-folders (Models, Audio, Textures, Animations, Data).\n\nReplicated to all clients — do NOT store sensitive server-only data here.\n\nMethods:\n- find(name) — look up a template by name\n- get(id) — look up by immutable id\n- all() — all templates in Assets/Shared",
+    insert: "Rebur.Assets.Shared",
+  },
+  {
+    label: "Rebur.Assets.Shared.find",
     kind: K.Function,
-    detail: "Rebur.ReplicatedStorage.find(name) → Entity | null",
-    doc: "Look up a template entity by name in ReplicatedStorage.\n\n⚠️ Not safe for server-only secrets — use Rebur.ServerStorage instead.",
-    insert: "Rebur.ReplicatedStorage.find(\"${1:Name}\")",
+    detail: "Rebur.Assets.Shared.find(name) → Entity | null",
+    doc: "Look up a shared asset by name.\n\nFor sensitive server-only data use Rebur.Assets.Server instead.",
+    insert: "Rebur.Assets.Shared.find(\"${1:Name}\")",
     snippet: true,
   },
   {
-    label: "Rebur.ReplicatedStorage.all",
+    label: "Rebur.Assets.Shared.get",
     kind: K.Function,
-    detail: "Rebur.ReplicatedStorage.all() → Entity[]",
-    doc: "Return all entities in ReplicatedStorage.",
-    insert: "Rebur.ReplicatedStorage.all()",
+    detail: "Rebur.Assets.Shared.get(id) → Entity | null",
+    doc: "Look up a shared asset by immutable id.",
+    insert: "Rebur.Assets.Shared.get(\"${1:id}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Assets.Shared.all",
+    kind: K.Function,
+    detail: "Rebur.Assets.Shared.all() → Entity[]",
+    doc: "Return all entities in Assets/Shared (and sub-folders).",
+    insert: "Rebur.Assets.Shared.all()",
   },
 
-  // ─── Rebur.ServerStorage ──────────────────────────────────────────────────
+  // ─── Rebur.Assets.Server ─────────────────────────────────────────────────
   {
-    label: "Rebur.ServerStorage",
+    label: "Rebur.Assets.Server",
     kind: K.Variable,
-    detail: "ServerStorage — server-only storage (never replicated)",
-    doc: "Query API for entities in ServerStorage.\n\nSafe for server-only data — never replicated to clients, similar to Roblox's ServerStorage.\n\nMethods:\n- find(name) — look up an object by name\n- get(id) — look up by immutable id\n- all() — all objects in ServerStorage",
-    insert: "Rebur.ServerStorage",
+    detail: "AssetsServerAPI — server-only assets (never replicated)",
+    doc: "Query API for assets in Assets/Server and its sub-folders (Models, Audio, Textures, Animations, Data).\n\nNever replicated to clients — safe for secrets, server-side configs, and private content.\n\nMethods:\n- find(name) — look up an asset by name\n- get(id) — look up by immutable id\n- all() — all assets in Assets/Server",
+    insert: "Rebur.Assets.Server",
   },
   {
-    label: "Rebur.ServerStorage.find",
+    label: "Rebur.Assets.Server.find",
     kind: K.Function,
-    detail: "Rebur.ServerStorage.find(name) → Entity | null",
-    doc: "Look up a server-only object by name. Safe for sensitive data — never sent to clients.",
-    insert: "Rebur.ServerStorage.find(\"${1:Name}\")",
+    detail: "Rebur.Assets.Server.find(name) → Entity | null",
+    doc: "Look up a server-only asset by name. Never sent to clients.",
+    insert: "Rebur.Assets.Server.find(\"${1:Name}\")",
     snippet: true,
   },
   {
-    label: "Rebur.ServerStorage.all",
+    label: "Rebur.Assets.Server.get",
     kind: K.Function,
-    detail: "Rebur.ServerStorage.all() → Entity[]",
-    doc: "Return all entities in ServerStorage.",
-    insert: "Rebur.ServerStorage.all()",
+    detail: "Rebur.Assets.Server.get(id) → Entity | null",
+    doc: "Look up a server-only asset by immutable id.",
+    insert: "Rebur.Assets.Server.get(\"${1:id}\")",
+    snippet: true,
+  },
+  {
+    label: "Rebur.Assets.Server.all",
+    kind: K.Function,
+    detail: "Rebur.Assets.Server.all() → Entity[]",
+    doc: "Return all entities in Assets/Server (and sub-folders).",
+    insert: "Rebur.Assets.Server.all()",
   },
 
   // ─── Rebur.Players ───────────────────────────────────────────────────────

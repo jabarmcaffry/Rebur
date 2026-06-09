@@ -69,11 +69,22 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 \`\`\`
 Rebur                      ← single global
 ├── Workspace              ← live 3D world: rendered + simulated entities
-├── Players                ← player entity container
 ├── Lighting               ← lighting entity container (not simulated)
-├── ReplicatedStorage      ← shared templates visible to all scripts (NOT for secrets)
-├── ServerStorage          ← server-only templates/data, never replicated to clients
-├── State                  ← shared session key-value store
+├── Players                ← player entity container
+├── Assets
+│   ├── Shared             ← shared assets replicated to all clients (NOT for secrets)
+│   │   ├── Models         ← 3D model templates
+│   │   ├── Audio          ← audio assets
+│   │   ├── Textures       ← texture assets
+│   │   ├── Animations     ← animation assets
+│   │   └── Data           ← shared read-only config data
+│   └── Server             ← server-only assets, never replicated to clients
+│       ├── Models
+│       ├── Audio
+│       ├── Textures
+│       ├── Animations
+│       └── Data
+├── State                  ← shared session key-value store (resets each session)
 ├── DataStore              ← persistent cross-session storage
 ├── Gui                    ← shared HUD render layer (all players see)
 ├── Sound                  ← audio playback
