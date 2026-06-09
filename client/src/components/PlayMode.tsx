@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback, Suspense } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Grid } from "@react-three/drei";
+import * as THREE from "three";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   X, Terminal, Heart, Settings, MessageSquare, Send,
@@ -18,13 +19,184 @@ import Avatar from "@/components/play/Avatar";
 import ChaseCameraRig from "@/components/play/ChaseCameraRig";
 import { RenderClient } from "@/lib/render-client";
 import { ClientScriptRunner } from "@/lib/runtime/client-script-runner";
-import type { RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
+import type { RenderObject, RenderPlayer, RenderGuiElement, DebugDraw, ParticleEvent } from "@shared/render-types";
 
 interface ChatMessage {
   id: number;
   username: string;
   text: string;
   ts: number;
+}
+
+// ── DebugDrawLayer ────────────────────────────────────────────────────────────
+// Renders debug visualization (rays, points, boxes, spheres) inside the R3F scene.
+function DebugDrawLayer({ draws }: { draws: DebugDraw[] }) {
+  const groupRef = useRef<THREE.Group>(null!);
+  const expiry = useRef<Map<number, number>>(new Map());
+  const meshes = useRef<Map<number, THREE.Object3D>>(new Map());
+
+  useEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+
+    const now = performance.now() / 1000;
+    const seenIds = new Set<number>();
+
+    draws.forEach((d, i) => {
+      seenIds.add(i);
+      if (meshes.current.has(i)) return; // already rendered
+
+      let obj: THREE.Object3D | null = null;
+      const color = d.color ?? "#ffffff";
+
+      if (d.kind === "ray") {
+        const origin = new THREE.Vector3(d.origin.x, d.origin.y, d.origin.z);
+        const dir = d.direction
+          ? new THREE.Vector3(d.direction.x, d.direction.y, d.direction.z).normalize()
+          : new THREE.Vector3(0, 1, 0);
+        const end = origin.clone().addScaledVector(dir, d.length ?? 10);
+        const pts = [origin, end];
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color });
+        obj = new THREE.Line(geo, mat);
+      } else if (d.kind === "point") {
+        const geo = new THREE.SphereGeometry((d.radius ?? 0.12), 6, 6);
+        const mat = new THREE.MeshBasicMaterial({ color });
+        obj = new THREE.Mesh(geo, mat);
+        obj.position.set(d.origin.x, d.origin.y, d.origin.z);
+      } else if (d.kind === "box") {
+        const s = d.size ?? { x: 1, y: 1, z: 1 };
+        const geo = new THREE.BoxGeometry(s.x, s.y, s.z);
+        const mat = new THREE.MeshBasicMaterial({ color, wireframe: true });
+        obj = new THREE.Mesh(geo, mat);
+        obj.position.set(d.origin.x, d.origin.y, d.origin.z);
+      } else if (d.kind === "sphere") {
+        const geo = new THREE.SphereGeometry(d.radius ?? 0.5, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color, wireframe: true });
+        obj = new THREE.Mesh(geo, mat);
+        obj.position.set(d.origin.x, d.origin.y, d.origin.z);
+      }
+
+      if (obj) {
+        group.add(obj);
+        meshes.current.set(i, obj);
+        expiry.current.set(i, now + (d.duration ?? 0.05));
+      }
+    });
+
+    // Clean up expired
+    expiry.current.forEach((exp, id) => {
+      if (now > exp || !seenIds.has(id)) {
+        const m = meshes.current.get(id);
+        if (m) group.remove(m);
+        meshes.current.delete(id);
+        expiry.current.delete(id);
+      }
+    });
+  }, [draws]);
+
+  return <group ref={groupRef} />;
+}
+
+// ── ParticleLayer ──────────────────────────────────────────────────────────────
+// Renders particle bursts from the server particle event queue.
+
+interface LiveParticle {
+  id: number;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  color: string;
+  size: number;
+}
+
+let _particleSeq = 0;
+
+function ParticleLayer({ events, onDone }: { events: ParticleEvent[]; onDone: () => void }) {
+  const particles = useRef<LiveParticle[]>([]);
+  const pointsRef = useRef<THREE.Points>(null!);
+  const processed = useRef<Set<string>>(new Set());
+
+  // Spawn particles from new events
+  useEffect(() => {
+    events.forEach((ev) => {
+      const px = ev.position.x, py = ev.position.y, pz = ev.position.z;
+      const key = `${ev.id}`;
+      if (processed.current.has(key)) return;
+      processed.current.add(key);
+
+      const count = ev.count ?? 10;
+      const speed = ev.speed ?? 5;
+      const lifetime = ev.lifetime ?? 0.6;
+      const color = ev.color ?? "#ffffff";
+      const size = ev.size ?? 0.12;
+      const spread = ev.spread ?? Math.PI;
+
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = (Math.random() - 0.5) * spread;
+        const vel = new THREE.Vector3(
+          Math.cos(theta) * Math.cos(phi),
+          Math.sin(phi),
+          Math.sin(theta) * Math.cos(phi)
+        ).multiplyScalar(speed * (0.6 + Math.random() * 0.4));
+        particles.current.push({
+          id: _particleSeq++,
+          pos: new THREE.Vector3(px, py, pz),
+          vel,
+          life: lifetime,
+          maxLife: lifetime,
+          color,
+          size,
+        });
+      }
+    });
+    if (events.length > 0) {
+      processed.current.clear();
+    }
+  }, [events]);
+
+  useFrame(({ clock }, delta) => {
+    const pts = pointsRef.current;
+    if (!pts) return;
+
+    const dt = Math.min(delta, 0.05);
+    particles.current = particles.current.filter(p => {
+      p.pos.addScaledVector(p.vel, dt);
+      p.vel.y -= 6 * dt; // gravity
+      p.life -= dt;
+      return p.life > 0;
+    });
+
+    const count = particles.current.length;
+    const geo = pts.geometry;
+    const positions = new Float32Array(count * 3);
+    particles.current.forEach((p, i) => {
+      positions[i * 3]     = p.pos.x;
+      positions[i * 3 + 1] = p.pos.y;
+      positions[i * 3 + 2] = p.pos.z;
+    });
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setDrawRange(0, count);
+    geo.computeBoundingSphere();
+
+    if (count === 0 && events.length > 0) {
+      onDone();
+    }
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          args={[new Float32Array(0), 3]}
+        />
+      </bufferGeometry>
+      <pointsMaterial size={0.15} vertexColors={false} color="#ffffff" sizeAttenuation />
+    </points>
+  );
 }
 
 export default function PlayMode({
@@ -106,6 +278,15 @@ export default function PlayMode({
   // atan2(0, -1) = π.  Initialise to π so the very first input packet uses
   // the correct camera-relative direction even before ChaseCameraRig fires.
   const cameraYawRef = useRef(Math.PI);
+  // World-space camera position + forward (sent to server for Rebur.Camera ray helpers)
+  const cameraStateRef = useRef<{
+    pos: { x: number; y: number; z: number };
+    forward: { x: number; y: number; z: number };
+  }>({ pos: { x: 0, y: 10, z: 8 }, forward: { x: 0, y: 0, z: -1 } });
+
+  // Debug draws and particle events from server
+  const [debugDraws, setDebugDraws] = useState<DebugDraw[]>([]);
+  const [particleEvents, setParticleEvents] = useState<ParticleEvent[]>([]);
 
   // Connect to server and set up callbacks
   useEffect(() => {
@@ -197,13 +378,15 @@ export default function PlayMode({
       const dt = (now - lastTime) / 1000;
       lastTime = now;
 
-      // Send inputs to server
+      // Send inputs to server (including camera world-space state)
       renderClient.updateInput(
         inputRef.current.moveX,
         inputRef.current.moveZ,
         inputRef.current.jump,
         cameraYawRef.current,
-        false
+        false,
+        cameraStateRef.current.pos,
+        cameraStateRef.current.forward,
       );
       inputRef.current.jump = false; // Reset jump after sending
 
@@ -213,6 +396,15 @@ export default function PlayMode({
       setRenderPlayers(interp.players);
       setLocalPlayer(renderClient.getLocalPlayer());
       setTick((t) => (t + 1) % 1000000);
+
+      // Pick up debug draws and particle events from server
+      if (renderClient.debugDraws.length > 0) {
+        setDebugDraws([...renderClient.debugDraws]);
+      }
+      if (renderClient.particleEvents.length > 0) {
+        setParticleEvents(prev => [...prev, ...renderClient.particleEvents]);
+        renderClient.particleEvents = [];
+      }
 
       // FPS counter
       const fpsd = fpsRef.current;
@@ -443,12 +635,17 @@ export default function PlayMode({
             {renderPlayers.map((rp) => (
               <Avatar key={rp.id} player={rp} isLocal={false} />
             ))}
-            <ChaseCameraRig 
-              player={player} 
+            <ChaseCameraRig
+              player={player}
               shiftLock={shiftLock}
               serverCamera={renderClient.camera}
               onCameraYawChange={(yaw) => { cameraYawRef.current = yaw; }}
+              onCameraStateChange={(pos, fwd) => {
+                cameraStateRef.current = { pos, forward: fwd };
+              }}
             />
+            <DebugDrawLayer draws={debugDraws} />
+            <ParticleLayer events={particleEvents} onDone={() => setParticleEvents([])} />
           </Canvas>
         </PlayCanvasErrorBoundary>
       ) : (

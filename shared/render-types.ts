@@ -50,6 +50,7 @@ export interface RenderPlayer {
   motors: {
     [slot: string]: {
       objectId: string;
+      objectName: string;
       offset: Vec3;
       rotation: Vec3;
     } | null;
@@ -75,6 +76,44 @@ export interface RenderGuiElement {
   maxValue?: number;
   visible: boolean;
   clickable?: boolean;
+}
+
+// ── Debug Visualization ───────────────────────────────────────────────────────
+
+export interface DebugDraw {
+  id: string;
+  kind: "ray" | "point" | "box" | "sphere";
+  origin: Vec3;
+  direction?: Vec3;   // for "ray"
+  length?: number;    // for "ray"
+  size?: Vec3;        // for "box" (full extents)
+  radius?: number;    // for "point" / "sphere"
+  color: string;
+  duration: number;   // seconds; 0 = one render frame
+}
+
+// ── Particle Events ───────────────────────────────────────────────────────────
+
+export interface ParticleEvent {
+  id: string;
+  position: Vec3;
+  effectType:
+    | "explosion"
+    | "muzzleFlash"
+    | "smoke"
+    | "sparkle"
+    | "hit"
+    | "pickup"
+    | "fire"
+    | "blood"
+    | "custom";
+  color?: string;
+  count?: number;
+  speed?: number;
+  size?: number;
+  lifetime?: number;
+  direction?: Vec3;
+  spread?: number;
 }
 
 // ── Complete Render State ─────────────────────────────────────────────────────
@@ -103,6 +142,8 @@ export interface RenderState {
     fogNear?: number;
     fogFar?: number;
   };
+  debugDraws?: DebugDraw[];
+  particleEvents?: ParticleEvent[];
 }
 
 // ── WebSocket Protocol Messages ───────────────────────────────────────────────
@@ -125,7 +166,8 @@ export type ServerMessage =
 // Client → Server
 export type ClientMessage =
   | { type: "join"; sessionId: string; gameId: string; playerName: string; colors?: Record<string, string>; userId?: string }
-  | { type: "input"; moveX: number; moveZ: number; jump: boolean; camY: number; sprint?: boolean }
+  | { type: "input"; moveX: number; moveZ: number; jump: boolean; camY: number; sprint?: boolean;
+      cameraPos?: Vec3; cameraForward?: Vec3 }
   | { type: "keyDown"; key: string }
   | { type: "keyUp"; key: string }
   | { type: "guiClick"; elementId: string }

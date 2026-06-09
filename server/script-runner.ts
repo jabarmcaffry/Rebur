@@ -124,7 +124,7 @@ export interface GuiElement {
   id: string;
   kind: "text" | "button" | "image" | "bar";
   text?: string;
-  x: number; y: number;
+  x?: number; y?: number;
   width?: number; height?: number;
   anchor?: string;
   color?: string;
@@ -255,6 +255,13 @@ export class ScriptRunner {
   private playerInventory = new Map<string, InventoryData>();
   private playerMotors    = new Map<string, Map<string, ScriptObjState>>();
   private playerAnimators = new Map<string, AnimatorData>();
+
+  // Debug visualization & particles (drained each tick by GameRoom)
+  debugDraws:     any[] = [];
+  particleEvents: any[] = [];
+
+  // Per-player camera state sent from client each tick
+  private playerCameraStates = new Map<string, { pos: {x:number;y:number;z:number}; forward: {x:number;y:number;z:number} }>();
 
   constructor(
     private readonly objects: Map<string, ScriptObjState>,
@@ -546,6 +553,24 @@ export class ScriptRunner {
         },
         getAttribute(key: string) {
           return obj._attrs?.get(key);
+        },
+        get particles() {
+          return {
+            emit(opts?: any) {
+              runner.particleEvents.push({
+                id: `pe_${++runner.timerIdCounter}`,
+                position: { x: obj.positionX, y: obj.positionY, z: obj.positionZ },
+                effectType: opts?.effectType ?? opts?.type ?? "sparkle",
+                color: opts?.color,
+                count: opts?.count,
+                speed: opts?.speed,
+                size: opts?.size,
+                lifetime: opts?.lifetime,
+                direction: opts?.direction,
+                spread: opts?.spread,
+              });
+            },
+          };
         },
       };
 
@@ -1038,6 +1063,78 @@ export class ScriptRunner {
         return best;
       },
 
+      // ── AABB ray cast — ALL hits sorted by distance ────────────────────
+      raycastAll(origin: any, direction: any, opts?: any) {
+        const ox = +(origin?.x??0), oy = +(origin?.y??0), oz = +(origin?.z??0);
+        const maxDist = +(opts?.maxDistance ?? 500);
+        const rx = +(direction?.x??0), ry = +(direction?.y??0), rz = +(direction?.z??0);
+        const rlen = Math.sqrt(rx*rx+ry*ry+rz*rz)||1;
+        const dx=rx/rlen, dy=ry/rlen, dz=rz/rlen;
+        const ignoreNames = new Set<string>(((opts?.ignore??[]) as any[]).map((e:any)=>e?.name).filter(Boolean));
+        const filterTag: string|undefined = opts?.tag;
+        const results: any[] = [];
+
+        for (const obj of runner.objects.values()) {
+          if (obj._destroyed) continue;
+          if (ignoreNames.has(obj.name)) continue;
+          if (filterTag && !(runner.tagMap.get(filterTag)?.has(obj.name))) continue;
+
+          const hx=(obj.scaleX??1)/2, hy=(obj.scaleY??1)/2, hz=(obj.scaleZ??1)/2;
+          let tMin=0, tMax=maxDist, normX=0, normY=1, normZ=0;
+
+          if(Math.abs(dx)>1e-10){let t1=(obj.positionX-hx-ox)/dx,t2=(obj.positionX+hx-ox)/dx;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin){tMin=t1;normX=dx<0?1:-1;normY=0;normZ=0;}if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(ox<obj.positionX-hx||ox>obj.positionX+hx)continue;
+          if(Math.abs(dy)>1e-10){let t1=(obj.positionY-hy-oy)/dy,t2=(obj.positionY+hy-oy)/dy;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin){tMin=t1;normX=0;normY=dy<0?1:-1;normZ=0;}if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(oy<obj.positionY-hy||oy>obj.positionY+hy)continue;
+          if(Math.abs(dz)>1e-10){let t1=(obj.positionZ-hz-oz)/dz,t2=(obj.positionZ+hz-oz)/dz;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin){tMin=t1;normX=0;normY=0;normZ=dz<0?1:-1;}if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(oz<obj.positionZ-hz||oz>obj.positionZ+hz)continue;
+
+          if(tMin>=0){
+            results.push({
+              entity: makeEntityProxy(obj),
+              distance: tMin,
+              point: {x:ox+dx*tMin, y:oy+dy*tMin, z:oz+dz*tMin},
+              normal: {x:normX, y:normY, z:normZ},
+            });
+          }
+        }
+        results.sort((a,b)=>a.distance-b.distance);
+        return opts?.limit ? results.slice(0, +(opts.limit)) : results;
+      },
+
+      // ── Multiple simultaneous raycasts (spread, shotgun, etc.) ─────────
+      multiRaycast(rays: any[], opts?: any) {
+        if (!Array.isArray(rays)) return [];
+        const ws = reburWorkspace;
+        return rays.map(r => ws.raycast(
+          r?.origin ?? r?.from ?? {x:0,y:0,z:0},
+          r?.direction ?? r?.dir ?? {x:0,y:0,z:1},
+          opts
+        ));
+      },
+
+      // ── Sphere sweep — AABB expanded by radius, good for hit scan ──────
+      sphereCast(origin: any, radius: number, direction: any, opts?: any) {
+        const ox = +(origin?.x??0), oy = +(origin?.y??0), oz = +(origin?.z??0);
+        const r  = Math.max(0, +(radius ?? 0.5));
+        const maxDist = +(opts?.maxDistance ?? 500);
+        const rx = +(direction?.x??0), ry = +(direction?.y??0), rz = +(direction?.z??0);
+        const rlen = Math.sqrt(rx*rx+ry*ry+rz*rz)||1;
+        const dx=rx/rlen, dy=ry/rlen, dz=rz/rlen;
+        const ignoreNames = new Set<string>(((opts?.ignore??[]) as any[]).map((e:any)=>e?.name).filter(Boolean));
+        let best: any = null;
+
+        for (const obj of runner.objects.values()) {
+          if (obj._destroyed || ignoreNames.has(obj.name)) continue;
+          const hx=(obj.scaleX??1)/2+r, hy=(obj.scaleY??1)/2+r, hz=(obj.scaleZ??1)/2+r;
+          let tMin=0, tMax=maxDist;
+          if(Math.abs(dx)>1e-10){let t1=(obj.positionX-hx-ox)/dx,t2=(obj.positionX+hx-ox)/dx;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin)tMin=t1;if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(ox<obj.positionX-hx||ox>obj.positionX+hx)continue;
+          if(Math.abs(dy)>1e-10){let t1=(obj.positionY-hy-oy)/dy,t2=(obj.positionY+hy-oy)/dy;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin)tMin=t1;if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(oy<obj.positionY-hy||oy>obj.positionY+hy)continue;
+          if(Math.abs(dz)>1e-10){let t1=(obj.positionZ-hz-oz)/dz,t2=(obj.positionZ+hz-oz)/dz;if(t1>t2){const s=t1;t1=t2;t2=s;}if(t1>tMin)tMin=t1;if(t2<tMax)tMax=t2;if(tMax<tMin)continue;}else if(oz<obj.positionZ-hz||oz>obj.positionZ+hz)continue;
+          if(tMin>=0&&(!best||tMin<best.distance)){
+            best={entity:makeEntityProxy(obj),distance:tMin,point:{x:ox+dx*tMin,y:oy+dy*tMin,z:oz+dz*tMin},normal:{x:0,y:1,z:0},radius:r};
+          }
+        }
+        return best;
+      },
+
       create(opts: any) {
         const name = opts.name ?? `Part_${++runner.timerIdCounter}`;
         const px = +(opts.position?.x ?? 0);
@@ -1165,11 +1262,230 @@ export class ScriptRunner {
       return () => { entry.cancelled = true; };
     };
 
-    // ── Rebur.Camera (plain writable proxy — no preset modes) ─────────────
-    const reburCamera = new Proxy(runner.cameraSettings, {
-      get(t, key: string) { return t[key]; },
-      set(t, key: string, val) { t[key] = val; return true; },
-    });
+    // ── Rebur.Camera — writable settings + per-player ray helpers ─────────
+    const reburCamera = {
+      // ── Writable global camera settings ────────────────────────────────
+      get mode()     { return runner.cameraSettings.mode ?? "thirdPerson"; },
+      set mode(v: any)     { runner.cameraSettings.mode = v; },
+      get fov()      { return runner.cameraSettings.fov ?? 60; },
+      set fov(v: any)      { runner.cameraSettings.fov = +v; },
+      get distance() { return runner.cameraSettings.distance ?? 6; },
+      set distance(v: any) { runner.cameraSettings.distance = +v; },
+      get position() { return runner.cameraSettings.position; },
+      set position(v: any) { runner.cameraSettings.position = v; },
+      get lookAt()   { return runner.cameraSettings.lookAt; },
+      set lookAt(v: any)   { runner.cameraSettings.lookAt = v; },
+
+      // ── Per-player camera state (sent by client each tick) ─────────────
+      // getPosition / getForward — world-space camera position & direction
+      getPosition(player: any): {x:number;y:number;z:number} {
+        const id = typeof player === "string" ? player : player?.id;
+        return runner.playerCameraStates.get(id)?.pos ?? { x: 0, y: 10, z: 10 };
+      },
+      getForward(player: any): {x:number;y:number;z:number} {
+        const id = typeof player === "string" ? player : player?.id;
+        return runner.playerCameraStates.get(id)?.forward ?? { x: 0, y: 0, z: -1 };
+      },
+
+      // ── Ray helpers ────────────────────────────────────────────────────
+      // Camera-forward ray — for aim-based shooting (first-person aim, auto-aim)
+      getForwardRay(player: any): { origin:{x:number;y:number;z:number}; direction:{x:number;y:number;z:number} } | null {
+        const id = typeof player === "string" ? player : player?.id;
+        const state = runner.playerCameraStates.get(id);
+        if (!state) return null;
+        return { origin: { ...state.pos }, direction: { ...state.forward } };
+      },
+
+      // Screen-point ray — nx/ny are normalized device coords [-1,1]
+      // To convert mouse: nx = mouseX/width*2-1, ny = 1-mouseY/height*2
+      // Perfect for mouse-click picking in 3D space
+      screenPointToRay(player: any, nx: number, ny: number, aspectRatio = 16/9): { origin:{x:number;y:number;z:number}; direction:{x:number;y:number;z:number} } | null {
+        const id = typeof player === "string" ? player : player?.id;
+        const state = runner.playerCameraStates.get(id);
+        if (!state) return null;
+
+        const fov = runner.cameraSettings.fov ?? 60;
+        const tanHalfFov = Math.tan((fov * Math.PI / 180) / 2);
+        const fw = state.forward;
+
+        // Derive right as forward × worldUp (fallback to worldRight if near vertical)
+        const wy = Math.abs(fw.y) < 0.98 ? { x:0, y:1, z:0 } : { x:1, y:0, z:0 };
+        const rcx = fw.y*wy.z - fw.z*wy.y;
+        const rcy = fw.z*wy.x - fw.x*wy.z;
+        const rcz = fw.x*wy.y - fw.y*wy.x;
+        const rlen = Math.sqrt(rcx*rcx+rcy*rcy+rcz*rcz)||1;
+        const rx=rcx/rlen, ry=rcy/rlen, rz=rcz/rlen;
+
+        // Up = right × forward
+        const ux = ry*fw.z - rz*fw.y;
+        const uy = rz*fw.x - rx*fw.z;
+        const uz = rx*fw.y - ry*fw.x;
+
+        const dirX = fw.x + nx*tanHalfFov*aspectRatio*rx + ny*tanHalfFov*ux;
+        const dirY = fw.y + nx*tanHalfFov*aspectRatio*ry + ny*tanHalfFov*uy;
+        const dirZ = fw.z + nx*tanHalfFov*aspectRatio*rz + ny*tanHalfFov*uz;
+        const dlen = Math.sqrt(dirX*dirX+dirY*dirY+dirZ*dirZ)||1;
+
+        return { origin: { ...state.pos }, direction: { x:dirX/dlen, y:dirY/dlen, z:dirZ/dlen } };
+      },
+
+      // Viewport-point ray — vx/vy are 0-1 (top-left origin)
+      viewportPointToRay(player: any, vx: number, vy: number, aspectRatio = 16/9) {
+        return reburCamera.screenPointToRay(player, vx*2-1, 1-vy*2, aspectRatio);
+      },
+    };
+
+    // ── Rebur.Debug — runtime visualization (like Unity Debug.DrawRay) ────
+    const reburDebug = {
+      drawRay(origin: any, direction: any, opts?: any) {
+        const ox=+(origin?.x??0), oy=+(origin?.y??0), oz=+(origin?.z??0);
+        const dx=+(direction?.x??0), dy=+(direction?.y??0), dz=+(direction?.z??0);
+        const dl=Math.sqrt(dx*dx+dy*dy+dz*dz)||1;
+        runner.debugDraws.push({
+          id: `dd_${++runner.timerIdCounter}`,
+          kind: "ray",
+          origin: {x:ox,y:oy,z:oz},
+          direction: {x:dx/dl,y:dy/dl,z:dz/dl},
+          length: +(opts?.length??opts?.maxDistance??10),
+          color: opts?.color ?? "#00ff00",
+          duration: +(opts?.duration??0),
+        });
+      },
+      drawPoint(position: any, opts?: any) {
+        runner.debugDraws.push({
+          id: `dd_${++runner.timerIdCounter}`,
+          kind: "point",
+          origin: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          radius: +(opts?.radius??opts?.size??0.15),
+          color: opts?.color ?? "#ff0000",
+          duration: +(opts?.duration??0),
+        });
+      },
+      drawBox(center: any, size: any, opts?: any) {
+        runner.debugDraws.push({
+          id: `dd_${++runner.timerIdCounter}`,
+          kind: "box",
+          origin: {x:+(center?.x??0),y:+(center?.y??0),z:+(center?.z??0)},
+          size: {x:+(size?.x??1),y:+(size?.y??1),z:+(size?.z??1)},
+          color: opts?.color ?? "#0088ff",
+          duration: +(opts?.duration??0),
+        });
+      },
+      drawSphere(center: any, radius: number, opts?: any) {
+        runner.debugDraws.push({
+          id: `dd_${++runner.timerIdCounter}`,
+          kind: "sphere",
+          origin: {x:+(center?.x??0),y:+(center?.y??0),z:+(center?.z??0)},
+          radius: +(radius??0.5),
+          color: opts?.color ?? "#ffaa00",
+          duration: +(opts?.duration??0),
+        });
+      },
+      clear() { runner.debugDraws = []; },
+    };
+
+    // ── Rebur.Particles — visual effects emitter ───────────────────────────
+    const reburParticles = {
+      emit(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: opts?.effectType??opts?.type??"sparkle",
+          color: opts?.color,
+          count: opts?.count,
+          speed: opts?.speed,
+          size: opts?.size,
+          lifetime: opts?.lifetime,
+          direction: opts?.direction,
+          spread: opts?.spread,
+        });
+      },
+      explosion(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "explosion",
+          color: opts?.color??"#ff6600",
+          count: opts?.count??40,
+          speed: opts?.speed??8,
+          size: opts?.size??0.3,
+          lifetime: opts?.lifetime??1.2,
+        });
+      },
+      muzzleFlash(position: any, direction?: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "muzzleFlash",
+          direction: direction?{x:+(direction.x??0),y:+(direction.y??0),z:+(direction.z??0)}:undefined,
+          color: opts?.color??"#ffff88",
+          count: opts?.count??8,
+          speed: opts?.speed??6,
+          size: opts?.size??0.12,
+          lifetime: opts?.lifetime??0.1,
+        });
+      },
+      hit(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "hit",
+          color: opts?.color??"#ffffff",
+          count: opts?.count??10,
+          speed: opts?.speed??4,
+          size: opts?.size??0.08,
+          lifetime: opts?.lifetime??0.4,
+        });
+      },
+      smoke(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "smoke",
+          color: opts?.color??"#888888",
+          count: opts?.count??15,
+          speed: opts?.speed??1.5,
+          size: opts?.size??0.5,
+          lifetime: opts?.lifetime??2.0,
+        });
+      },
+      sparkle(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "sparkle",
+          color: opts?.color??"#ffdd00",
+          count: opts?.count??20,
+          speed: opts?.speed??5,
+          size: opts?.size??0.1,
+          lifetime: opts?.lifetime??0.8,
+        });
+      },
+      fire(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "fire",
+          color: opts?.color??"#ff4400",
+          count: opts?.count??25,
+          speed: opts?.speed??2,
+          size: opts?.size??0.2,
+          lifetime: opts?.lifetime??1.5,
+        });
+      },
+      pickup(position: any, opts?: any) {
+        runner.particleEvents.push({
+          id: `pe_${++runner.timerIdCounter}`,
+          position: {x:+(position?.x??0),y:+(position?.y??0),z:+(position?.z??0)},
+          effectType: "pickup",
+          color: opts?.color??"#00ffff",
+          count: opts?.count??15,
+          speed: opts?.speed??3,
+          size: opts?.size??0.1,
+          lifetime: opts?.lifetime??0.6,
+        });
+      },
+    };
 
     // ── Rebur.Input ────────────────────────────────────────────────────────
     // Consistent .on() pattern:
@@ -1326,6 +1642,8 @@ export class ScriptRunner {
       RunService: reburRunService,
       Network:    reburNetwork,
       Tags:       reburTags,
+      Debug:      reburDebug,
+      Particles:  reburParticles,
     };
 
     // ── AsyncFunction sandbox ──────────────────────────────────────────────
@@ -1518,8 +1836,36 @@ export class ScriptRunner {
   drainAllPlayerMutations(): Map<string, ScriptPlayerMutation> {
     const m = new Map(this.playerMutations); this.playerMutations.clear(); return m;
   }
+  drainDebugDraws(): any[]     { const d=[...this.debugDraws]; this.debugDraws=[]; return d; }
+  drainParticleEvents(): any[] { const p=[...this.particleEvents]; this.particleEvents=[]; return p; }
   getCameraSettings()  { return { ...this.cameraSettings }; }
   getPhysicsSettings() { return { ...this.physicsSettings }; }
+
+  /** Called by GameRoom each tick after receiving client input. */
+  updatePlayerCameraState(playerId: string, pos: {x:number;y:number;z:number}, forward: {x:number;y:number;z:number}) {
+    this.playerCameraStates.set(playerId, { pos, forward });
+  }
+
+  /** Remove camera state when player leaves. */
+  removePlayerCameraState(playerId: string) {
+    this.playerCameraStates.delete(playerId);
+  }
+
+  /** Returns motor slots for a player so GameRoom can include them in RenderPlayer. */
+  getMotorSlots(playerId: string): Record<string, { objectId: string; objectName: string; offset: {x:number;y:number;z:number}; rotation: {x:number;y:number;z:number} } | null> {
+    const motorMap = this.playerMotors.get(playerId);
+    if (!motorMap || motorMap.size === 0) return {};
+    const result: Record<string, any> = {};
+    for (const [slot, obj] of motorMap) {
+      result[slot] = {
+        objectId: obj.id,
+        objectName: obj.name,
+        offset: { x: obj.positionX, y: obj.positionY, z: obj.positionZ },
+        rotation: { x: obj.rotationX, y: obj.rotationY, z: obj.rotationZ },
+      };
+    }
+    return result;
+  }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 

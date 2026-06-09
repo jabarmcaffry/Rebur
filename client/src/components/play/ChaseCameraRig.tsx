@@ -8,17 +8,25 @@ import type { RenderPlayer, RenderState } from "@shared/render-types";
  * Camera rig that follows the player using OrbitControls.
  * Supports third-person chase camera, shift-lock mode, and
  * server-driven camera settings from Rebur.Camera.
+ * Also reports world-space camera position + forward direction
+ * back to the parent so they can be sent to the server for
+ * Rebur.Camera.getForwardRay() and screenPointToRay().
  */
 export default function ChaseCameraRig({
   player,
   shiftLock = false,
   serverCamera,
   onCameraYawChange,
+  onCameraStateChange,
 }: {
   player: RenderPlayer;
   shiftLock?: boolean;
   serverCamera?: RenderState["camera"];
   onCameraYawChange?: (yaw: number) => void;
+  onCameraStateChange?: (
+    pos: { x: number; y: number; z: number },
+    forward: { x: number; y: number; z: number }
+  ) => void;
 }) {
   const { camera } = useThree();
   const controlsRef = useRef<any>(null);
@@ -31,6 +39,8 @@ export default function ChaseCameraRig({
   const maxDistance = 20;
   const offset = { x: 0, y: 1.95, z: 0 };
   const defaultFov = 60;
+
+  const _fwd = useRef(new THREE.Vector3());
 
   useFrame(() => {
     const mode = serverCamera?.mode ?? "thirdPerson";
@@ -51,6 +61,7 @@ export default function ChaseCameraRig({
       if (controlsRef.current) {
         controlsRef.current.enabled = false;
       }
+      _reportCameraState();
       return;
     }
 
@@ -70,10 +81,11 @@ export default function ChaseCameraRig({
         controlsRef.current.update();
       }
       if (onCameraYawChange) {
-        const fwd = new THREE.Vector3();
-        camera.getWorldDirection(fwd);
-        onCameraYawChange(Math.atan2(fwd.x, fwd.z));
+        const fwdV = new THREE.Vector3();
+        camera.getWorldDirection(fwdV);
+        onCameraYawChange(Math.atan2(fwdV.x, fwdV.z));
       }
+      _reportCameraState();
       return;
     }
 
@@ -122,12 +134,23 @@ export default function ChaseCameraRig({
 
     // Report camera yaw back to parent for input handling
     if (onCameraYawChange) {
-      const fwd = new THREE.Vector3();
-      camera.getWorldDirection(fwd);
-      const yaw = Math.atan2(fwd.x, fwd.z);
+      const fwdV = new THREE.Vector3();
+      camera.getWorldDirection(fwdV);
+      const yaw = Math.atan2(fwdV.x, fwdV.z);
       onCameraYawChange(yaw);
     }
+
+    _reportCameraState();
   });
+
+  function _reportCameraState() {
+    if (!onCameraStateChange) return;
+    camera.getWorldDirection(_fwd.current);
+    onCameraStateChange(
+      { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      { x: _fwd.current.x, y: _fwd.current.y, z: _fwd.current.z }
+    );
+  }
 
   return (
     <OrbitControls

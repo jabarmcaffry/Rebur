@@ -96,6 +96,12 @@ export class RenderClient {
   private _jump = false;
   private _camY = 0;
   private _sprint = false;
+  private _cameraPos: { x: number; y: number; z: number } | undefined = undefined;
+  private _cameraForward: { x: number; y: number; z: number } | undefined = undefined;
+
+  // Latest debug draws and particle events from server
+  debugDraws: import("@shared/render-types").DebugDraw[] = [];
+  particleEvents: import("@shared/render-types").ParticleEvent[] = [];
 
   constructor(gameId: string, username: string, colors: Record<string, string> = {}, userId?: string) {
     this.sessionId = `game-${gameId}`;
@@ -239,6 +245,8 @@ export class RenderClient {
         this.gui = msg.state.gui;
         this.lighting = msg.state.lighting;
         this.camera = msg.state.camera;
+        if (msg.state.debugDraws)    this.debugDraws    = msg.state.debugDraws;
+        if (msg.state.particleEvents) this.particleEvents = msg.state.particleEvents;
         this.onGuiChanged?.();
         break;
       }
@@ -397,13 +405,17 @@ export class RenderClient {
   updateInput(
     moveX: number, moveZ: number,
     jump: boolean, camY: number,
-    sprint = false
+    sprint = false,
+    cameraPos?: { x: number; y: number; z: number },
+    cameraForward?: { x: number; y: number; z: number }
   ) {
     this._moveX = moveX;
     this._moveZ = moveZ;
     this._jump  = this._jump || jump; // latch jump until sent
     this._camY  = camY;
     this._sprint = sprint;
+    if (cameraPos)    this._cameraPos    = cameraPos;
+    if (cameraForward) this._cameraForward = cameraForward;
   }
 
   private _sendInput() {
@@ -414,6 +426,8 @@ export class RenderClient {
       jump:  this._jump,
       camY:  this._camY,
       sprint: this._sprint,
+      cameraPos:     this._cameraPos,
+      cameraForward: this._cameraForward,
     });
     this._jump = false; // reset jump latch after sending
   }

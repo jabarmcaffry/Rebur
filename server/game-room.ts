@@ -16,7 +16,7 @@
  */
 
 import { ScriptRunner, type ScriptObjState, type ScriptPlayerState } from "./script-runner";
-import type { RenderState, RenderObject, RenderPlayer, RenderGuiElement } from "@shared/render-types";
+import type { RenderState, RenderObject, RenderPlayer, RenderGuiElement, DebugDraw, ParticleEvent } from "@shared/render-types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TICK_MS       = 50;    // 20 Hz
@@ -45,6 +45,9 @@ interface PlayerState {
   health: number; maxHealth: number;
   speed: number; jumpPower: number;
   animation: string;
+  // Camera state sent by client each input tick
+  camWx: number; camWy: number; camWz: number;   // world-space camera position
+  camFx: number; camFy: number; camFz: number;   // world-space camera forward (unit vec)
 }
 
 interface StaticBox {
@@ -227,6 +230,8 @@ export class GameRoom {
       moveX: 0, moveZ: 0, jumpQueued: false, camY: 0,
       sprint: false,
       spawnX: x, spawnY: y, spawnZ: z,
+      camWx: x, camWy: y+6, camWz: z+8,
+      camFx: 0, camFy: 0, camFz: -1,
       shirtColor: colors.shirtColor ?? "#3b82f6",
       skinColor:  colors.skinColor  ?? "#d4a574",
       pantsColor: colors.pantsColor ?? "#374151",
@@ -270,7 +275,9 @@ export class GameRoom {
     id: string,
     moveX: number, moveZ: number,
     jump: boolean, rotY: number, camY: number,
-    sprint = false
+    sprint = false,
+    cameraPos?: { x: number; y: number; z: number },
+    cameraForward?: { x: number; y: number; z: number }
   ) {
     const p = this.players.get(id);
     if (!p) return;
@@ -278,6 +285,15 @@ export class GameRoom {
     if (jump) p.jumpQueued = true;
     p.rotY = rotY; p.camY = camY;
     p.sprint = sprint;
+    if (cameraPos) { p.camWx = cameraPos.x; p.camWy = cameraPos.y; p.camWz = cameraPos.z; }
+    if (cameraForward) { p.camFx = cameraForward.x; p.camFy = cameraForward.y; p.camFz = cameraForward.z; }
+    if (this.scriptRunner && (cameraPos || cameraForward)) {
+      this.scriptRunner.updatePlayerCameraState(
+        id,
+        { x: p.camWx, y: p.camWy, z: p.camWz },
+        { x: p.camFx, y: p.camFy, z: p.camFz }
+      );
+    }
   }
 
   syncPosition(id: string, x: number, y: number, z: number, rotY: number) {
@@ -688,6 +704,10 @@ export class GameRoom {
     this.tickNumber++;
     if (this.players.size === 0) return;
 
+    // ── Step 10b: Drain debug draws & particle events ─────────────────────
+    const debugDraws:    DebugDraw[]     = this.scriptRunner ? this.scriptRunner.drainDebugDraws()    : [];
+    const particleEvts:  ParticleEvent[] = this.scriptRunner ? this.scriptRunner.drainParticleEvents() : [];
+
     // ── Step 11: Broadcast worldState (per-player for GUI, shared for world) ──
     const renderObjects  = Array.from(this.allObjs.values()).map(this._toRenderObj);
     const renderPlayers  = Array.from(this.players.values()).map(this._toRenderPlayer);
@@ -723,6 +743,8 @@ export class GameRoom {
           gui: playerGui.map(toRenderGui),
           localPlayerId: p.id,
           camera: cameraState,
+          debugDraws: debugDraws.length > 0 ? debugDraws : undefined,
+          particleEvents: particleEvts.length > 0 ? particleEvts : undefined,
         };
         this.sendToPlayerFn(p.id, { type: "worldState", state });
       }
@@ -736,6 +758,8 @@ export class GameRoom {
         gui: guiElements.map(toRenderGui),
         localPlayerId: null,
         camera: cameraState,
+        debugDraws: debugDraws.length > 0 ? debugDraws : undefined,
+        particleEvents: particleEvts.length > 0 ? particleEvts : undefined,
       };
       this.broadcastFn({ type: "worldState", state });
     }
@@ -818,7 +842,7 @@ export class GameRoom {
     onGround: p.onGround, animation: p.animation,
     health: p.health, maxHealth: p.maxHealth,
     colors: { shirt: p.shirtColor, skin: p.skinColor, pants: p.pantsColor },
-    motors: {},
+    motors: this.scriptRunner?.getMotorSlots(p.id) ?? {},
   });
 
   private _makeScriptPlayer(p: PlayerState): ScriptPlayerState {
