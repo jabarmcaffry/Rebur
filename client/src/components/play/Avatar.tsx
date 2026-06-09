@@ -159,8 +159,12 @@ function findBone(root: THREE.Object3D, side: Side, part: Part): THREE.Bone | nu
 }
 
 interface RigBones {
+  hip: THREE.Bone | null;
+  waist: THREE.Bone | null;
   spine: THREE.Bone | null;
   head: THREE.Bone | null;
+  leftShoulder: THREE.Bone | null;
+  rightShoulder: THREE.Bone | null;
   leftArm: THREE.Bone | null;
   rightArm: THREE.Bone | null;
   leftForeArm: THREE.Bone | null;
@@ -193,62 +197,83 @@ function getBoneAlongWorldDir(bone: THREE.Bone): THREE.Vector3 {
   return xH > yH ? xDir : yDir;
 }
 
-function computeCorrectedArmBindQ(
+// Find a bone by its exact name (for bones like KTFL/KTFR that have non-standard names).
+function findBoneByName(root: THREE.Object3D, name: string): THREE.Bone | null {
+  let result: THREE.Bone | null = null;
+  root.traverse((c) => {
+    if ((c as THREE.Bone).isBone && c.name === name) result = c as THREE.Bone;
+  });
+  return result;
+}
+
+// Shared helper: compute a corrected bindQ that reorients a T-pose horizontal bone
+// toward `target` (world-space unit vector).  Never writes bone.quaternion.
+function computeHorizontalBoneCorrection(
   bone: THREE.Bone,
-  isLeft: boolean,
+  target: THREE.Vector3,
 ): THREE.Quaternion {
   const currentDir = getBoneAlongWorldDir(bone);
-  // Only correct if the arm is substantially horizontal (T-pose criterion).
-  if (Math.abs(currentDir.x) < 0.45) return bone.quaternion.clone();
+  if (Math.abs(currentDir.x) < 0.4) return bone.quaternion.clone(); // not horizontal, skip
 
-  // Desired world-space direction: arm hanging at side with a slight outward lean.
-  // Confirmed via debug: upperarmL local+Y → world+X, upperarmR local+Y → world-X
-  const target = new THREE.Vector3(isLeft ? -0.15 : 0.15, -0.98, 0).normalize();
-
-  // World-space rotation that maps currentDir → target.
   const worldCorrection = new THREE.Quaternion().setFromUnitVectors(currentDir, target);
-
-  // Convert the world correction into the bone's LOCAL space.
-  //   newBoneLocalQ = parentWorldQ⁻¹ * worldCorrection * parentWorldQ * oldBoneLocalQ
-  // THREE.js: .multiply(q) = this*q,  .premultiply(q) = q*this
   const parentWorldQ = new THREE.Quaternion();
   if (bone.parent) bone.parent.getWorldQuaternion(parentWorldQ);
-  const localCorrection = parentWorldQ.clone().invert() // pWQ⁻¹
-    .multiply(worldCorrection)                          // pWQ⁻¹ * worldCorrection
-    .multiply(parentWorldQ);                            // pWQ⁻¹ * worldCorrection * pWQ
-
-  // Return corrected bindQ = localCorrection * originalBindQ
-  // (do NOT write back to bone.quaternion — that is done separately on mount)
+  // localCorrection = pWQ⁻¹ * worldCorrection * pWQ
+  const localCorrection = parentWorldQ.clone().invert()
+    .multiply(worldCorrection)
+    .multiply(parentWorldQ);
   return localCorrection.multiply(bone.quaternion.clone());
 }
 
-function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
-  const rig: RigBones = {
-    spine:        findBone(root, "center", "spine"),
-    head:         findBone(root, "center", "head"),
-    leftArm:      findBone(root, "left",  "upperArm"),
-    rightArm:     findBone(root, "right", "upperArm"),
-    leftForeArm:  findBone(root, "left",  "foreArm"),
-    rightForeArm: findBone(root, "right", "foreArm"),
-    leftUpLeg:    findBone(root, "left",  "upperLeg"),
-    rightUpLeg:   findBone(root, "right", "upperLeg"),
-    leftLeg:      findBone(root, "left",  "lowerLeg"),
-    rightLeg:     findBone(root, "right", "lowerLeg"),
-  };
+// Upper-arm correction: bring T-pose arm all the way to at-side (~−Y with slight outward lean).
+function computeCorrectedArmBindQ(bone: THREE.Bone, isLeft: boolean): THREE.Quaternion {
+  const target = new THREE.Vector3(isLeft ? -0.15 : 0.15, -0.98, 0).normalize();
+  return computeHorizontalBoneCorrection(bone, target);
+}
 
+// Shoulder (KTFL/KTFR) correction: bring to A-pose (~45° down from T-pose horizontal).
+// This moves the shoulder attachment point inward so the arm doesn't start too far to the side.
+function computeCorrectedShoulderBindQ(bone: THREE.Bone, isLeft: boolean): THREE.Quaternion {
+  const target = new THREE.Vector3(isLeft ? -0.71 : 0.71, -0.71, 0).normalize();
+  return computeHorizontalBoneCorrection(bone, target);
+}
+
+function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
   // World matrices must be current before sampling bone directions.
   root.updateMatrixWorld(true);
 
-  // Build bindQ map.  For arm bones we substitute a T-pose-corrected quaternion
-  // so the animation system treats "arms at sides" as the rest position.
-  // Crucially we never write back to bone.quaternion, so the SkinnedMesh
-  // boneInverses (which are baked for T-pose) stay consistent.
+  const rig: RigBones = {
+    // Root chain — found by exact name since this FBX uses non-standard names.
+    hip:           findBoneByName(root, "hip"),
+    waist:         findBoneByName(root, "waist"),
+    // Chest acts as the spine (score=3 via chest|torso pattern).
+    spine:         findBone(root, "center", "spine"),
+    head:          findBone(root, "center", "head"),
+    // KTFL / KTFR are the collarbone/shoulder bones — parents of the upper arms.
+    leftShoulder:  findBoneByName(root, "KTFL"),
+    rightShoulder: findBoneByName(root, "KTFR"),
+    leftArm:       findBone(root, "left",  "upperArm"),
+    rightArm:      findBone(root, "right", "upperArm"),
+    leftForeArm:   findBone(root, "left",  "foreArm"),
+    rightForeArm:  findBone(root, "right", "foreArm"),
+    leftUpLeg:     findBone(root, "left",  "upperLeg"),
+    rightUpLeg:    findBone(root, "right", "upperLeg"),
+    leftLeg:       findBone(root, "left",  "lowerLeg"),
+    rightLeg:      findBone(root, "right", "lowerLeg"),
+  };
+
+  // Build bindQ map.  Shoulder and arm bones get a T-pose correction so the
+  // rest position is A-pose / at-side rather than the extreme T-pose spread.
   const bindQ = new Map<THREE.Bone, THREE.Quaternion>();
   for (const [key, b] of Object.entries(rig) as [keyof RigBones, THREE.Bone | null][]) {
     if (!b) continue;
-    if (key === "leftArm")  { bindQ.set(b, computeCorrectedArmBindQ(b, true));  continue; }
-    if (key === "rightArm") { bindQ.set(b, computeCorrectedArmBindQ(b, false)); continue; }
-    bindQ.set(b, b.quaternion.clone());
+    switch (key) {
+      case "leftShoulder":  bindQ.set(b, computeCorrectedShoulderBindQ(b, true));  break;
+      case "rightShoulder": bindQ.set(b, computeCorrectedShoulderBindQ(b, false)); break;
+      case "leftArm":       bindQ.set(b, computeCorrectedArmBindQ(b, true));       break;
+      case "rightArm":      bindQ.set(b, computeCorrectedArmBindQ(b, false));      break;
+      default:              bindQ.set(b, b.quaternion.clone());
+    }
   }
   return { rig, bindQ };
 }
@@ -257,8 +282,12 @@ function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone,
 // Returns additive Euler (x,y,z) rotations per bone for a given state + phase.
 // Phase is in radians; the caller advances phase = phase + dt * stepRate.
 interface PoseTargets {
+  hip?: THREE.Euler;
+  waist?: THREE.Euler;
   spine?: THREE.Euler;
   head?: THREE.Euler;
+  leftShoulder?: THREE.Euler;
+  rightShoulder?: THREE.Euler;
   leftArm?: THREE.Euler;
   rightArm?: THREE.Euler;
   leftForeArm?: THREE.Euler;
@@ -274,13 +303,11 @@ function poseFor(state: string, phase: number, intensity: number): PoseTargets {
   const c = Math.cos(phase);
 
   // ── JUMP ──────────────────────────────────────────────────────────────────
-  // Arms raise high outward (+Z), elbows bend, legs tuck up.
-  // Convention (confirmed via debug):
-  //   arm local+X → world LEFT  →  positive X = arm swings backward
-  //   arm local+Z → world FORWARD  →  positive Z = arm raises outward
-  //   leg local+X → world LEFT  →  positive X = foot swings forward
+  // Arms raise high outward + shoulders lift, legs tuck, spine leans forward.
   if (state === "jump") {
     return {
+      leftShoulder:  new THREE.Euler(-0.2 * intensity, 0,  0),
+      rightShoulder: new THREE.Euler(-0.2 * intensity, 0,  0),
       leftArm:       new THREE.Euler(-0.4 * intensity, 0,  1.6 * intensity),
       rightArm:      new THREE.Euler(-0.4 * intensity, 0, -1.6 * intensity),
       leftForeArm:   new THREE.Euler( 0.6 * intensity, 0, 0),
@@ -294,9 +321,11 @@ function poseFor(state: string, phase: number, intensity: number): PoseTargets {
   }
 
   // ── FALL ──────────────────────────────────────────────────────────────────
-  // Arms spread even wider for a "falling / bracing" look, legs trail loosely.
+  // Arms spread wide for a bracing/starfish look; legs trail loosely behind.
   if (state === "fall") {
     return {
+      leftShoulder:  new THREE.Euler( 0.1 * intensity, 0,  0),
+      rightShoulder: new THREE.Euler( 0.1 * intensity, 0,  0),
       leftArm:       new THREE.Euler( 0.2 * intensity, 0,  1.9 * intensity),
       rightArm:      new THREE.Euler( 0.2 * intensity, 0, -1.9 * intensity),
       leftForeArm:   new THREE.Euler( 0.3 * intensity, 0, 0),
@@ -310,38 +339,39 @@ function poseFor(state: string, phase: number, intensity: number): PoseTargets {
   }
 
   if (state === "walk" || state === "run") {
-    // Opposite-side arms/legs swing. Stronger swing for run.
     const swing    = (state === "run" ? 1.1 : 0.7) * intensity;
     const armSwing = (state === "run" ? 1.3 : 0.9) * intensity;
     const bob      = (state === "run" ? 0.10 : 0.06) * intensity;
     return {
-      // ── Arms ──────────────────────────────────────────────────────────────
-      // leftArm/rightArm are opposite so they counter-swing the legs.
-      // Positive X = arm swings backward, negative X = arm swings forward.
+      // ── Shoulders (KTFL / KTFR) ───────────────────────────────────────────
+      // Counter-rotate opposite to the arm for a natural shoulder roll.
+      leftShoulder:  new THREE.Euler(0, 0, -s * 0.12 * intensity),
+      rightShoulder: new THREE.Euler(0, 0,  s * 0.12 * intensity),
+      // ── Arms ─────────────────────────────────────────────────────────────
+      // Positive X = arm swings backward, negative X = swings forward.
       leftArm:       new THREE.Euler( s * armSwing, 0, 0),
       rightArm:      new THREE.Euler(-s * armSwing, 0, 0),
-      // Elbow flexes when the arm swings BACKWARD (s > 0 for left).
+      // Elbow flexes when the arm is on the backward swing (s > 0 for left arm).
       leftForeArm:   new THREE.Euler(Math.max(0,  s * 0.45) * intensity, 0, 0),
       rightForeArm:  new THREE.Euler(Math.max(0, -s * 0.45) * intensity, 0, 0),
-      // ── Legs ──────────────────────────────────────────────────────────────
-      // leftUpLeg/rightUpLeg are opposite (left-back when right-forward).
-      // Positive X = foot swings forward.
+      // ── Legs ─────────────────────────────────────────────────────────────
+      // Positive X = foot swings forward; legs are opposite phase to each other.
       leftUpLeg:  new THREE.Euler(-s * swing, 0, 0),
       rightUpLeg: new THREE.Euler( s * swing, 0, 0),
-      // Lower leg: knee bends (negative X, curling the shin back) during the
-      // FORWARD swing phase — NOT during the push-off phase.
-      // left forward = s < 0  →  leftLeg = Math.min(0,  s * …) = negative  ✓
-      // right forward = s > 0  →  rightLeg = Math.min(0, -s * …) = negative ✓
+      // Knee bends (negative X = shin curls back) during the FORWARD swing.
+      // left forward = s < 0  → Math.min(0,  s*…) < 0 ✓
+      // right forward = s > 0 → Math.min(0, -s*…) < 0 ✓
       leftLeg:    new THREE.Euler(Math.min(0,  s * swing * 0.65), 0, 0),
       rightLeg:   new THREE.Euler(Math.min(0, -s * swing * 0.65), 0, 0),
-      // Subtle torso counter-rotation + bob
+      // ── Torso ────────────────────────────────────────────────────────────
+      hip:   new THREE.Euler(0,  s * 0.05 * intensity, 0),
+      waist: new THREE.Euler(0, -s * 0.03 * intensity, 0),
       spine: new THREE.Euler(bob * 0.5, -s * 0.08 * intensity, 0),
-      head:  new THREE.Euler(0,          s * 0.05 * intensity, 0),
+      head:  new THREE.Euler(0,           s * 0.05 * intensity, 0),
     };
   }
 
   // ── IDLE ─────────────────────────────────────────────────────────────────
-  // Gentle breathing — arms hang with a very slight outward tilt.
   const breath = 0.04 * intensity;
   return {
     spine: new THREE.Euler(c * breath, 0, 0),
@@ -477,16 +507,20 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
       bone.quaternion.copy(tmpQ);
     };
 
-    apply(rig.spine, pose.spine);
-    apply(rig.head, pose.head);
-    apply(rig.leftArm, pose.leftArm);
-    apply(rig.rightArm, pose.rightArm);
-    apply(rig.leftForeArm, pose.leftForeArm);
-    apply(rig.rightForeArm, pose.rightForeArm);
-    apply(rig.leftUpLeg, pose.leftUpLeg);
-    apply(rig.rightUpLeg, pose.rightUpLeg);
-    apply(rig.leftLeg, pose.leftLeg);
-    apply(rig.rightLeg, pose.rightLeg);
+    apply(rig.hip,           pose.hip);
+    apply(rig.waist,         pose.waist);
+    apply(rig.spine,         pose.spine);
+    apply(rig.head,          pose.head);
+    apply(rig.leftShoulder,  pose.leftShoulder);
+    apply(rig.rightShoulder, pose.rightShoulder);
+    apply(rig.leftArm,       pose.leftArm);
+    apply(rig.rightArm,      pose.rightArm);
+    apply(rig.leftForeArm,   pose.leftForeArm);
+    apply(rig.rightForeArm,  pose.rightForeArm);
+    apply(rig.leftUpLeg,     pose.leftUpLeg);
+    apply(rig.rightUpLeg,    pose.rightUpLeg);
+    apply(rig.leftLeg,       pose.leftLeg);
+    apply(rig.rightLeg,      pose.rightLeg);
   });
 
   // Log rig once for debugging.
