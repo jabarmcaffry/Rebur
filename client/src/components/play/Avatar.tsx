@@ -231,11 +231,13 @@ function computeCorrectedArmBindQ(bone: THREE.Bone, isLeft: boolean): THREE.Quat
   return computeHorizontalBoneCorrection(bone, target);
 }
 
-// Shoulder (KTFL/KTFR) correction: bring to A-pose (~45° down from T-pose horizontal).
-// This moves the shoulder attachment point inward so the arm doesn't start too far to the side.
-function computeCorrectedShoulderBindQ(bone: THREE.Bone, isLeft: boolean): THREE.Quaternion {
-  const target = new THREE.Vector3(isLeft ? -0.71 : 0.71, -0.71, 0).normalize();
-  return computeHorizontalBoneCorrection(bone, target);
+// Shoulder (KTFL/KTFR): NO geometric correction — the shoulder attachment is
+// already in the right anatomical location.  The arm correction independently
+// makes the upper arm hang at-side relative to the T-pose shoulder.  Applying
+// a downward correction here would compound with the arm correction and tilt
+// the arm back upward by the same angle, which is exactly the wrong result.
+function computeCorrectedShoulderBindQ(bone: THREE.Bone, _isLeft: boolean): THREE.Quaternion {
+  return bone.quaternion.clone(); // bind to natural T-pose, animate from there
 }
 
 function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone, THREE.Quaternion> } {
