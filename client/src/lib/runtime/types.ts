@@ -36,10 +36,23 @@ export type ContainerName =
   | "Workspace"
   | "Lighting"
   | "Players"
-  | "ServerScriptService"
-  | "StarterPlayer"
-  | "ReplicatedStorage"
-  | "ServerStorage";
+  | "Players/StarterInventory"
+  | "Players/StarterData"
+  | "Players/StarterCharacter"
+  | "Players/StarterGui"
+  | "Assets"
+  | "Assets/Shared"
+  | "Assets/Server"
+  | "Data"
+  | "Data/Session"
+  | "Data/Store"
+  | "Scripts"
+  | "Scripts/Server"
+  | "Scripts/Client"
+  | "Scripts/Shared"
+  | "Teams"
+  | "Chat"
+  | "Sound";
 
 export type ObjectProperties = {
   anchored: boolean;

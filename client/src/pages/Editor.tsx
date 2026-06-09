@@ -84,25 +84,201 @@ const PRIMITIVES = [
   { type: "light", label: "Light", icon: Lightbulb },
 ] as const;
 
-// Engine services. Order here drives the Hierarchy panel order.
-//   - Workspace            : live, rendered 3D world
-//   - Lighting             : lights and atmosphere
-//   - Players              : player avatars + per-player non-physical data
-//   - ServerScriptService  : server-authoritative scripts (Script type)
-//   - StarterPlayer        : per-player scripts/objects copied to each client (LocalScript)
-//   - ReplicatedStorage    : shared templates + ModuleScripts (visible to all — NOT safe for secrets)
-//   - ServerStorage        : server-only templates/data (never replicated to clients)
-// `defaultScriptType` is what gets created when the user clicks "+ script" on
-// the container header.
-const CONTAINERS = [
-  { name: "Workspace",           displayName: "Workspace",           icon: Box,      hint: "3D objects in the live world",                         defaultScriptType: "Script" },
-  { name: "Lighting",            displayName: "Lighting",            icon: Sun,      hint: "Lights and lighting helpers",                          defaultScriptType: "Script" },
-  { name: "Players",             displayName: "Players",             icon: Box,      hint: "Player avatars + per-player data",                     defaultScriptType: "LocalScript" },
-  { name: "ServerScriptService", displayName: "ServerScriptService", icon: FileCode, hint: "Server-authoritative scripts (Script)",                defaultScriptType: "Script" },
-  { name: "StarterPlayer",       displayName: "StarterPlayer",       icon: FileCode, hint: "Scripts copied to each player (LocalScript)",          defaultScriptType: "LocalScript" },
-  { name: "ReplicatedStorage",   displayName: "ReplicatedStorage",   icon: Archive,  hint: "Shared templates — visible to all, not for secrets",   defaultScriptType: "ModuleScript" },
-  { name: "ServerStorage",       displayName: "ServerStorage",       icon: Archive,  hint: "Server-only storage — never replicated to clients",    defaultScriptType: "Script" },
+// Rebur service hierarchy — mirrors the Rebur runtime container model exactly.
+// `allowedScripts` controls which script types (server/client/shared) are valid in this container.
+// `canHoldObjects` controls whether 3D entities can be placed here.
+// `children` defines nested sub-containers within the parent.
+interface ContainerDef {
+  name: string;
+  displayName: string;
+  icon: any;
+  hint: string;
+  allowedScripts: Array<"server" | "client" | "shared">;
+  canHoldObjects: boolean;
+  children?: ContainerDef[];
+}
+
+const CONTAINERS: ContainerDef[] = [
+  {
+    name: "Workspace",
+    displayName: "Workspace",
+    icon: Box,
+    hint: "Freeform 3D world — organize it however your game needs. Scripts attach directly to entities.",
+    allowedScripts: ["server", "client"],
+    canHoldObjects: true,
+  },
+  {
+    name: "Lighting",
+    displayName: "Lighting",
+    icon: Sun,
+    hint: "Global lighting, atmosphere, skybox. Not spatial — use Rebur.Lighting.* in scripts.",
+    allowedScripts: [],
+    canHoldObjects: true,
+  },
+  {
+    name: "Players",
+    displayName: "Players",
+    icon: Users,
+    hint: "Everything that defines a player before and during a session. Declare once, applies automatically.",
+    allowedScripts: [],
+    canHoldObjects: false,
+    children: [
+      {
+        name: "Players/StarterInventory",
+        displayName: "StarterInventory",
+        icon: Archive,
+        hint: "Items given to every player on join. Use Players.StarterInventory.add() in scripts.",
+        allowedScripts: [],
+        canHoldObjects: false,
+      },
+      {
+        name: "Players/StarterData",
+        displayName: "StarterData",
+        icon: Archive,
+        hint: "Initial per-player data values (coins, xp, level). Use Players.StarterData.* in scripts.",
+        allowedScripts: [],
+        canHoldObjects: false,
+      },
+      {
+        name: "Players/StarterCharacter",
+        displayName: "StarterCharacter",
+        icon: Layers,
+        hint: "Character templates (Default, Warrior, Scout). Accepts server and client scripts.",
+        allowedScripts: ["server", "client"],
+        canHoldObjects: true,
+      },
+      {
+        name: "Players/StarterGui",
+        displayName: "StarterGui",
+        icon: Layers,
+        hint: "HUD scripts cloned to every player on join. Client-only — GUI is always client-side.",
+        allowedScripts: ["client"],
+        canHoldObjects: false,
+      },
+    ],
+  },
+  {
+    name: "Assets",
+    displayName: "Assets",
+    icon: Archive,
+    hint: "One place for everything reusable — models, sounds, textures, animations.",
+    allowedScripts: [],
+    canHoldObjects: false,
+    children: [
+      {
+        name: "Assets/Shared",
+        displayName: "Shared",
+        icon: Globe,
+        hint: "Replicated to all clients — client scripts only. Use Assets.Shared.Models.get() in scripts.",
+        allowedScripts: ["client"],
+        canHoldObjects: true,
+      },
+      {
+        name: "Assets/Server",
+        displayName: "Server",
+        icon: Lock,
+        hint: "Server-only assets, never sent to clients — server scripts only.",
+        allowedScripts: ["server"],
+        canHoldObjects: true,
+      },
+    ],
+  },
+  {
+    name: "Data",
+    displayName: "Data",
+    icon: Archive,
+    hint: "Everything persistence related — session state and cross-session storage.",
+    allowedScripts: [],
+    canHoldObjects: false,
+    children: [
+      {
+        name: "Data/Session",
+        displayName: "Session",
+        icon: Archive,
+        hint: "Resets each session (scores, phase, round state). Use Data.Session.set() in scripts.",
+        allowedScripts: [],
+        canHoldObjects: false,
+      },
+      {
+        name: "Data/Store",
+        displayName: "Store",
+        icon: Archive,
+        hint: "Persists across sessions (high scores, progression). Use Data.Store.set() in scripts.",
+        allowedScripts: [],
+        canHoldObjects: false,
+      },
+    ],
+  },
+  {
+    name: "Scripts",
+    displayName: "Scripts",
+    icon: FileCode,
+    hint: "Global systems that don't belong to any specific entity.",
+    allowedScripts: [],
+    canHoldObjects: false,
+    children: [
+      {
+        name: "Scripts/Server",
+        displayName: "Server",
+        icon: FileCode,
+        hint: "Server-authoritative global logic — server scripts only (RoundManager, SpawnSystem…)",
+        allowedScripts: ["server"],
+        canHoldObjects: false,
+      },
+      {
+        name: "Scripts/Client",
+        displayName: "Client",
+        icon: FileCode,
+        hint: "Client-side global logic — client scripts only (InputHandler, CameraController…)",
+        allowedScripts: ["client"],
+        canHoldObjects: false,
+      },
+      {
+        name: "Scripts/Shared",
+        displayName: "Shared",
+        icon: FileCode,
+        hint: "Utilities and constants — shared scripts only (MathUtils, Constants, ItemConfig…)",
+        allowedScripts: ["shared"],
+        canHoldObjects: false,
+      },
+    ],
+  },
+  {
+    name: "Teams",
+    displayName: "Teams",
+    icon: Users,
+    hint: "Team configuration — use Rebur.Teams.create(), assign(), score() in scripts.",
+    allowedScripts: [],
+    canHoldObjects: false,
+  },
+  {
+    name: "Chat",
+    displayName: "Chat",
+    icon: Terminal,
+    hint: "Chat settings — use Rebur.Chat.send(), on(), channels.* in scripts.",
+    allowedScripts: [],
+    canHoldObjects: false,
+  },
+  {
+    name: "Sound",
+    displayName: "Sound",
+    icon: Sparkles,
+    hint: "Audio groups — use Rebur.Sound.group(), play(), volume() in scripts.",
+    allowedScripts: [],
+    canHoldObjects: false,
+  },
 ];
+
+// Flat list of all containers including sub-containers, for lookup/grouping.
+function flattenContainers(cs: ContainerDef[]): ContainerDef[] {
+  const result: ContainerDef[] = [];
+  for (const c of cs) {
+    result.push(c);
+    if (c.children) result.push(...flattenContainers(c.children));
+  }
+  return result;
+}
+const ALL_CONTAINERS = flattenContainers(CONTAINERS);
 
 // All snippets use the Rebur.* single-global API.
 // Scripts run top-to-bottom once on Play; register events for everything else.
@@ -825,10 +1001,10 @@ export default function EditorPage() {
     [objects]
   );
 
-  /** Objects grouped by container, in CONTAINERS order. */
+  /** Objects grouped by container (all containers including sub-containers). */
   const objectsByContainer = useMemo(() => {
     const groups: Record<string, GameObject[]> = {};
-    for (const c of CONTAINERS) groups[c.name] = [];
+    for (const c of ALL_CONTAINERS) groups[c.name] = [];
     for (const o of objects) {
       if (o.parentId) continue;
       const c = o.container ?? "Workspace";
@@ -851,10 +1027,10 @@ export default function EditorPage() {
   /** Scripts parented directly to a service container (no `objectId`). */
   const scriptsByContainer = useMemo(() => {
     const groups: Record<string, Script[]> = {};
-    for (const c of CONTAINERS) groups[c.name] = [];
+    for (const c of ALL_CONTAINERS) groups[c.name] = [];
     for (const s of scripts) {
       if (s.objectId) continue;
-      const c = s.container ?? "ServerScriptService";
+      const c = s.container ?? "Scripts/Server";
       if (!groups[c]) groups[c] = [];
       groups[c].push(s);
     }
@@ -890,14 +1066,14 @@ export default function EditorPage() {
   };
 
   /** Create a new script — either attached to a service container, or parented
-   *  to a specific GameObject/group. Only the first script gets a helpful comment. */
-  const addScriptTo = (containerName: string, objectId?: string) => {
-    const containerCfg = CONTAINERS.find((c) => c.name === containerName);
-    const scriptType = containerCfg?.defaultScriptType ?? "Script";
+   *  to a specific GameObject. `scriptType` is "server", "client", or "shared"
+   *  and is determined by the container's rules. Only the first script gets the
+   *  DEFAULT_SCRIPT starter code. */
+  const addScriptTo = (containerName: string, scriptType: "server" | "client" | "shared", objectId?: string) => {
     const isFirstScript = scripts.length === 0;
     createScriptMutation.mutate({
       gameId,
-      name: `Script${scripts.length + 1}.js`,
+      name: `Script${scripts.length + 1}`,
       code: isFirstScript ? DEFAULT_SCRIPT : "",
       enabled: true,
       container: containerName,
@@ -1134,13 +1310,22 @@ export default function EditorPage() {
     );
   };
 
-  /** Popover menu: lets the user pick what to add (object / light / folder / model / script). */
+  /** Context-aware add menu — shows object types and/or script types based on what the
+   *  container rules allow. `showObjects` overrides `containerDef.canHoldObjects` so it
+   *  can be set to true for group objects (folders/models) regardless of container type. */
   const AddItemMenu = ({
-    containerName,
+    containerDef,
     parentId,
     testId,
     title,
-  }: { containerName: string; parentId?: string | null; testId: string; title: string }) => {
+    showObjects,
+  }: {
+    containerDef: ContainerDef;
+    parentId?: string | null;
+    testId: string;
+    title: string;
+    showObjects?: boolean;
+  }) => {
     const [open, setOpen] = useState(false);
     const close = () => setOpen(false);
     const Item = ({ icon: I, label, onClick, testId: t }: { icon: any; label: string; onClick: () => void; testId: string }) => (
@@ -1153,6 +1338,11 @@ export default function EditorPage() {
         <span>{label}</span>
       </button>
     );
+
+    const hasObjects = showObjects ?? containerDef.canHoldObjects;
+    const allowedScripts = containerDef.allowedScripts;
+    if (!hasObjects && allowedScripts.length === 0) return null;
+
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
@@ -1166,83 +1356,117 @@ export default function EditorPage() {
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-52 p-1" onClick={(e) => e.stopPropagation()}>
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Object</div>
-          <Item icon={Box}      label="Cube"     onClick={() => addPrimitiveTo(containerName, "cube", parentId)}     testId={`add-cube-${testId}`} />
-          <Item icon={Circle}   label="Sphere"   onClick={() => addPrimitiveTo(containerName, "sphere", parentId)}   testId={`add-sphere-${testId}`} />
-          <Item icon={Cylinder} label="Cylinder" onClick={() => addPrimitiveTo(containerName, "cylinder", parentId)} testId={`add-cylinder-${testId}`} />
-          <Item icon={Square}   label="Plane"    onClick={() => addPrimitiveTo(containerName, "plane", parentId)}    testId={`add-plane-${testId}`} />
-          <Item icon={Lightbulb} label="Light"   onClick={() => addPrimitiveTo(containerName, "light", parentId)}    testId={`add-light-${testId}`} />
-          <Separator className="my-1" />
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Group</div>
-          <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerName, "folder", parentId)} testId={`add-folder-${testId}`} />
-          <Item icon={Layers} label="Model"  onClick={() => createGroupObject(containerName, "model",  parentId)} testId={`add-model-${testId}`} />
-          <Separator className="my-1" />
-          <Item icon={FileCode} label="Script" onClick={() => addScriptTo(containerName, parentId ?? undefined)} testId={`add-script-${testId}`} />
+          {hasObjects && (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Object</div>
+              <Item icon={Box}       label="Cube"     onClick={() => addPrimitiveTo(containerDef.name, "cube",     parentId)} testId={`add-cube-${testId}`} />
+              <Item icon={Circle}    label="Sphere"   onClick={() => addPrimitiveTo(containerDef.name, "sphere",   parentId)} testId={`add-sphere-${testId}`} />
+              <Item icon={Cylinder}  label="Cylinder" onClick={() => addPrimitiveTo(containerDef.name, "cylinder", parentId)} testId={`add-cylinder-${testId}`} />
+              <Item icon={Square}    label="Plane"    onClick={() => addPrimitiveTo(containerDef.name, "plane",    parentId)} testId={`add-plane-${testId}`} />
+              <Item icon={Lightbulb} label="Light"    onClick={() => addPrimitiveTo(containerDef.name, "light",    parentId)} testId={`add-light-${testId}`} />
+              <Separator className="my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Group</div>
+              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} testId={`add-folder-${testId}`} />
+              <Item icon={Layers} label="Model"  onClick={() => createGroupObject(containerDef.name, "model",  parentId)} testId={`add-model-${testId}`} />
+            </>
+          )}
+          {allowedScripts.length > 0 && (
+            <>
+              {hasObjects && <Separator className="my-1" />}
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Script</div>
+              {allowedScripts.includes("server") && (
+                <Item icon={FileCode} label="Server Script" onClick={() => addScriptTo(containerDef.name, "server", parentId ?? undefined)} testId={`add-server-${testId}`} />
+              )}
+              {allowedScripts.includes("client") && (
+                <Item icon={FileCode} label="Client Script" onClick={() => addScriptTo(containerDef.name, "client", parentId ?? undefined)} testId={`add-client-${testId}`} />
+              )}
+              {allowedScripts.includes("shared") && (
+                <Item icon={FileCode} label="Shared Script" onClick={() => addScriptTo(containerDef.name, "shared", parentId ?? undefined)} testId={`add-shared-${testId}`} />
+              )}
+            </>
+          )}
         </PopoverContent>
       </Popover>
     );
   };
 
-  const HierarchyContent = (
-    <ScrollArea className="flex-1 h-full">
-      <div className="p-2 space-y-2">
-        {objects.length === 0 && scripts.length === 0 && (
-          <div className="text-xs text-muted-foreground px-3 py-4 text-center">
-            Empty scene. Add objects from the toolbar, or click "+" on a service to add a script.
+  // Renders one container header + its contents recursively.
+  // Sub-containers appear indented beneath the parent.
+  const ContainerSection = ({ c, depth = 0 }: { c: ContainerDef; depth?: number }) => {
+    const items = objectsByContainer[c.name] ?? [];
+    const containerScripts = scriptsByContainer[c.name] ?? [];
+    const collapsed = !!collapsedContainers[c.name];
+    const Icon = c.icon;
+    const hasChildren = (c.children ?? []).length > 0;
+    const totalCount = items.length + containerScripts.length;
+    const pl = depth * 10;
+    const testId = c.name.replace(/\//g, "-");
+
+    return (
+      <div
+        data-testid={`group-container-${testId}`}
+        {...(depth === 0 ? dropTargetProps({ container: c.name, parentId: null }) : {})}
+      >
+        <div
+          className="group flex items-center gap-1 py-1 text-xs uppercase tracking-wide text-muted-foreground hover-elevate rounded-md"
+          style={{ paddingLeft: 8 + pl }}
+        >
+          <button
+            onClick={() => toggleContainer(c.name)}
+            className="flex-1 flex items-center gap-1 min-w-0"
+            title={c.hint}
+            data-testid={`button-toggle-container-${testId}`}
+          >
+            {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            <Icon className="w-3 h-3" />
+            <span className={`font-semibold truncate ${depth > 0 ? "normal-case text-muted-foreground/80" : ""}`}>
+              {c.displayName}
+            </span>
+            {totalCount > 0 && <span className="ml-auto text-[10px] opacity-60">{totalCount}</span>}
+          </button>
+          <AddItemMenu
+            containerDef={c}
+            parentId={null}
+            testId={`button-add-${testId}`}
+            title={`Add to ${c.displayName}`}
+          />
+        </div>
+        {!collapsed && (
+          <div className="mt-0.5 space-y-0.5" style={{ paddingLeft: pl + 4 }}>
+            {(c.children ?? []).map((child) => (
+              <ContainerSection key={child.name} c={child} depth={depth + 1} />
+            ))}
+            {items.length === 0 && containerScripts.length === 0 && !hasChildren && (
+              <div className="text-[11px] text-muted-foreground px-3 py-1 italic">empty</div>
+            )}
+            {containerScripts.map((s) => (
+              <ScriptRow key={s.id} s={s} indent={pl + 12} />
+            ))}
+            {items.map((o) => (
+              <ObjectTreeRow key={o.id} o={o} containerDef={c} indent={pl + 12} />
+            ))}
           </div>
         )}
-        {CONTAINERS.map((c) => {
-          const items = objectsByContainer[c.name] ?? [];
-          const containerScripts = scriptsByContainer[c.name] ?? [];
-          const collapsed = !!collapsedContainers[c.name];
-          const Icon = c.icon;
-          const totalCount = items.length + containerScripts.length;
-          return (
-            <div key={c.name} data-testid={`group-container-${c.name}`} {...dropTargetProps({ container: c.name, parentId: null })}>
-              <div className="group flex items-center gap-1 px-2 py-1 text-xs uppercase tracking-wide text-muted-foreground hover-elevate rounded-md">
-                <button
-                  onClick={() => toggleContainer(c.name)}
-                  className="flex-1 flex items-center gap-1 min-w-0"
-                  title={c.hint}
-                  data-testid={`button-toggle-container-${c.name}`}
-                >
-                  {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  <Icon className="w-3 h-3" />
-                  <span className="font-semibold truncate">{(c as any).displayName ?? c.name}</span>
-                  <span className="ml-auto text-[10px] opacity-60">{totalCount}</span>
-                </button>
-                <AddItemMenu
-                  containerName={c.name}
-                  parentId={null}
-                  testId={`button-add-${c.name}`}
-                  title={`Add to ${(c as any).displayName ?? c.name}`}
-                />
-              </div>
-              {!collapsed && (
-                <div className="mt-0.5 space-y-0.5 pl-2">
-                  {items.length === 0 && containerScripts.length === 0 && (
-                    <div className="text-[11px] text-muted-foreground px-3 py-1 italic">
-                      empty
-                    </div>
-                  )}
-                  {/* Scripts parented directly to the service. */}
-                  {containerScripts.map((s) => (
-                    <ScriptRow key={s.id} s={s} indent={12} />
-                  ))}
-                  {/* Objects, with attached scripts + nested children. */}
-                  {items.map((o) => (
-                    <ObjectTreeRow key={o.id} o={o} containerName={c.name} indent={12} />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      </div>
+    );
+  };
+
+  const HierarchyContent = (
+    <ScrollArea className="flex-1 h-full">
+      <div className="p-2 space-y-1">
+        {objects.length === 0 && scripts.length === 0 && (
+          <div className="text-xs text-muted-foreground px-3 py-4 text-center">
+            Empty scene. Add objects from the toolbar or click "+" on a container.
+          </div>
+        )}
+        {CONTAINERS.map((c) => (
+          <ContainerSection key={c.name} c={c} depth={0} />
+        ))}
       </div>
     </ScrollArea>
   );
 
-  function ObjectTreeRow({ o, containerName, indent }: { o: GameObject; containerName: string; indent: number }) {
+  function ObjectTreeRow({ o, containerDef, indent }: { o: GameObject; containerDef: ContainerDef; indent: number }) {
     const childObjs = objectsByParent[o.id] ?? [];
     const childScripts = scriptsByObject[o.id] ?? [];
     const isGroup = o.type === "folder" || o.type === "model";
@@ -1277,7 +1501,7 @@ export default function EditorPage() {
             if (!isGroup) return;
             e.preventDefault();
             e.stopPropagation();
-            moveHierarchyItem({ container: containerName, parentId: o.id });
+            moveHierarchyItem({ container: containerDef.name, parentId: o.id });
             setDraggingId(null);
           }}
           className={`group flex items-center gap-0.5 rounded-md transition-all duration-150 ${
@@ -1301,17 +1525,18 @@ export default function EditorPage() {
             <span className="truncate">{o.name}</span>
           </button>
           <AddItemMenu
-            containerName={containerName}
+            containerDef={containerDef}
             parentId={o.id}
             testId={`button-add-on-${o.id}`}
             title={isGroup ? `Add into ${o.name}` : `Attach a script to ${o.name}`}
+            showObjects={isGroup}
           />
         </div>
         {childScripts.map((s) => (
           <ScriptRow key={s.id} s={s} indent={indent + 16} />
         ))}
         {childObjs.map((child) => (
-          <ObjectTreeRow key={child.id} o={child} containerName={containerName} indent={indent + 12} />
+          <ObjectTreeRow key={child.id} o={child} containerDef={containerDef} indent={indent + 12} />
         ))}
       </div>
     );
@@ -1351,7 +1576,7 @@ export default function EditorPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {CONTAINERS.map((c) => (
+                {ALL_CONTAINERS.filter((c) => c.canHoldObjects).map((c) => (
                   <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1818,16 +2043,16 @@ export default function EditorPage() {
             <div>
               <Label className="text-xs">Type</Label>
               <Select
-                value={selectedScript.scriptType ?? "Script"}
+                value={selectedScript.scriptType ?? "server"}
                 onValueChange={(v) => handleScriptFieldChange("scriptType", v)}
               >
                 <SelectTrigger data-testid="select-script-type-panel">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Script">Script</SelectItem>
-                  <SelectItem value="LocalScript">LocalScript</SelectItem>
-                  <SelectItem value="ModuleScript">ModuleScript</SelectItem>
+                  <SelectItem value="server">Server</SelectItem>
+                  <SelectItem value="client">Client</SelectItem>
+                  <SelectItem value="shared">Shared</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1849,12 +2074,16 @@ export default function EditorPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1.5">
-            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${selectedScript.scriptType === "LocalScript" ? "bg-blue-400" : "bg-green-400"}`} />
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+              selectedScript.scriptType === "client" ? "bg-blue-400"
+              : selectedScript.scriptType === "shared" ? "bg-purple-400"
+              : "bg-green-400"
+            }`} />
             <span className="text-[11px] text-muted-foreground">
-              {selectedScript.scriptType === "LocalScript"
+              {selectedScript.scriptType === "client"
                 ? "Runs client-side in the player's browser"
-                : selectedScript.scriptType === "ModuleScript"
-                ? "Shared module — required by other scripts"
+                : selectedScript.scriptType === "shared"
+                ? "Runs anywhere — utilities and shared constants"
                 : "Runs server-side in the secure sandbox"}
             </span>
           </div>
@@ -2259,7 +2488,7 @@ export default function EditorPage() {
                               multiplayer is wired up. Today every script runs locally,
                               but the value is recorded for future replication. */}
                           <Select
-                            value={selectedScript.scriptType ?? "Script"}
+                            value={selectedScript.scriptType ?? "server"}
                             onValueChange={(v) =>
                               updateScriptMutation.mutate({
                                 id: selectedScript.id,
@@ -2271,9 +2500,9 @@ export default function EditorPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="Script">Script (server)</SelectItem>
-                              <SelectItem value="LocalScript">LocalScript (client)</SelectItem>
-                              <SelectItem value="ModuleScript">ModuleScript (shared)</SelectItem>
+                              <SelectItem value="server">Server</SelectItem>
+                              <SelectItem value="client">Client</SelectItem>
+                              <SelectItem value="shared">Shared</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

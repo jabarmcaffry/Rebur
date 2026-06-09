@@ -162,6 +162,7 @@ interface RigBones {
   hip: THREE.Bone | null;
   waist: THREE.Bone | null;
   spine: THREE.Bone | null;
+  neck: THREE.Bone | null;
   head: THREE.Bone | null;
   leftShoulder: THREE.Bone | null;
   rightShoulder: THREE.Bone | null;
@@ -169,6 +170,8 @@ interface RigBones {
   rightArm: THREE.Bone | null;
   leftForeArm: THREE.Bone | null;
   rightForeArm: THREE.Bone | null;
+  leftHand: THREE.Bone | null;
+  rightHand: THREE.Bone | null;
   leftUpLeg: THREE.Bone | null;
   rightUpLeg: THREE.Bone | null;
   leftLeg: THREE.Bone | null;
@@ -250,6 +253,7 @@ function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone,
     waist:         findBoneByName(root, "waist"),
     // Chest acts as the spine (score=3 via chest|torso pattern).
     spine:         findBone(root, "center", "spine"),
+    neck:          findBoneByName(root, "neck"),
     head:          findBone(root, "center", "head"),
     // KTFL / KTFR are the collarbone/shoulder bones — parents of the upper arms.
     leftShoulder:  findBoneByName(root, "KTFL"),
@@ -258,6 +262,8 @@ function buildRig(root: THREE.Object3D): { rig: RigBones; bindQ: Map<THREE.Bone,
     rightArm:      findBone(root, "right", "upperArm"),
     leftForeArm:   findBone(root, "left",  "foreArm"),
     rightForeArm:  findBone(root, "right", "foreArm"),
+    leftHand:      findBoneByName(root, "handL"),
+    rightHand:     findBoneByName(root, "handR"),
     leftUpLeg:     findBone(root, "left",  "upperLeg"),
     rightUpLeg:    findBone(root, "right", "upperLeg"),
     leftLeg:       findBone(root, "left",  "lowerLeg"),
@@ -287,6 +293,7 @@ interface PoseTargets {
   hip?: THREE.Euler;
   waist?: THREE.Euler;
   spine?: THREE.Euler;
+  neck?: THREE.Euler;
   head?: THREE.Euler;
   leftShoulder?: THREE.Euler;
   rightShoulder?: THREE.Euler;
@@ -294,6 +301,8 @@ interface PoseTargets {
   rightArm?: THREE.Euler;
   leftForeArm?: THREE.Euler;
   rightForeArm?: THREE.Euler;
+  leftHand?: THREE.Euler;
+  rightHand?: THREE.Euler;
   leftUpLeg?: THREE.Euler;
   rightUpLeg?: THREE.Euler;
   leftLeg?: THREE.Euler;
@@ -366,10 +375,13 @@ function poseFor(state: string, phase: number, intensity: number): PoseTargets {
       leftLeg:    new THREE.Euler(Math.min(0,  s * swing * 0.65), 0, 0),
       rightLeg:   new THREE.Euler(Math.min(0, -s * swing * 0.65), 0, 0),
       // ── Torso ────────────────────────────────────────────────────────────
-      hip:   new THREE.Euler(0,  s * 0.05 * intensity, 0),
-      waist: new THREE.Euler(0, -s * 0.03 * intensity, 0),
-      spine: new THREE.Euler(bob * 0.5, -s * 0.08 * intensity, 0),
-      head:  new THREE.Euler(0,           s * 0.05 * intensity, 0),
+      hip:       new THREE.Euler(0,  s * 0.05 * intensity, 0),
+      waist:     new THREE.Euler(0, -s * 0.03 * intensity, 0),
+      spine:     new THREE.Euler(bob * 0.5, -s * 0.08 * intensity, 0),
+      neck:      new THREE.Euler(0, -s * 0.04 * intensity, 0),
+      head:      new THREE.Euler(0,           s * 0.05 * intensity, 0),
+      leftHand:  new THREE.Euler(Math.max(0,  s * 0.15) * intensity, 0, 0),
+      rightHand: new THREE.Euler(Math.max(0, -s * 0.15) * intensity, 0, 0),
     };
   }
 
@@ -519,6 +531,9 @@ function AvatarMesh({ player }: { player: RenderPlayer }) {
     apply(rig.rightArm,      pose.rightArm);
     apply(rig.leftForeArm,   pose.leftForeArm);
     apply(rig.rightForeArm,  pose.rightForeArm);
+    apply(rig.leftHand,      pose.leftHand);
+    apply(rig.rightHand,     pose.rightHand);
+    apply(rig.neck,          pose.neck);
     apply(rig.leftUpLeg,     pose.leftUpLeg);
     apply(rig.rightUpLeg,    pose.rightUpLeg);
     apply(rig.leftLeg,       pose.leftLeg);
