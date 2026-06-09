@@ -1,0 +1,214 @@
+Here's the fully complete picture:
+Rebur
+├── Workspace
+│   └── [developer organized folders]
+│       └── [entities]
+│           ├── AnyScript.server
+│           └── AnyScript.client
+│
+├── Lighting
+│
+├── Players
+│   ├── StarterInventory
+│   ├── StarterData
+│   ├── StarterCharacter
+│   │   ├── Default
+│   │   │   ├── CharacterSetup.server
+│   │   │   └── CharacterSetup.client
+│   │   ├── Warrior
+│   │   │   ├── WarriorSetup.server
+│   │   │   └── WarriorSetup.client
+│   │   └── Scout
+│   │       ├── ScoutSetup.server
+│   │       └── ScoutSetup.client
+│   └── StarterGui
+│       └── HudSetup.client
+│
+├── Assets
+│   ├── Shared
+│   │   ├── Models
+│   │   │   └── Sword
+│   │   │       └── SwordGlow.client
+│   │   ├── Sounds
+│   │   ├── Textures
+│   │   └── Animations
+│   └── Server
+│       ├── Models
+│       │   └── RareDrop
+│       │       └── DropLogic.server
+│       └── Data
+│
+├── Data
+│   ├── Session
+│   └── Store
+│
+├── Scripts
+│   ├── Server
+│   │   └── AnyScript.server
+│   ├── Client
+│   │   └── AnyScript.client
+│   └── Shared
+│       └── AnyScript.shared
+│
+├── Teams
+├── Chat
+└── Sound
+
+The rules that govern everything:
+SuffixRuns onCan accessUsed for.serverServer onlyAll Rebur APIsGame logic, physics, data, authority.clientPlayer browserLimited APIsVisual feedback, UI, input, effects.sharedAnywhereSafe APIs onlyUtilities, constants, helpers
+
+Where scripts are allowed:
+Location.server.client.sharedWorkspace entities✓✓✗Players/StarterCharacter✓✓✗Players/StarterGui✗✓✗Assets/Shared✗✓✗Assets/Server✓✗✗Scripts/Server✓✗✗Scripts/Client✗✓✗Scripts/Shared✗✗✓
+
+Each container explained:
+Workspace
+Freeform, developer organized. No enforced structure. Organize it however your game needs. Scripts attach directly to entities and follow the suffix rules. Effects attach as components directly to parts:
+jspart.effects.add("particles", { color: "#ff4400", rate: 50 })
+part.effects.add("glow", { intensity: 0.8, color: "#ffffff" })
+part.effects.add("trail", { color: "#ffffff", length: 2 })
+part.effects.add("outline", { color: "#ff0000", width: 2 })
+part.effects.clear()
+part.effects.remove("glow")
+Example of a real game structure inside Workspace:
+Workspace
+├── Lobby
+│   ├── SpawnPoints
+│   └── Props
+├── BattleArena
+│   ├── DamagePart
+│   │   ├── DamageScript.server    — calculates and applies damage
+│   │   └── DamageScript.client    — screen shake, hit flash
+│   ├── Weapons
+│   │   └── Sword
+│   │       └── SwordScript.client — blade glow, swing trail
+│   └── SpawnPoints
+└── Shop
+    └── ShopZone
+        ├── ShopLogic.server       — validates purchases, updates data
+        └── ShopUi.client          — opens shop UI, animations
+
+Lighting
+Global, top level, affects everything. Not spatial so it doesn't belong inside Workspace:
+jsRebur.Lighting.ambient = "#334455"
+Rebur.Lighting.brightness = 0.8
+Rebur.Lighting.fog = { color: "#aaaaaa", density: 0.02 }
+Rebur.Lighting.shadows = true
+Rebur.Lighting.time = 14.5
+Rebur.Lighting.weather = "rain"
+Rebur.Lighting.skybox = "sunset"
+Rebur.Lighting.on("timeChanged", (time) => {})
+
+Players
+Everything that defines a player before and during a session. Declare once, applies to every player automatically:
+jsPlayers.StarterCharacter.Default.walkSpeed = 16
+Players.StarterCharacter.Default.maxHealth = 100
+Players.StarterCharacter.Warrior.walkSpeed = 12
+Players.StarterCharacter.Warrior.maxHealth = 200
+Players.StarterCharacter.Scout.walkSpeed = 22
+Players.StarterCharacter.Scout.maxHealth = 80
+Players.StarterData.coins = 0
+Players.StarterData.xp = 0
+Players.StarterData.level = 1
+Players.StarterInventory.add("Sword")
+Players.StarterInventory.add("Potion", { count: 3 })
+
+Assets
+One place for everything reusable. Split by who can see it:
+jsconst sword = Assets.Shared.Models.get("Sword").clone()
+const hit = Assets.Shared.Sounds.get("HitSound")
+const anim = Assets.Shared.Animations.get("SwordSwing")
+const secret = Assets.Server.Models.get("RareDrop").clone()
+
+Data
+Everything persistence related. Split by lifetime:
+js// session — scores, round state, phase
+Data.Session.set("score", 0)
+Data.Session.set("phase", "lobby")
+Data.Session.on("score", (newVal, oldVal) => {})
+Data.Session.bind("score", (val) => {
+  Rebur.Gui.text("score", "Score: " + val)
+})
+
+// store — high scores, progression, records
+Data.Store.set("highScore", { username: "Jabar", score: 9999 })
+Data.Store.increment("totalGamesPlayed")
+Data.Store.leaderboard("score", { limit: 10 })
+Data.Store.leaderboard("score", { limit: 10, period: "weekly" })
+
+Scripts
+Global systems that don't belong to any specific object:
+Scripts
+├── Server
+│   ├── RoundManager.server
+│   ├── SpawnSystem.server
+│   ├── EconomySystem.server
+│   └── PlayerManager.server
+├── Client
+│   ├── InputHandler.client
+│   └── CameraController.client
+└── Shared
+    ├── MathUtils.shared
+    ├── Constants.shared
+    └── ItemConfig.shared
+
+Teams
+jsRebur.Teams.create("Red", "#ef4444")
+Rebur.Teams.create("Blue", "#3b82f6")
+Rebur.Teams.assign(player, "Red")
+Rebur.Teams.get("Red")
+Rebur.Teams.score("Red", 10)
+Rebur.Teams.reset()
+Rebur.Teams.on("scored", (team, points) => {})
+Rebur.Teams.on("won", (team) => {})
+player.team
+
+Chat
+jsRebur.Chat.send(player, "hello")
+Rebur.Chat.send(null, "Server announcement")
+Rebur.Chat.on("message", (player, text, channel) => {})
+Rebur.Chat.channels.create("global")
+Rebur.Chat.channels.create("team")
+Rebur.Chat.channels.join(player, "team")
+Rebur.Chat.filter(text)
+Rebur.Chat.mute(player)
+Rebur.Chat.unmute(player)
+
+Sound
+jsRebur.Sound.group("music", { volume: 0.5 })
+Rebur.Sound.group("sfx", { volume: 0.8 })
+Rebur.Sound.group("ambient", { volume: 0.3 })
+Rebur.Sound.play("theme", { group: "music", loop: true })
+Rebur.Sound.play("hit", { group: "sfx" })
+Rebur.Sound.volume("music", 0.3)
+Rebur.Sound.mute("music")
+Rebur.Sound.unmute("music")
+Rebur.Sound.fadeOut("music", 2)
+Rebur.Sound.fadeIn("theme", 2)
+
+Physics
+jsRebur.Physics.gravity = 9.81
+Rebur.Physics.airDrag = 0.01
+Rebur.Physics.joint(entityA, entityB, { type: "hinge", axis: "y" })
+Rebur.Physics.joint(entityA, entityB, { type: "fixed" })
+Rebur.Physics.joint(entityA, entityB, { type: "spring", stiffness: 10 })
+entity.body.material = "ice"
+entity.body.material = "rubber"
+entity.body.material = "metal"
+entity.body.constraint = { maxVelocity: 20 }
+
+How a developer thinks in this system:
+What they want to doWhere it goesDamage logic on a partWorkspace/BattleArena/DamagePart/DamageScript.serverHit effect on a partWorkspace/BattleArena/DamagePart/DamageScript.clientDefault character statsPlayers/StarterCharacter/Default/CharacterSetup.serverDefault HUD for everyonePlayers/StarterGui/HudSetup.clientReusable sword templateAssets/Shared/Models/SwordSecret drop tableAssets/Server/DataRound managementScripts/Server/RoundManager.serverCamera controllerScripts/Client/CameraController.clientMath utilityScripts/Shared/MathUtils.sharedTrack round scoreData/Session/scoreTrack high scoreData/Store/highScoreGive everyone a swordPlayers/StarterInventory/SwordAdd glow to a partpart.effects.add("glow", {...})Manage teamsRebur.TeamsSend chat messageRebur.ChatPlay background musicRebur.Sound.play("theme", { group: "music" })Control lightingRebur.Lighting
+
+The core rules that never change:
+
+Workspace is freeform — organize it however your game needs
+Scripts follow suffix rules wherever they live — .server, .client, .shared
+.shared scripts only live in Scripts/Shared, never on entities
+StarterGui only allows .client scripts, GUI is always client side
+Assets/Shared only allows .client scripts, already replicated
+Assets/Server only allows .server scripts, never sent to clients
+Effects are components on entities, never a container
+Data/Session resets, Data/Store persists, always one decision
+Teams, Chat, Sound are flat services, no sub containers
+Never nest containers inside containers beyond what is shown
+Everything is one decision — the structure always answers where something lives
