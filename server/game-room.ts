@@ -20,7 +20,7 @@ import type { RenderState, RenderObject, RenderPlayer, RenderGuiElement, DebugDr
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const TICK_MS       = 50;    // 20 Hz
-const GRAVITY       = -28;
+// GRAVITY constant removed — use _getGravityVec() which reads live from scriptRunner.getPhysicsSettings()
 const DEFAULT_SPEED = 14;
 const DEFAULT_JUMP  = 14;
 const SPRINT_MULT   = 1.6;
@@ -45,6 +45,7 @@ interface PlayerState {
   health: number; maxHealth: number;
   speed: number; jumpPower: number;
   animation: string;
+  autoRespawn: boolean;  // if false, script handles respawn manually
   // Camera state sent by client each input tick
   camWx: number; camWy: number; camWz: number;   // world-space camera position
   camFx: number; camFy: number; camFz: number;   // world-space camera forward (unit vec)
@@ -178,10 +179,15 @@ export class GameRoom {
       if (!isWorkspace) continue;
       if (o.type === "light" || o.type === "folder") continue;
 
+      // Support both new format (properties.gravity={strength,radius})
+      // and legacy editor format (properties.gravityEnabled/gravityStrength/gravityRadius)
       const gravPropRaw = o.properties?.gravity;
+      const legacyEnabled = o.properties?.gravityEnabled;
       const gravProp = gravPropRaw
         ? { strength: gravPropRaw.strength ?? 20, radius: gravPropRaw.radius ?? 20 }
-        : undefined;
+        : (legacyEnabled
+            ? { strength: o.properties?.gravityStrength ?? 20, radius: o.properties?.gravityRadius ?? 20 }
+            : undefined);
 
       const dobj: DynamicObj = {
         id: o.id, name: o.name ?? "Part",
@@ -254,6 +260,7 @@ export class GameRoom {
       health: 100, maxHealth: 100,
       speed: DEFAULT_SPEED, jumpPower: DEFAULT_JUMP,
       animation: "idle",
+      autoRespawn: true,
     };
     this.players.set(id, p);
 
@@ -446,13 +453,19 @@ export class GameRoom {
         if (mut.impulseX !== undefined) p.vx += mut.impulseX;
         if (mut.impulseY !== undefined) p.vy += mut.impulseY;
         if (mut.impulseZ !== undefined) p.vz += mut.impulseZ;
+        // Direct velocity assignment (knockback via player.body.velocity = {...})
+        if (mut.velX !== undefined) p.vx = mut.velX;
+        if (mut.velY !== undefined) p.vy = mut.velY;
+        if (mut.velZ !== undefined) p.vz = mut.velZ;
         if (mut.heading  !== undefined) p.rotY = mut.heading;
+        if (mut.autoRespawn !== undefined) p.autoRespawn = mut.autoRespawn;
         if (p.health <= 0) this._handlePlayerDeath(p);
       }
     }
 
-    // ── Step 4: Per-object gravity wells ─────────────────────────────────────
+    // ── Step 4: Per-object gravity wells + setGravityField zones ─────────────
     for (const p of this.players.values()) {
+      // Entity-attached gravity wells
       for (const obj of this.allObjs.values()) {
         if (!obj.gravity) continue;
         const grav = obj.gravity as { strength: number; radius: number };
@@ -463,6 +476,29 @@ export class GameRoom {
           p.vx += (dx / dist) * force * dt;
           p.vy += (dy / dist) * force * dt;
           p.vz += (dz / dist) * force * dt;
+        }
+      }
+      // World-space gravity fields from Rebur.Physics.setGravityField()
+      if (this.scriptRunner) {
+        for (const field of this.scriptRunner.getGravityFields()) {
+          if (!field.enabled) continue;
+          const dx = field.position.x - p.x, dy = field.position.y - p.y, dz = field.position.z - p.z;
+          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (dist > 0 && dist < field.radius) {
+            const force = field.strength / Math.max(dist, 1);
+            if (field.direction) {
+              // Pull in fixed direction
+              const dl = Math.sqrt(field.direction.x**2 + field.direction.y**2 + field.direction.z**2) || 1;
+              p.vx += (field.direction.x / dl) * force * dt;
+              p.vy += (field.direction.y / dl) * force * dt;
+              p.vz += (field.direction.z / dl) * force * dt;
+            } else {
+              // Pull toward center
+              p.vx += (dx / dist) * force * dt;
+              p.vy += (dy / dist) * force * dt;
+              p.vz += (dz / dist) * force * dt;
+            }
+          }
         }
       }
     }
@@ -494,10 +530,15 @@ export class GameRoom {
       // Sub-step loop — integrate gravity + resolve collisions multiple times per
       // tick so high-velocity motion (e.g. fast falling) doesn't tunnel through thin
       // platforms and collision response is numerically stable.
+      // World gravity vector — read live so scripts can change it at runtime
+      const wg = this._getGravityVec();
+
       for (let step = 0; step < SUBSTEPS; step++) {
         // Faster fall when descending (snappier jump feel without changing jump height)
         const gravScale = p.vy < 0 ? 1.4 : 1.0;
-        p.vy += GRAVITY * gravScale * subDt;
+        p.vx += wg.x * gravScale * subDt;
+        p.vy += wg.y * gravScale * subDt;
+        p.vz += wg.z * gravScale * subDt;
 
         p.x += p.vx * subDt;
         p.y += p.vy * subDt;
@@ -528,7 +569,10 @@ export class GameRoom {
     for (const obj of this.dynamics.values()) {
       if (obj.anchored) continue;
 
-      obj.vy += GRAVITY * dt;
+      const wg2 = this._getGravityVec();
+      obj.vx += wg2.x * dt;
+      obj.vy += wg2.y * dt;
+      obj.vz += wg2.z * dt;
       const drag = Math.pow(OBJ_DRAG, dt);
       obj.vx *= drag; obj.vz *= drag;
 
@@ -579,6 +623,7 @@ export class GameRoom {
     if (this.scriptRunner) {
       const nowTouching = new Set<string>();
       for (const p of this.players.values()) {
+        const sp = this._makeScriptPlayer(p);
         for (const obj of this.allObjs.values()) {
           const hx=obj.sx/2, hy=obj.sy/2, hz=obj.sz/2;
           const ox = Math.min(p.x+PLAYER_RADIUS, obj.x+hx) - Math.max(p.x-PLAYER_RADIUS, obj.x-hx);
@@ -588,7 +633,7 @@ export class GameRoom {
             const key = `${p.id}:${obj.id}`;
             nowTouching.add(key);
             if (!this.touchedPairs.has(key)) {
-              this.scriptRunner.fireTouched(obj.name, this._makeScriptPlayer(p));
+              this.scriptRunner.fireTouched(obj.name, sp);
             }
           }
         }
@@ -600,8 +645,24 @@ export class GameRoom {
             const key = `${p.id}:static:${b.name}`;
             nowTouching.add(key);
             if (!this.touchedPairs.has(key)) {
-              this.scriptRunner.fireTouched(b.name, this._makeScriptPlayer(p));
+              this.scriptRunner.fireTouched(b.name, sp);
             }
+          }
+        }
+      }
+      // Fire "untouched" for pairs that left contact
+      for (const key of this.touchedPairs) {
+        if (!nowTouching.has(key)) {
+          const parts = key.split(":");
+          const playerId = parts[0];
+          const p = this.players.get(playerId);
+          if (!p) continue;
+          const sp2 = this._makeScriptPlayer(p);
+          if (parts[1] === "static") {
+            this.scriptRunner.fireUntouched(parts[2], sp2);
+          } else {
+            const obj = this.allObjs.get(parts[1]);
+            if (obj) this.scriptRunner.fireUntouched(obj.name, sp2);
           }
         }
       }
@@ -805,16 +866,20 @@ export class GameRoom {
     } : undefined;
 
     if (this.sendToPlayerFn) {
-      // Per-player worldState: each player gets global gui + their own gui
+      // Per-player worldState: each player gets global gui + their own gui + own camera override
       for (const p of this.players.values()) {
         const playerGui = this.scriptRunner?.getGuiElementsForPlayer(p.id) ?? this.scriptRunner?.getGuiElements() ?? [];
+        const perPlayerCam = this.scriptRunner?.getPlayerCameraOverride(p.id);
+        const playerCamera = perPlayerCam
+          ? { mode: perPlayerCam.mode ?? cameraState?.mode ?? "thirdPerson", position: perPlayerCam.position, lookAt: perPlayerCam.lookAt, fov: perPlayerCam.fov ?? cameraState?.fov, distance: perPlayerCam.distance ?? cameraState?.distance }
+          : cameraState;
         const state: RenderState = {
           tick, serverTime: broadcastTime,
           objects: renderObjects,
           players: renderPlayers,
           gui: playerGui.map(toRenderGui),
           localPlayerId: p.id,
-          camera: cameraState,
+          camera: playerCamera,
           debugDraws: debugDraws.length > 0 ? debugDraws : undefined,
           particleEvents: particleEvts.length > 0 ? particleEvts : undefined,
         };
@@ -841,14 +906,25 @@ export class GameRoom {
 
   private _handlePlayerDeath(p: PlayerState) {
     this.scriptRunner?.firePlayerDied(this._makeScriptPlayer(p));
-    this._respawnPlayer(p);
-    p.health = p.maxHealth;
-    this.scriptRunner?.firePlayerSpawned(this._makeScriptPlayer(p));
+    if (p.autoRespawn !== false) {
+      this._respawnPlayer(p);
+      p.health = p.maxHealth;
+      this.scriptRunner?.firePlayerSpawned(this._makeScriptPlayer(p));
+    }
   }
 
   private _respawnPlayer(p: PlayerState) {
     p.x = p.spawnX; p.y = p.spawnY; p.z = p.spawnZ;
     p.vx = 0; p.vy = 0; p.vz = 0;
+  }
+
+  // ── Gravity vector helper ─────────────────────────────────────────────────────
+
+  private _getGravityVec(): { x: number; y: number; z: number } {
+    const g = this.scriptRunner?.getPhysicsSettings()?.gravity ?? 28;
+    if (typeof g === "number") return { x: 0, y: -(g as number), z: 0 };
+    const gv = g as { x?: number; y?: number; z?: number };
+    return { x: gv.x ?? 0, y: gv.y ?? -28, z: gv.z ?? 0 };
   }
 
   // ── AABB helpers ──────────────────────────────────────────────────────────────

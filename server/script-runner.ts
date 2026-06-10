@@ -81,6 +81,8 @@ export interface ScriptPlayerMutation {
   spawnPoint?: { x: number; y: number; z: number };
   impulseX?: number; impulseY?: number; impulseZ?: number;
   heading?: number;  // yaw in radians — applied to the player's facing angle
+  velX?: number; velY?: number; velZ?: number;  // direct velocity assignment (knockback)
+  autoRespawn?: boolean;
 }
 
 export interface ScriptCreatedObject {
@@ -253,7 +255,9 @@ export class ScriptRunner {
 
   // Camera is a plain writable store — no preset modes
   private cameraSettings: Record<string, any> = {};
-  private physicsSettings = { gravity: 9.81, airDrag: 0 };
+  private physicsSettings: { gravity: number | { x: number; y: number; z: number }; airDrag: number } = { gravity: 28, airDrag: 0 };
+  private perPlayerCameraSettings = new Map<string, Record<string, any>>();
+  readonly gravityFields: Array<{ id: number; position: {x:number;y:number;z:number}; radius: number; strength: number; direction: {x:number;y:number;z:number}|null; enabled: boolean }> = [];
 
   // Per-player sub-systems
   private playerInventory = new Map<string, InventoryData>();
@@ -345,7 +349,7 @@ export class ScriptRunner {
     // ── Internal engine events (scripts cannot emit these) ────────────────
     const INTERNAL_ENTITY_EVENTS = new Set([
       "touched", "untouched", "touchstarted", "touchended",
-      "clicked", "destroyed", "woke", "slept",
+      "clicked", "destroyed", "predestroy", "removing", "woke", "slept",
       "collisionstarted", "collisionended",
       "propertychanged", "changed",
     ]);
@@ -429,6 +433,11 @@ export class ScriptRunner {
           obj.impulseX = (obj.impulseX ?? 0) + (+(f?.x ?? 0));
           obj.impulseY = (obj.impulseY ?? 0) + (+(f?.y ?? 0));
           obj.impulseZ = (obj.impulseZ ?? 0) + (+(f?.z ?? 0));
+        },
+        applyAngularImpulse(t: any) {
+          obj.avX = (obj.avX ?? 0) + (+(t?.x ?? 0));
+          obj.avY = (obj.avY ?? 0) + (+(t?.y ?? 0));
+          obj.avZ = (obj.avZ ?? 0) + (+(t?.z ?? 0));
         },
         setVelocity(v: any) {
           obj.velX = +(v?.x ?? 0);
@@ -527,7 +536,8 @@ export class ScriptRunner {
 
         destroy() {
           if (obj._destroyed) return;
-          runner._fireObj(obj.name, "removing", ep);
+          runner._fireObj(obj.name, "predestroy", ep);
+          runner._fireObj(obj.name, "removing", ep);  // backward-compat alias
           obj._destroyed = true;
           obj.visible = false;
           runner.destroyQueue.push(obj.name);
@@ -839,6 +849,37 @@ export class ScriptRunner {
         get respawn()    { return false; },
         set respawn(v: any) { if (v) mut().respawn = true; },
 
+        get autoRespawn()   { return (p as any)._autoRespawn !== false; },
+        set autoRespawn(v: any) {
+          (p as any)._autoRespawn = Boolean(v);
+          mut().autoRespawn = Boolean(v);
+        },
+
+        get body() {
+          return {
+            get velocity() { return { x: 0, y: 0, z: 0 }; },
+            set velocity(v: any) {
+              const m = mut();
+              m.velX = +(v?.x ?? 0);
+              m.velY = +(v?.y ?? 0);
+              m.velZ = +(v?.z ?? 0);
+            },
+            applyForce(f: any) {
+              const dt = 0.05;
+              const m = mut();
+              m.impulseX = (m.impulseX ?? 0) + (+(f?.x ?? 0)) * dt;
+              m.impulseY = (m.impulseY ?? 0) + (+(f?.y ?? 0)) * dt;
+              m.impulseZ = (m.impulseZ ?? 0) + (+(f?.z ?? 0)) * dt;
+            },
+            applyImpulse(f: any) {
+              const m = mut();
+              m.impulseX = (m.impulseX ?? 0) + (+(f?.x ?? 0));
+              m.impulseY = (m.impulseY ?? 0) + (+(f?.y ?? 0));
+              m.impulseZ = (m.impulseZ ?? 0) + (+(f?.z ?? 0));
+            },
+          };
+        },
+
         get gui()       { return gui; },
         get data()      { return data; },
         get animator()  { return animator; },
@@ -1130,6 +1171,50 @@ export class ScriptRunner {
         return best;
       },
 
+      // ── Sphere overlap — all AABB objects intersecting a sphere ───────────
+      overlapSphere(center: any, radius: number, opts?: any) {
+        const cx = +(center?.x ?? 0), cy = +(center?.y ?? 0), cz = +(center?.z ?? 0);
+        const r  = Math.max(0, +(radius ?? 1));
+        const filterTag: string | string[] | undefined = opts?.tag;
+        const results: any[] = [];
+        for (const obj of runner.objects.values()) {
+          if (obj._destroyed) continue;
+          if (filterTag) {
+            const tags = Array.isArray(filterTag) ? filterTag : [filterTag];
+            if (!tags.every(t => runner.tagMap.get(t)?.has(obj.name))) continue;
+          }
+          // Closest point on AABB to sphere center
+          const hx = (obj.scaleX ?? 1) / 2, hy = (obj.scaleY ?? 1) / 2, hz = (obj.scaleZ ?? 1) / 2;
+          const cpx = Math.max(obj.positionX - hx, Math.min(cx, obj.positionX + hx));
+          const cpy = Math.max(obj.positionY - hy, Math.min(cy, obj.positionY + hy));
+          const cpz = Math.max(obj.positionZ - hz, Math.min(cz, obj.positionZ + hz));
+          const ddx = cx - cpx, ddy = cy - cpy, ddz = cz - cpz;
+          if (ddx*ddx + ddy*ddy + ddz*ddz <= r*r) results.push(makeEntityProxy(obj));
+        }
+        return results;
+      },
+
+      // ── Box overlap — all AABB objects intersecting an axis-aligned box ──
+      overlapBox(center: any, halfExtents: any, _rotation?: any, opts?: any) {
+        const cx = +(center?.x ?? 0), cy = +(center?.y ?? 0), cz = +(center?.z ?? 0);
+        const hx = +(halfExtents?.x ?? 1), hy = +(halfExtents?.y ?? 1), hz = +(halfExtents?.z ?? 1);
+        const filterTag: string | string[] | undefined = opts?.tag ?? _rotation?.tag;
+        const results: any[] = [];
+        for (const obj of runner.objects.values()) {
+          if (obj._destroyed) continue;
+          if (filterTag) {
+            const tags = Array.isArray(filterTag) ? filterTag : [filterTag];
+            if (!tags.every(t => runner.tagMap.get(t)?.has(obj.name))) continue;
+          }
+          const ohx = (obj.scaleX ?? 1) / 2, ohy = (obj.scaleY ?? 1) / 2, ohz = (obj.scaleZ ?? 1) / 2;
+          const ox = Math.min(cx+hx, obj.positionX+ohx) - Math.max(cx-hx, obj.positionX-ohx);
+          const oy = Math.min(cy+hy, obj.positionY+ohy) - Math.max(cy-hy, obj.positionY-ohy);
+          const oz = Math.min(cz+hz, obj.positionZ+ohz) - Math.max(cz-hz, obj.positionZ-ohz);
+          if (ox > 0 && oy > 0 && oz > 0) results.push(makeEntityProxy(obj));
+        }
+        return results;
+      },
+
       create(opts: any) {
         const name = opts.name ?? `Part_${++runner.timerIdCounter}`;
         const px = +(opts.position?.x ?? 0);
@@ -1222,6 +1307,15 @@ export class ScriptRunner {
       all(entityOrProxy: any) {
         const name = typeof entityOrProxy === "string" ? entityOrProxy : entityOrProxy?.name;
         return Array.from(runner.entityTags.get(name) ?? []);
+      },
+      query(tagOrTags: string | string[]) {
+        const tags = Array.isArray(tagOrTags) ? tagOrTags : [tagOrTags];
+        let results = Array.from(runner.objects.values()).filter(o => !o._destroyed);
+        for (const tag of tags) {
+          const names = runner.tagMap.get(tag) ?? new Set();
+          results = results.filter(o => names.has(o.name));
+        }
+        return results.map(o => makeEntityProxy(o));
       },
     };
 
@@ -1336,6 +1430,27 @@ export class ScriptRunner {
         const ray = reburCamera.getForwardRay(player);
         if (!ray) return null;
         return reburWorkspace.raycast(ray.origin, ray.direction, opts);
+      },
+
+      // Per-player camera override — only affects the named player's client view.
+      setForPlayer(player: any, opts: any) {
+        const id = typeof player === "string" ? player : player?.id;
+        if (!id || !opts) return;
+        runner.perPlayerCameraSettings.set(id, { ...opts });
+      },
+
+      // Broadcast the same camera override to every connected player.
+      setForAll(opts: any) {
+        if (!opts) return;
+        for (const id of runner.players.keys()) {
+          runner.perPlayerCameraSettings.set(id, { ...opts });
+        }
+      },
+
+      // Clear a per-player override (reverts to global camera).
+      clearForPlayer(player: any) {
+        const id = typeof player === "string" ? player : player?.id;
+        if (id) runner.perPlayerCameraSettings.delete(id);
       },
     };
 
@@ -1510,10 +1625,39 @@ export class ScriptRunner {
     };
 
     // ── Rebur.Physics ──────────────────────────────────────────────────────
-    const reburPhysics = new Proxy(runner.physicsSettings as any, {
-      get(t, key: string) { return t[key]; },
-      set(t, key: string, val) { t[key] = val; return true; },
-    });
+    const reburPhysics = {
+      get gravity()  { return runner.physicsSettings.gravity; },
+      set gravity(v: any) {
+        // Accept scalar (downward magnitude) or vector {x,y,z}
+        if (typeof v === "number") runner.physicsSettings.gravity = v;
+        else if (v && typeof v === "object") runner.physicsSettings.gravity = v as any;
+      },
+      get airDrag()  { return runner.physicsSettings.airDrag; },
+      set airDrag(v: any) { runner.physicsSettings.airDrag = Math.max(0, +v); },
+      setGravityField(opts: any) {
+        const id = ++runner.timerIdCounter;
+        const dir = opts?.direction
+          ? { x: +(opts.direction.x ?? 0), y: +(opts.direction.y ?? -1), z: +(opts.direction.z ?? 0) }
+          : null; // null means pull toward center
+        const field = {
+          id,
+          position: { x: +(opts?.position?.x ?? 0), y: +(opts?.position?.y ?? 0), z: +(opts?.position?.z ?? 0) },
+          radius:   +(opts?.radius   ?? 20),
+          strength: +(opts?.strength ?? 10),
+          direction: dir,
+          enabled:  true,
+        };
+        runner.gravityFields.push(field);
+        return {
+          get enabled() { return field.enabled; },
+          set enabled(v: any) { field.enabled = Boolean(v); },
+          remove() {
+            const idx = runner.gravityFields.indexOf(field);
+            if (idx >= 0) runner.gravityFields.splice(idx, 1);
+          },
+        };
+      },
+    };
 
     // ── Rebur.RunService ───────────────────────────────────────────────────
     const reburRunService = {
@@ -1536,13 +1680,20 @@ export class ScriptRunner {
       broadcast(event: string, payload?: any) {
         runner.networkMessages.push({ event, payload: payload ?? null });
       },
-      // Server → specific player (targeted)
-      send(playerOrId: any, event: string, payload?: any) {
+      // Server → specific player (primary spec name)
+      sendTo(playerOrId: any, event: string, payload?: any) {
         const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
         if (id) runner.networkToPlayer.push({ playerId: id, event, payload: payload ?? null });
       },
-      // Backward-compat alias for targeted send
-      sendTo(playerOrId: any, event: string, payload?: any) {
+      // Server → subset of players
+      sendToMany(playersOrIds: any[], event: string, payload?: any) {
+        for (const p of (playersOrIds ?? [])) {
+          const id = typeof p === "string" ? p : p?.id;
+          if (id) runner.networkToPlayer.push({ playerId: id, event, payload: payload ?? null });
+        }
+      },
+      // Alias kept for backward compat — same as sendTo
+      send(playerOrId: any, event: string, payload?: any) {
         const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
         if (id) runner.networkToPlayer.push({ playerId: id, event, payload: payload ?? null });
       },
@@ -1871,7 +2022,11 @@ export class ScriptRunner {
   drainDebugDraws(): any[]     { const d=[...this.debugDraws]; this.debugDraws=[]; return d; }
   drainParticleEvents(): any[] { const p=[...this.particleEvents]; this.particleEvents=[]; return p; }
   getCameraSettings()  { return { ...this.cameraSettings }; }
-  getPhysicsSettings() { return { ...this.physicsSettings }; }
+  getPlayerCameraOverride(playerId: string): Record<string, any> | undefined {
+    return this.perPlayerCameraSettings.get(playerId);
+  }
+  getPhysicsSettings() { return { gravity: this.physicsSettings.gravity, airDrag: this.physicsSettings.airDrag }; }
+  getGravityFields()   { return this.gravityFields; }
 
   /** Called by GameRoom each tick after receiving client input. */
   updatePlayerCameraState(playerId: string, pos: {x:number;y:number;z:number}, forward: {x:number;y:number;z:number}) {
