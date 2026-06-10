@@ -55,6 +55,7 @@ interface StaticBox {
   minY: number; maxY: number;
   minZ: number; maxZ: number;
   name: string;
+  canCollide: boolean;
 }
 
 interface DynamicObj {
@@ -74,10 +75,12 @@ interface DynamicObj {
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;
-  // Per-object gravity well
-  gravityEnabled?: boolean;
-  gravityStrength?: number;
-  gravityRadius?: number;
+  // Per-object gravity well: { strength, radius } or false/undefined for none
+  gravity?: { strength: number; radius: number } | false;
+  // Angular velocity (radians/second)
+  avX: number; avY: number; avZ: number;
+  // Accumulated torque (applied each tick, then cleared)
+  torqueX: number; torqueY: number; torqueZ: number;
 }
 
 // ── GameRoom ──────────────────────────────────────────────────────────────────
@@ -175,7 +178,10 @@ export class GameRoom {
       if (!isWorkspace) continue;
       if (o.type === "light" || o.type === "folder") continue;
 
-      const gravProp = o.properties?.gravity;
+      const gravPropRaw = o.properties?.gravity;
+      const gravProp = gravPropRaw
+        ? { strength: gravPropRaw.strength ?? 20, radius: gravPropRaw.radius ?? 20 }
+        : undefined;
 
       const dobj: DynamicObj = {
         id: o.id, name: o.name ?? "Part",
@@ -196,9 +202,9 @@ export class GameRoom {
         animation: o.properties?.animation ?? null,
         animationSpeed: o.properties?.animationSpeed ?? 1,
         animationLoop: o.properties?.animationLoop !== false,
-        gravityEnabled: !!gravProp,
-        gravityStrength: gravProp?.strength ?? 20,
-        gravityRadius: gravProp?.radius ?? 20,
+        gravity: gravProp,
+        avX: 0, avY: 0, avZ: 0,
+        torqueX: 0, torqueY: 0, torqueZ: 0,
       };
       this.allObjs.set(o.id, dobj);
 
@@ -209,6 +215,7 @@ export class GameRoom {
           minX: px - sx/2, maxX: px + sx/2,
           minY: py - sy/2, maxY: py + sy/2,
           minZ: pz - sz/2, maxZ: pz + sz/2,
+          canCollide: o.properties?.canCollide !== false,
         });
       } else if (!isLogicalOnly) {
         this.dynamics.set(o.id, dobj);
@@ -388,7 +395,16 @@ export class GameRoom {
           obj.rotX  = so.rotationX; obj.rotY  = so.rotationY; obj.rotZ  = so.rotationZ;
           obj.color = so.color;     obj.visible = so.visible;
           obj.transparency = so.transparency ?? obj.transparency;
-          if (!obj.anchored) { obj.vx = so.velX; obj.vy = so.velY; obj.vz = so.velZ; }
+          if (!obj.anchored) {
+            obj.vx = so.velX; obj.vy = so.velY; obj.vz = so.velZ;
+            if (so.avX !== undefined) obj.avX = so.avX;
+            if (so.avY !== undefined) obj.avY = so.avY;
+            if (so.avZ !== undefined) obj.avZ = so.avZ;
+            if (so.torqueX) { obj.torqueX += so.torqueX; so.torqueX = 0; }
+            if (so.torqueY) { obj.torqueY += so.torqueY; so.torqueY = 0; }
+            if (so.torqueZ) { obj.torqueZ += so.torqueZ; so.torqueZ = 0; }
+          }
+          if (so.gravity !== undefined) obj.gravity = so.gravity;
           break;
         }
       }
@@ -403,6 +419,8 @@ export class GameRoom {
         sb.minX = obj.x - obj.sx/2; sb.maxX = obj.x + obj.sx/2;
         sb.minY = obj.y - obj.sy/2; sb.maxY = obj.y + obj.sy/2;
         sb.minZ = obj.z - obj.sz/2; sb.maxZ = obj.z + obj.sz/2;
+        const so2 = this.scriptObjs.get(obj.name);
+        if (so2) sb.canCollide = so2.canCollide !== false;
         break;
       }
     }
@@ -436,11 +454,12 @@ export class GameRoom {
     // ── Step 4: Per-object gravity wells ─────────────────────────────────────
     for (const p of this.players.values()) {
       for (const obj of this.allObjs.values()) {
-        if (!obj.gravityEnabled) continue;
+        if (!obj.gravity) continue;
+        const grav = obj.gravity as { strength: number; radius: number };
         const dx = obj.x - p.x, dy = obj.y - p.y, dz = obj.z - p.z;
         const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-        if (dist > 0 && dist < (obj.gravityRadius ?? 20)) {
-          const force = (obj.gravityStrength ?? 20) / Math.max(dist, 1);
+        if (dist > 0 && dist < grav.radius) {
+          const force = grav.strength / Math.max(dist, 1);
           p.vx += (dx / dist) * force * dt;
           p.vy += (dy / dist) * force * dt;
           p.vz += (dz / dist) * force * dt;
@@ -517,6 +536,13 @@ export class GameRoom {
       obj.y += obj.vy * dt;
       obj.z += obj.vz * dt;
 
+      // Angular velocity: apply torque, then rotate
+      obj.avX += obj.torqueX * dt; obj.avY += obj.torqueY * dt; obj.avZ += obj.torqueZ * dt;
+      obj.torqueX = 0; obj.torqueY = 0; obj.torqueZ = 0;
+      obj.rotX += obj.avX * dt; obj.rotY += obj.avY * dt; obj.rotZ += obj.avZ * dt;
+      const angDrag = Math.pow(0.85, dt);
+      obj.avX *= angDrag; obj.avY *= angDrag; obj.avZ *= angDrag;
+
       if (obj.y < KILL_Y) { obj.x=0; obj.y=5; obj.z=0; obj.vx=0; obj.vy=0; obj.vz=0; }
 
       this._pushObjOutOfStatics(obj);
@@ -543,7 +569,10 @@ export class GameRoom {
       so.rotationX = obj.rotX; so.rotationY = obj.rotY; so.rotationZ = obj.rotZ;
       so.color = obj.color; so.visible = obj.visible;
       so.transparency = obj.transparency ?? 0;
-      if (!obj.anchored) { so.velX = obj.vx; so.velY = obj.vy; so.velZ = obj.vz; }
+      if (!obj.anchored) {
+        so.velX = obj.vx; so.velY = obj.vy; so.velZ = obj.vz;
+        so.avX = obj.avX; so.avY = obj.avY; so.avZ = obj.avZ;
+      }
     }
 
     // ── Step 8: Touched event detection ──────────────────────────────────────
@@ -593,6 +622,9 @@ export class GameRoom {
           sx: spec.scaleX, sy: spec.scaleY, sz: spec.scaleZ,
           color: spec.color, visible: true, anchored: spec.anchored,
           transparency: spec.transparency,
+          gravity: spec.gravity,
+          avX: 0, avY: 0, avZ: 0,
+          torqueX: 0, torqueY: 0, torqueZ: 0,
         };
         this.allObjs.set(id, dobj);
         if (!spec.anchored) this.dynamics.set(id, dobj);
@@ -602,6 +634,7 @@ export class GameRoom {
             minX: spec.positionX - spec.scaleX/2, maxX: spec.positionX + spec.scaleX/2,
             minY: spec.positionY - spec.scaleY/2, maxY: spec.positionY + spec.scaleY/2,
             minZ: spec.positionZ - spec.scaleZ/2, maxZ: spec.positionZ + spec.scaleZ/2,
+            canCollide: spec.canCollide !== false,
           });
         }
         this.scriptObjs.set(spec.name, {
@@ -822,6 +855,7 @@ export class GameRoom {
 
   private _pushPlayerOutOfStatics(p: PlayerState): void {
     for (const b of this.statics) {
+      if (!b.canCollide) continue;
       const ox = Math.min(p.x+PLAYER_RADIUS, b.maxX) - Math.max(p.x-PLAYER_RADIUS, b.minX);
       const oy = Math.min(p.y+PLAYER_HALF_H, b.maxY) - Math.max(p.y-PLAYER_HALF_H, b.minY);
       const oz = Math.min(p.z+PLAYER_RADIUS, b.maxZ) - Math.max(p.z-PLAYER_RADIUS, b.minZ);
@@ -842,6 +876,7 @@ export class GameRoom {
   private _pushObjOutOfStatics(obj: DynamicObj) {
     const hx=obj.sx/2, hy=obj.sy/2, hz=obj.sz/2;
     for (const b of this.statics) {
+      if (!b.canCollide) continue;
       const ox = Math.min(obj.x+hx, b.maxX) - Math.max(obj.x-hx, b.minX);
       const oy = Math.min(obj.y+hy, b.maxY) - Math.max(obj.y-hy, b.minY);
       const oz = Math.min(obj.z+hz, b.maxZ) - Math.max(obj.z-hz, b.minZ);

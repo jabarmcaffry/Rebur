@@ -352,7 +352,7 @@ entity.on("touched", (other) => {
 
 ## Entity Physics Body
 
-Physics lives on \`entity.body\`. Direct velocity assignment is gone — use forces/impulses for realistic results that scale to vehicles and complex simulations.
+Physics lives on \`entity.body\`. You can assign velocity directly or use forces/impulses for more complex physics simulations.
 
 ### body properties
 
@@ -365,7 +365,8 @@ Physics lives on \`entity.body\`. Direct velocity assignment is gone — use for
 | \`body.restitution\` | number | Bounciness 0–1 (default 0) |
 | \`body.isKinematic\` | boolean | Script-moved; not affected by forces |
 | \`body.isTrigger\` | boolean | Detects overlaps but no collision response |
-| \`body.velocity\` | \`{x,y,z}\` | Current velocity (read-only) |
+| \`body.velocity\` | \`{x,y,z}\` | Current velocity — **read/write** |
+| \`body.angularVelocity\` | \`{x,y,z}\` | Rotational velocity (rad/s) — **read/write** |
 
 \`\`\`js
 const ball = Rebur.Workspace.find("Ball");
@@ -459,7 +460,8 @@ crate.on("collisionStarted", (other, impulse) => {
 | \`"collisionStarted"\` | Physical impact begins | \`other: Entity\`, \`impulse: number\` | ✗ | ✓ |
 | \`"collisionEnded"\` | Physical separation | \`other: Entity\` | ✗ | ✓ |
 | \`"clicked"\` | Player clicks this entity in 3D view | \`player: PlayerEntity\` | — | — |
-| \`"destroyed"\` | Entity is destroyed | — | — | — |
+| \`"removing"\` | **Before** entity is destroyed (cleanup hook) | \`entity: Entity\` | — | — |
+| \`"destroyed"\` | After entity is fully removed | — | — | — |
 | *(custom)* | Your script calls \`.emit()\` | your args | — | — |
 
 \`\`\`js
@@ -512,7 +514,7 @@ entity.emit("Open", 2);
 // No other entity, player, or client sees this signal.
 \`\`\`
 
-To signal across the network (server → clients or client → server), use \`Rebur.Network.send()\` or \`Rebur.Network.sendTo()\`.
+To signal across the network (server → clients), use \`Rebur.Network.broadcast()\` or \`Rebur.Network.send(player, ...)\`. From a ClientScript (client → server), use \`Rebur.Network.send(event, payload)\`.
 
 ---
 
@@ -1156,29 +1158,32 @@ const unsub = Rebur.State.on("score", (newVal, oldVal) => {
   log("Score changed from", oldVal, "to", newVal);
 });
 
+Rebur.State.delete("tempKey");  // remove a key
 Rebur.State.keys();     // string[]
 Rebur.State.getAll();   // Record<string, any>
 \`\`\`
 
 ### State-driven UI (canonical pattern)
 
-**GUI is a render layer. State is the data layer. They should not both be updated from the same line of game logic.**
+**GUI is a render layer. State is the data layer.**
 
 The correct pattern:
 1. **Game logic writes State only** — \`Rebur.State.set("score", n)\`
-2. **GUI binds to State** — automatically re-renders when State changes
+2. **GUI listens to State** — re-renders automatically when State changes via \`Rebur.State.on()\`
 
 \`\`\`js
 // 1. Declare your State
 Rebur.State.set("score", 0);
 
-// 2. Bind GUI to State — runs immediately with the current value,
-//    then automatically re-runs every time "score" changes.
-Rebur.Gui.bind("scoreLabel", "score", (val) => {
+// 2. Show initial UI
+Rebur.Gui.text("scoreLabel", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
+
+// 3. Subscribe — re-renders whenever "score" changes
+Rebur.State.on("score", (val) => {
   Rebur.Gui.text("scoreLabel", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
 });
 
-// 3. Game logic ONLY touches State — GUI updates itself
+// 4. Game logic ONLY touches State — GUI updates itself
 const coin = Rebur.Workspace.find("Coin");
 coin.on("touched", (other) => {
   if (!other.isPlayer) return;
@@ -1188,9 +1193,7 @@ coin.on("touched", (other) => {
 });
 \`\`\`
 
-**Why this matters:** if you call \`Rebur.Gui.text("scoreLabel", ...)\` directly in game logic AND have a \`Gui.bind("scoreLabel", ...)\` binding, you get two updates per event. In dev mode the engine throws immediately to catch this; in production it warns and no-ops the direct call. The binding is the only way to keep the element updated.
-
-**Exception — one-shot messages:** Use \`Rebur.Gui.text()\` directly for transient, stateless messages that don't need to survive a state change (countdown announcements, kill feed, etc.):
+**One-shot messages:** Use \`Rebur.Gui.text()\` directly for transient, stateless messages (countdown announcements, kill feed, etc.):
 
 \`\`\`js
 // One-shot OK: this message has no State backing, it's purely ephemeral
@@ -1306,29 +1309,31 @@ Rebur.Gui.clear("label");  // remove one element
 Rebur.Gui.clear();          // remove all elements
 \`\`\`
 
-### Rebur.Gui.bind(id, stateKey, renderFn) → unsubscribe
+### State-driven GUI pattern
 
-Bind a GUI element to a State key. The \`renderFn\` fires immediately with the current value and again every time the state changes. Returns an unsubscribe function to detach the binding.
+For persistent HUD elements that reflect game data, use \`Rebur.State.on()\` to update the GUI whenever state changes:
 
 \`\`\`js
 // Score label — always shows the current score
 Rebur.State.set("score", 0);
-const unbind = Rebur.Gui.bind("score", "score", (val) => {
+Rebur.Gui.text("score", "Score: 0", { anchor: "tl", x: 20, y: 20, size: 20 });
+
+Rebur.State.on("score", (val) => {
   Rebur.Gui.text("score", "Score: " + val, { anchor: "tl", x: 20, y: 20, size: 20 });
 });
 
-// Health bar — updates whenever health state changes
+// Health bar — updates whenever hp changes
 Rebur.State.set("hp", 100);
-Rebur.Gui.bind("hpBar", "hp", (val) => {
+Rebur.Gui.bar("hpBar", 100, 100, { anchor: "bl", x: 20, y: 20, width: 200, height: 14, color: "#22c55e" });
+
+Rebur.State.on("hp", (val) => {
   Rebur.Gui.bar("hpBar", val, 100, { anchor: "bl", x: 20, y: 20, width: 200, height: 14, color: "#22c55e" });
 });
 
 // Game logic only writes State — GUI updates automatically
-Rebur.State.set("score", Rebur.State.get("score") + 1);  // score label refreshes
-Rebur.State.set("hp", 75);                                // health bar refreshes
+Rebur.State.set("score", Rebur.State.get("score") + 1);
+Rebur.State.set("hp", 75);
 \`\`\`
-
-\`bind\` is the **only** correct way to connect persistent HUD elements to game data. Use \`Rebur.Gui.text()\` directly only for ephemeral one-shot messages.
 
 ---
 
@@ -1513,23 +1518,21 @@ unsub(); // unsubscribe
 
 ## Rebur.Network
 
-The Network API is symmetrical across server and client — both sides use the same three methods. Server Scripts and ClientScripts share the same \`Rebur.Network\` interface.
-
 | | Server | Client (ClientScript) |
 |---|---|---|
-| Send to all | \`Rebur.Network.send(event, payload)\` | — |
-| Send to one | \`Rebur.Network.sendTo(player, event, payload)\` | — |
+| Broadcast to all | \`Rebur.Network.broadcast(event, payload)\` | — |
+| Send to one player | \`Rebur.Network.send(player, event, payload)\` | — |
 | Send to server | — | \`Rebur.Network.send(event, payload)\` |
 | Receive | \`Rebur.Network.on(event, fn)\` | \`Rebur.Network.on(event, fn)\` |
 
 ### Server → Clients
 
 \`\`\`js
-// Send to ALL connected clients
-Rebur.Network.send("roundOver", { winner: "Alice", score: 42 });
+// Broadcast to ALL connected clients
+Rebur.Network.broadcast("roundOver", { winner: "Alice", score: 42 });
 
 // Send to one specific player
-Rebur.Network.sendTo(player, "personalMessage", { text: "You won!" });
+Rebur.Network.send(player, "personalMessage", { text: "You won!" });
 \`\`\`
 
 ### Client → Server (server listens)
@@ -1544,9 +1547,9 @@ Rebur.Network.on("purchaseRequest", (payload, sender) => {
   if (coins >= payload.cost) {
     sender.data.set("coins", coins - payload.cost);
     sender.inventory.add(payload.item);
-    Rebur.Network.sendTo(sender, "purchaseResult", { success: true, item: payload.item });
+    Rebur.Network.send(sender, "purchaseResult", { success: true, item: payload.item });
   } else {
-    Rebur.Network.sendTo(sender, "purchaseResult", { success: false, reason: "Not enough coins" });
+    Rebur.Network.send(sender, "purchaseResult", { success: false, reason: "Not enough coins" });
   }
 });
 \`\`\`
@@ -1559,7 +1562,7 @@ Network is a **data and event bus**. It is not a UI system. Do not use \`Rebur.N
 |----------|------------|-----|
 | Update a shared score label | \`Rebur.State.set("score", n)\` + \`Rebur.Gui.text()\` | State replicates; GUI is the render layer |
 | Update a per-player HP bar | \`player.gui.bar("hp", hp, max)\` | Server routes to the right client directly |
-| Notify a player of a purchase | \`Rebur.Network.sendTo(player, "purchaseResult", data)\` | Data event, not UI — the ClientScript or client handles rendering |
+| Notify a player of a purchase | \`Rebur.Network.send(player, "purchaseResult", data)\` | Data event, not UI — the ClientScript or client handles rendering |
 
 \`\`\`js
 // ✓ Correct: update state and shared HUD together on the server
@@ -1571,7 +1574,7 @@ coin.on("touched", (other) => {
 });
 
 // ✗ Anti-pattern: using Network as a UI pipe
-// Rebur.State.on("score", (val) => { Rebur.Network.send("scoreUpdate", { score: val }); });
+// Rebur.State.on("score", (val) => { Rebur.Network.broadcast("scoreUpdate", { score: val }); });
 // ...then in ClientScript: Rebur.Gui.text("score", ...)
 // This creates a redundant layer — the server already controls Rebur.Gui directly.
 \`\`\`
@@ -2012,9 +2015,9 @@ Server-side Script to pair:
 // Script (server-side) — receives from ClientScript
 Rebur.Network.on("clientReady", (player, data) => {
   log(player.username, "is ready at", data.time);
-  Rebur.Network.sendTo(player, "showAlert", { message: "Welcome!" });
+  Rebur.Network.send(player, "showAlert", { message: "Welcome!" });
 });
 \`\`\`
 
-> ClientScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send\`.
+> ClientScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send(event, payload)\`.
 `;

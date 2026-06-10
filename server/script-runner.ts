@@ -40,6 +40,9 @@ export interface ScriptObjState {
   restitution?: number;
   impulseX?: number; impulseY?: number; impulseZ?: number;
   forceX?: number;   forceY?: number;   forceZ?: number;
+  torqueX?: number;  torqueY?: number;  torqueZ?: number;
+  avX?: number;      avY?: number;      avZ?: number;
+  gravity?: { strength: number; radius: number } | false;
   _destroyed?: boolean;
   _tags?: Set<string>;
   _attrs?: Map<string, any>;
@@ -92,6 +95,7 @@ export interface ScriptCreatedObject {
   transparency: number;
   isTrigger?: boolean;
   container?: string;
+  gravity?: { strength: number; radius: number } | false;
 }
 
 // ── Sub-system types ───────────────────────────────────────────────────────────
@@ -408,6 +412,14 @@ export class ScriptRunner {
         get restitution()   { return obj.restitution ?? 0; },
         set restitution(v)  { obj.restitution = Math.max(0, Math.min(1, +v)); },
         get velocity()       { return { x: obj.velX, y: obj.velY, z: obj.velZ }; },
+        set velocity(v: any) { obj.velX = +(v?.x??0); obj.velY = +(v?.y??0); obj.velZ = +(v?.z??0); },
+        get angularVelocity() { return { x: obj.avX??0, y: obj.avY??0, z: obj.avZ??0 }; },
+        set angularVelocity(v: any) { obj.avX = +(v?.x??0); obj.avY = +(v?.y??0); obj.avZ = +(v?.z??0); },
+        applyTorque(t: any) {
+          obj.torqueX = (obj.torqueX ?? 0) + (+(t?.x ?? 0));
+          obj.torqueY = (obj.torqueY ?? 0) + (+(t?.y ?? 0));
+          obj.torqueZ = (obj.torqueZ ?? 0) + (+(t?.z ?? 0));
+        },
         applyForce(f: any) {
           obj.forceX = (obj.forceX ?? 0) + (+(f?.x ?? 0));
           obj.forceY = (obj.forceY ?? 0) + (+(f?.y ?? 0));
@@ -475,6 +487,15 @@ export class ScriptRunner {
         get transparency() { return obj.transparency ?? 0; },
         set transparency(v){ if (obj._destroyed) { const m = `transparency write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.transparency = Math.max(0, Math.min(1, +v)); },
 
+        get gravity() { return obj.gravity ?? false; },
+        set gravity(v: any) {
+          if (v === false || v === null || v === undefined) {
+            obj.gravity = false;
+          } else if (typeof v === 'object') {
+            obj.gravity = { strength: +(v.strength ?? 20), radius: +(v.radius ?? 20) };
+          }
+        },
+
         get body()     { return body; },
         get parent() {
           if (!obj._parentName) return null;
@@ -506,6 +527,7 @@ export class ScriptRunner {
 
         destroy() {
           if (obj._destroyed) return;
+          runner._fireObj(obj.name, "removing", ep);
           obj._destroyed = true;
           obj.visible = false;
           runner.destroyQueue.push(obj.name);
@@ -848,41 +870,23 @@ export class ScriptRunner {
     };
 
     // ── Rebur.Gui (shared HUD) ─────────────────────────────────────────────
-    const guiBoundIds = new Set<string>();
     const reburGui = {
       text(id: string, text: string, opts?: any) {
-        if (guiBoundIds.has(id)) { const m = `Gui.text("${id}") called on a State-bound element — update Rebur.State instead of calling Gui directly`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"text", text, ...mapGuiOpts(opts), visible:true });
       },
       button(id: string, text: string, opts?: any, onClick?: EventHandler) {
-        if (guiBoundIds.has(id)) { const m = `Gui.button("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"button", text, width:160, height:36, ...mapGuiOpts(opts), visible:true, clickable:true });
         if (onClick) runner.guiClickHandlers.set(id, onClick);
       },
       bar(id: string, value: number, maxValue: number, opts?: any) {
-        if (guiBoundIds.has(id)) { const m = `Gui.bar("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"bar", value, maxValue, width:200, height:14, ...mapGuiOpts(opts), visible:true });
       },
       image(id: string, url: string, opts?: any) {
-        if (guiBoundIds.has(id)) { const m = `Gui.image("${id}") called on a State-bound element — update Rebur.State instead`; if (IS_DEV) throw new Error(m); warn(m); return; }
         runner.guiElements.set(id, { id, kind:"image", imageUrl:url, width:64, height:64, ...mapGuiOpts(opts), visible:true });
       },
       clear(id?: string) {
-        if (id !== undefined) { guiBoundIds.delete(id); runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); }
-        else { guiBoundIds.clear(); runner.guiElements.clear(); runner.guiClickHandlers.clear(); }
-      },
-      bind(id: string, stateKey: string, renderFn: (val: any) => void) {
-        guiBoundIds.add(id);
-        const run = (val: any) => { try { renderFn(val); } catch { /* isolate */ } };
-        const arr = runner.stateHandlers.get(stateKey) ?? [];
-        arr.push(run);
-        runner.stateHandlers.set(stateKey, arr);
-        const current = runner.gameState.get(stateKey);
-        if (current !== undefined) run(current);
-        return () => {
-          guiBoundIds.delete(id);
-          runner.stateHandlers.set(stateKey, (runner.stateHandlers.get(stateKey) ?? []).filter(h => h !== run));
-        };
+        if (id !== undefined) { runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); }
+        else { runner.guiElements.clear(); runner.guiClickHandlers.clear(); }
       },
     };
 
@@ -902,6 +906,7 @@ export class ScriptRunner {
         runner.stateHandlers.set(key, arr);
         return () => runner.stateHandlers.set(key, (runner.stateHandlers.get(key)??[]).filter(h=>h!==fn));
       },
+      delete(key: string) { runner.gameState.delete(key); },
       keys()   { return Array.from(runner.gameState.keys()); },
       getAll() { return Object.fromEntries(runner.gameState); },
     };
@@ -1527,14 +1532,19 @@ export class ScriptRunner {
 
     // ── Rebur.Network ──────────────────────────────────────────────────────
     const reburNetwork = {
-      // Server → all clients
-      send(event: string, payload: any) {
-        runner.networkMessages.push({ event, payload });
+      // Server → all clients (primary broadcast)
+      broadcast(event: string, payload?: any) {
+        runner.networkMessages.push({ event, payload: payload ?? null });
       },
-      // Server → specific player
-      sendTo(playerOrId: any, event: string, payload: any) {
+      // Server → specific player (targeted)
+      send(playerOrId: any, event: string, payload?: any) {
         const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
-        if (id) runner.networkToPlayer.push({ playerId: id, event, payload });
+        if (id) runner.networkToPlayer.push({ playerId: id, event, payload: payload ?? null });
+      },
+      // Backward-compat alias for targeted send
+      sendTo(playerOrId: any, event: string, payload?: any) {
+        const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
+        if (id) runner.networkToPlayer.push({ playerId: id, event, payload: payload ?? null });
       },
       // Server listens for client → server messages
       on(event: string, fn: EventHandler) {

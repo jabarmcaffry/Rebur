@@ -242,7 +242,7 @@ const CONTAINERS: ContainerDef[] = [
     name: "Network",
     displayName: "Network",
     icon: Share2,
-    hint: "Network event definitions — use Rebur.Network.send(), sendTo(), on() in scripts.",
+    hint: "Network event definitions — use Rebur.Network.broadcast(), send(player, ...), on() in scripts.",
     allowedScripts: [],
     canHoldObjects: false,
   },
