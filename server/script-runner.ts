@@ -1650,8 +1650,30 @@ export class ScriptRunner {
     // Every documented global is an explicit parameter so closures and async
     // continuations always have them in scope — no VM context lookup needed.
     // Dangerous Node.js globals are shadowed by passing `undefined`.
+
+    // Convenience `player` proxy — resolves lazily to the first connected player.
+    // Useful for single-player scripts without requiring Rebur.Players.all()[0].
+    const player = new Proxy({} as any, {
+      get(_t, key: string) {
+        const all = Array.from(runner.players.values());
+        if (!all.length) return undefined;
+        return makePlayerProxy(all[0])[key];
+      },
+      set(_t, key: string, value: any) {
+        const all = Array.from(runner.players.values());
+        if (!all.length) return true;
+        const pp = makePlayerProxy(all[0]);
+        (pp as any)[key] = value;
+        return true;
+      },
+    });
+
+    // Convenience `players` — shortcut for Rebur.Players
+    const players = Rebur.Players;
+
     const PARAMS = [
       "Rebur",
+      "player", "players",
       "after", "every", "wait",
       "random", "randInt", "pick",
       "log", "warn", "error",
@@ -1671,6 +1693,7 @@ export class ScriptRunner {
       const fn: (...args: any[]) => Promise<void> = new AsyncFunc(...PARAMS, code);
       fn(
         Rebur,
+        player, players,
         after, every, wait,
         random, randInt, pick,
         log, warn, error,

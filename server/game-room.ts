@@ -66,6 +66,8 @@ interface DynamicObj {
   sx: number; sy: number; sz: number;
   color: string; visible: boolean; anchored: boolean;
   transparency: number;
+  parentId?: string | null;
+  properties?: Record<string, any> | null;
   modelUrl?: string;
   modelScale?: number;
   audioUrl?: string;
@@ -181,6 +183,8 @@ export class GameRoom {
         color: o.color ?? "#888888",
         visible: true, anchored,
         transparency: o.properties?.transparency ?? 0,
+        parentId: o.parentId ?? null,
+        properties: (o.properties as Record<string, any> | null) ?? null,
         modelUrl: o.type === "model" ? o.properties?.fileUrl : undefined,
         audioUrl: o.type === "audio" ? o.properties?.fileUrl : undefined,
         modelScale: o.properties?.modelScale,
@@ -193,7 +197,7 @@ export class GameRoom {
       };
       this.allObjs.set(o.id, dobj);
 
-      const isLogicalOnly = o.type === "audio" || o.type === "folder";
+      const isLogicalOnly = o.type === "audio" || o.type === "folder" || o.type === "particleEmitter";
       if (!isLogicalOnly && anchored) {
         this.statics.push({
           name: dobj.name,
@@ -830,6 +834,8 @@ export class GameRoom {
     rotation: { x: o.rotX, y: o.rotY, z: o.rotZ },
     scale: { x: o.sx, y: o.sy, z: o.sz },
     color: o.color, visible: o.visible, transparency: o.transparency ?? 0,
+    parentId: o.parentId ?? null,
+    properties: o.properties ?? null,
     modelUrl: o.modelUrl, modelScale: o.modelScale, audioUrl: o.audioUrl,
     animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
   });

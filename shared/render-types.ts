@@ -22,6 +22,8 @@ export interface RenderObject {
   color: string;
   visible: boolean;
   transparency: number;
+  parentId?: string | null;
+  properties?: Record<string, any> | null;
   modelUrl?: string;
   modelScale?: number;
   audioUrl?: string;

@@ -487,7 +487,7 @@ const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   },
   {
     label: "Raycast forward",
-    code: `Rebur.on("tick", () => {\n  for (const p of Rebur.Players.all()) {\n    const origin = { x: p.position.x, y: p.position.y + 1.5, z: p.position.z };\n    const hit = raycast(origin, { x: 0, y: 0, z: -1 }, 25);\n    if (hit) log("Ray hit", hit.entity.name, "at", hit.distance.toFixed(1));\n  }\n});\n`,
+    code: `Rebur.on("tick", () => {\n  for (const p of Rebur.Players.all()) {\n    const origin = { x: p.position.x, y: p.position.y + 1.5, z: p.position.z };\n    const hit = Rebur.Workspace.raycast(origin, { x: 0, y: 0, z: -1 }, { maxDistance: 25 });\n    if (hit) log("Ray hit", hit.entity.name, "at", hit.distance.toFixed(1));\n  }\n});\n`,
   },
 ];
 
@@ -630,6 +630,23 @@ const PrimitiveMesh = forwardRef<THREE.Object3D, PrimitiveMeshProps>(function Pr
   const isTransparent = transparency > 0;
 
   if (obj.type === "folder") return null;
+  if (obj.type === "particleEmitter") {
+    // Tiny sparkle indicator in editor viewport (not physics-simulated)
+    return (
+      <group ref={ref as any} position={position} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+        <mesh>
+          <octahedronGeometry args={[0.18, 0]} />
+          <meshBasicMaterial color={selected ? "#a855f7" : (obj.color ?? "#ffffff")} wireframe={!selected} />
+        </mesh>
+        {selected && (
+          <mesh>
+            <sphereGeometry args={[0.28, 12, 12]} />
+            <meshBasicMaterial color="#a855f7" wireframe transparent opacity={0.3} />
+          </mesh>
+        )}
+      </group>
+    );
+  }
   if (obj.type === "audio") {
     // Speaker icon in viewport so audio objects can be selected and positioned
     const isSelected = selected;
@@ -1220,6 +1237,31 @@ export default function EditorPage() {
     updateScriptMutation.mutate({ id: selectedScript.id, updates: { [field]: value } });
   };
 
+  /** Attach a ParticleEmitter to any Workspace object. */
+  const addParticleEmitterTo = (containerName: string, parentId: string | null) => {
+    const count = objects.filter((o) => o.type === "particleEmitter").length + 1;
+    createObjectMutation.mutate({
+      gameId,
+      name: `ParticleEmitter${count > 1 ? count : ""}`,
+      type: "particleEmitter",
+      primitiveType: null,
+      container: containerName,
+      parentId: parentId ?? null,
+      positionX: 0, positionY: 0, positionZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1,
+      color: "#ffffff",
+      properties: {
+        enabled: true,
+        rate: 15,
+        lifetime: 1.2,
+        speed: 4,
+        spread: 80,
+        size: 0.1,
+        effectType: "custom",
+      },
+    } as Partial<GameObject>);
+  };
+
   const createGroupObject = (containerName: string, type: "folder" | "model", parentId?: string | null) => {
     const count = objects.filter((o) => o.type === type).length + 1;
     createObjectMutation.mutate({
@@ -1370,6 +1412,7 @@ export default function EditorPage() {
   const ObjectIcon = ({ o }: { o: GameObject }) => {
     const Icon =
       o.type === "light" ? Lightbulb
+      : o.type === "particleEmitter" ? Sparkles
       : o.primitiveType === "sphere" ? Circle
       : o.primitiveType === "cylinder" ? Cylinder
       : o.primitiveType === "plane" ? Square
@@ -1429,12 +1472,14 @@ export default function EditorPage() {
     testId,
     title,
     showObjects,
+    showEffects,
   }: {
     containerDef: ContainerDef;
     parentId?: string | null;
     testId: string;
     title: string;
     showObjects?: boolean;
+    showEffects?: boolean;
   }) => {
     const [open, setOpen] = useState(false);
     const close = () => setOpen(false);
@@ -1450,8 +1495,9 @@ export default function EditorPage() {
     );
 
     const hasObjects = showObjects ?? containerDef.canHoldObjects;
+    const hasEffects = showEffects ?? false;
     const allowedScripts = containerDef.allowedScripts;
-    if (!hasObjects && allowedScripts.length === 0) return null;
+    if (!hasObjects && !hasEffects && allowedScripts.length === 0) return null;
 
     return (
       <Popover open={open} onOpenChange={setOpen}>
@@ -1478,6 +1524,18 @@ export default function EditorPage() {
               <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Group</div>
               <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} testId={`add-folder-${testId}`} />
               <Item icon={Layers} label="Model"  onClick={() => createGroupObject(containerDef.name, "model",  parentId)} testId={`add-model-${testId}`} />
+            </>
+          )}
+          {hasEffects && (
+            <>
+              <Separator className="my-1" />
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Effects</div>
+              <Item
+                icon={Sparkles}
+                label="Particle Emitter"
+                onClick={() => addParticleEmitterTo(containerDef.name, parentId ?? null)}
+                testId={`add-particle-${testId}`}
+              />
             </>
           )}
           {allowedScripts.length > 0 && (
@@ -1638,8 +1696,9 @@ export default function EditorPage() {
             containerDef={containerDef}
             parentId={o.id}
             testId={`button-add-on-${o.id}`}
-            title={isGroup ? `Add into ${o.name}` : `Attach a script to ${o.name}`}
+            title={`Add to ${o.name}`}
             showObjects={isGroup}
+            showEffects={containerDef.name === "Workspace" && o.type !== "particleEmitter"}
           />
         </div>
         {childScripts.map((s) => (
@@ -1937,8 +1996,159 @@ export default function EditorPage() {
             </>
           )}
 
+          {/* ─── Particle Emitter properties ─── */}
+          {selected.type === "particleEmitter" && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Particle Emitter</Label>
+
+                {/* Enabled toggle */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-pe-enabled" className="text-xs">Enabled</Label>
+                  <Switch
+                    id="prop-pe-enabled"
+                    checked={getProp("enabled", true)}
+                    onCheckedChange={(v) => handlePropertyChange({ enabled: v })}
+                    data-testid="switch-pe-enabled"
+                  />
+                </div>
+
+                {/* Effect type */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Effect Type</Label>
+                  <Select
+                    value={getProp<string>("effectType", "custom")}
+                    onValueChange={(v) => handlePropertyChange({ effectType: v })}
+                  >
+                    <SelectTrigger data-testid="select-pe-effect-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="custom">Custom</SelectItem>
+                      <SelectItem value="sparkle">Sparkle</SelectItem>
+                      <SelectItem value="fire">Fire</SelectItem>
+                      <SelectItem value="smoke">Smoke</SelectItem>
+                      <SelectItem value="explosion">Explosion</SelectItem>
+                      <SelectItem value="snow">Snow</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Color */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={selected.color ?? "#ffffff"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                      data-testid="input-pe-color"
+                    />
+                    <Input
+                      value={selected.color ?? "#ffffff"}
+                      onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Rate */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Rate (particles/s)</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("rate", 15)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("rate", 15)]}
+                    min={1}
+                    max={100}
+                    step={1}
+                    onValueChange={([v]) => handlePropertyChange({ rate: v })}
+                    data-testid="slider-pe-rate"
+                  />
+                </div>
+
+                {/* Lifetime */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Lifetime (s)</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("lifetime", 1.2).toFixed(1)}s
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("lifetime", 1.2)]}
+                    min={0.1}
+                    max={5}
+                    step={0.1}
+                    onValueChange={([v]) => handlePropertyChange({ lifetime: v })}
+                    data-testid="slider-pe-lifetime"
+                  />
+                </div>
+
+                {/* Speed */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Speed</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("speed", 4).toFixed(1)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("speed", 4)]}
+                    min={0.1}
+                    max={20}
+                    step={0.1}
+                    onValueChange={([v]) => handlePropertyChange({ speed: v })}
+                    data-testid="slider-pe-speed"
+                  />
+                </div>
+
+                {/* Spread */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Spread</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("spread", 80)}°
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("spread", 80)]}
+                    min={0}
+                    max={180}
+                    step={1}
+                    onValueChange={([v]) => handlePropertyChange({ spread: v })}
+                    data-testid="slider-pe-spread"
+                  />
+                </div>
+
+                {/* Size */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Size</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {getProp<number>("size", 0.1).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[getProp<number>("size", 0.1)]}
+                    min={0.02}
+                    max={1}
+                    step={0.01}
+                    onValueChange={([v]) => handlePropertyChange({ size: v })}
+                    data-testid="slider-pe-size"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
           {/* ─── Entity (primitive/model) properties ─── */}
-          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && (
+          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "particleEmitter" && (
             <>
               <div className="space-y-1.5">
                 <Label className="text-xs">Color</Label>

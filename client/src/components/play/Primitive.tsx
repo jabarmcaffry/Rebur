@@ -80,6 +80,7 @@ function ModelMesh({
 export default function Primitive({ obj, onClick }: { obj: RenderObject; onClick?: (e: any) => void }) {
   if (!obj.visible) return null;
   if (obj.type === "folder") return null;
+  if (obj.type === "particleEmitter") return null; // rendered by ParticleEmitterLayer
 
   const opacity = 1 - (obj.transparency ?? 0);
   if (opacity <= 0.01) return null;

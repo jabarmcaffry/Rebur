@@ -199,6 +199,127 @@ function ParticleLayer({ events, onDone }: { events: ParticleEvent[]; onDone: ()
   );
 }
 
+// ── ParticleEmitterLayer ──────────────────────────────────────────────────────
+// Continuously emits particles for every `particleEmitter` object in the scene.
+// Emission origin = parent object position if parentId is set, else emitter position.
+interface ContinuousParticle {
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  color: string;
+  size: number;
+}
+
+function ParticleEmitterLayer({ renderableObjects }: { renderableObjects: RenderObject[] }) {
+  const particles = useRef<ContinuousParticle[]>([]);
+  const accumulators = useRef<Map<string, number>>(new Map());
+  const pointsRef = useRef<THREE.Points>(null!);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+
+    // Build a quick lookup of objects by ID for parent lookups
+    const byId = new Map<string, RenderObject>();
+    for (const o of renderableObjects) byId.set(o.id, o);
+
+    // Emit new particles from each enabled emitter
+    const emitters = renderableObjects.filter(o => o.type === "particleEmitter");
+    for (const em of emitters) {
+      const props = (em as any).properties ?? {};
+      if (!props.enabled) continue;
+
+      const rate: number = props.rate ?? 15;
+      const interval = 1 / rate;
+
+      const acc = (accumulators.current.get(em.id) ?? 0) + dt;
+      const burst = Math.floor(acc / interval);
+      accumulators.current.set(em.id, acc - burst * interval);
+      if (burst === 0) continue;
+
+      // Emission origin: use parent position if parentId is set
+      const parentObj = em.parentId ? byId.get(em.parentId) : null;
+      const ox = parentObj ? parentObj.position.x : em.position.x;
+      const oy = parentObj ? parentObj.position.y : em.position.y;
+      const oz = parentObj ? parentObj.position.z : em.position.z;
+
+      const lifetime: number = props.lifetime ?? 1.2;
+      const speed: number = props.speed ?? 4;
+      const spreadDeg: number = props.spread ?? 80;
+      const spreadRad = (spreadDeg / 180) * Math.PI;
+      const color: string = em.color ?? props.color ?? "#ffffff";
+      const size: number = props.size ?? 0.1;
+      const effectType: string = props.effectType ?? "custom";
+
+      for (let i = 0; i < burst; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = (Math.random() - 0.5) * spreadRad;
+        const vel = new THREE.Vector3(
+          Math.cos(theta) * Math.cos(phi),
+          Math.sin(phi),
+          Math.sin(theta) * Math.cos(phi)
+        ).multiplyScalar(speed * (0.7 + Math.random() * 0.3));
+
+        // Preset effects
+        if (effectType === "fire") {
+          vel.y = Math.abs(vel.y) * 1.5; // fire goes upward
+        } else if (effectType === "snow") {
+          vel.y = -Math.abs(vel.y) * 0.5; // snow falls
+        } else if (effectType === "explosion") {
+          vel.multiplyScalar(2);
+        }
+
+        particles.current.push({
+          pos: new THREE.Vector3(ox, oy, oz),
+          vel,
+          life: lifetime * (0.8 + Math.random() * 0.4),
+          maxLife: lifetime,
+          color,
+          size,
+        });
+      }
+    }
+
+    // Simulate all particles
+    const gravity = 3;
+    particles.current = particles.current.filter(p => {
+      p.pos.addScaledVector(p.vel, dt);
+      p.vel.y -= gravity * dt;
+      p.life -= dt;
+      return p.life > 0;
+    });
+
+    // Cap particle count
+    if (particles.current.length > 3000) {
+      particles.current = particles.current.slice(particles.current.length - 3000);
+    }
+
+    // Write to geometry
+    const pts = pointsRef.current;
+    if (!pts) return;
+    const count = particles.current.length;
+    const geo = pts.geometry;
+    const positions = new Float32Array(count * 3);
+    particles.current.forEach((p, i) => {
+      positions[i * 3]     = p.pos.x;
+      positions[i * 3 + 1] = p.pos.y;
+      positions[i * 3 + 2] = p.pos.z;
+    });
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setDrawRange(0, count);
+    geo.computeBoundingSphere();
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[new Float32Array(0), 3]} />
+      </bufferGeometry>
+      <pointsMaterial size={0.12} vertexColors={false} color="#ffffff" sizeAttenuation transparent opacity={0.9} />
+    </points>
+  );
+}
+
 export default function PlayMode({
   objects,
   scripts,
@@ -644,6 +765,7 @@ export default function PlayMode({
                 cameraStateRef.current = { pos, forward: fwd };
               }}
             />
+            <ParticleEmitterLayer renderableObjects={renderableObjects} />
             <DebugDrawLayer draws={debugDraws} />
             <ParticleLayer events={particleEvents} onDone={() => setParticleEvents([])} />
           </Canvas>
