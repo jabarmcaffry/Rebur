@@ -37,7 +37,6 @@ export type ContainerName =
   | "Lighting"
   | "Players"
   | "Players/StarterInventory"
-  | "Players/StarterData"
   | "Players/StarterCharacter"
   | "UI"
   | "UI/Player"
@@ -45,27 +44,12 @@ export type ContainerName =
   | "UI/Components"
   | "Assets"
   | "Assets/Shared"
-  | "Assets/Shared/Models"
-  | "Assets/Shared/Audio"
-  | "Assets/Shared/Textures"
-  | "Assets/Shared/Animations"
-  | "Assets/Shared/Data"
   | "Assets/Server"
-  | "Assets/Server/Models"
-  | "Assets/Server/Audio"
-  | "Assets/Server/Textures"
-  | "Assets/Server/Animations"
-  | "Assets/Server/Data"
-  | "Data"
-  | "Data/Session"
-  | "Data/Store"
-  | "Scripts"
-  | "Scripts/Server"
-  | "Scripts/Client"
-  | "Scripts/Shared"
+  | "Systems"
   | "Teams"
   | "Chat"
-  | "Network";
+  | "Network"
+  | string;
 
 export type ObjectProperties = {
   anchored: boolean;

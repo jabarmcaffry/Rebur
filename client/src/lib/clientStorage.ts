@@ -255,7 +255,7 @@ export function createScript(input: Partial<Script> & { gameId: string; name: st
     id,
     gameId: input.gameId,
     objectId: input.objectId ?? null,
-    container: input.container ?? "Scripts/Server",
+    container: input.container ?? "Systems",
     scriptType: input.scriptType ?? "Script",
     name: input.name,
     code: input.code ?? "// Write your JavaScript code here\n",

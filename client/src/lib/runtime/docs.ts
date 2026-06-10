@@ -70,20 +70,11 @@ All scripts currently run **server-side** inside a secure VM sandbox. The only g
 Rebur                      ← single global
 ├── Workspace              ← live 3D world: rendered + simulated entities
 ├── Lighting               ← lighting entity container (not simulated)
-├── Players                ← player entity container
+├── Players                ← active player entities; StarterCharacter & StarterInventory set defaults
 ├── Assets
-│   ├── Shared             ← shared assets replicated to all clients (NOT for secrets)
-│   │   ├── Models         ← 3D model templates
-│   │   ├── Audio          ← audio assets
-│   │   ├── Textures       ← texture assets
-│   │   ├── Animations     ← animation assets
-│   │   └── Data           ← shared read-only config data
-│   └── Server             ← server-only assets, never replicated to clients
-│       ├── Models
-│       ├── Audio
-│       ├── Textures
-│       ├── Animations
-│       └── Data
+│   ├── Shared             ← assets replicated to all clients (add your own folders via +)
+│   └── Server             ← server-only assets, never sent to clients (add folders via +)
+├── Systems                ← global server-authoritative scripts (round manager, spawn logic…)
 ├── State                  ← shared session key-value store (resets each session)
 ├── DataStore              ← persistent cross-session storage
 ├── Gui                    ← shared HUD render layer (all players see)
@@ -1446,6 +1437,37 @@ Rebur.Input.off("press", handler);
 
 Key names: letters (\`"a"\`–\`"z"\`), \`"space"\`, \`"shift"\`, \`"control"\`, \`"alt"\`, \`"enter"\`, \`"escape"\`, \`"arrowup"\`, \`"arrowdown"\`, \`"arrowleft"\`, \`"arrowright"\`.
 
+### Rebur.Camera.raycast(player, opts?) → RaycastResult | null
+
+A **safe convenience helper** that casts a ray from the player's camera forward and returns the first entity hit. Returns \`null\` if the player has no camera state — it never throws.
+
+\`\`\`js
+// ✓ Safe camera-forward raycast (recommended for aim/shoot logic)
+Rebur.Input.on("press", (player, key) => {
+  if (key !== "f") return;
+  const hit = Rebur.Camera.raycast(player, {
+    maxDistance: 50,
+    ignore: [player],
+  });
+  if (hit) {
+    log("Aim hit:", hit.entity.name, "at", hit.distance.toFixed(1), "units");
+    if (Rebur.Tags.has(hit.entity, "enemy")) hit.entity.destroy();
+  }
+});
+
+// ✗ Don't do this — getForwardRay() can return null, then .origin crashes
+// const ray = Rebur.Camera.getForwardRay(player);
+// const hit = Rebur.Workspace.raycast(ray.origin, ray.direction); // ERROR if ray is null
+
+// ✓ Use getForwardRay only when you need the raw ray object and guard it:
+const ray = Rebur.Camera.getForwardRay(player);
+if (ray) {
+  const hit = Rebur.Workspace.raycast(ray.origin, ray.direction, { maxDistance: 30 });
+}
+\`\`\`
+
+---
+
 ### Rebur.Input vs player.input
 
 | Need | API |
@@ -1956,7 +1978,7 @@ Rebur.on("tick", (dt) => {
 
 ## LocalScript (Client-Side)
 
-Scripts placed in the **StarterPlayer** container with type **LocalScript** run in the player's browser, not on the server.
+Scripts placed in the **UI/Player** or **UI/Global** containers with type **LocalScript** run in the player's browser, not on the server.
 
 LocalScripts have access to a smaller API focused on client ↔ server messaging:
 

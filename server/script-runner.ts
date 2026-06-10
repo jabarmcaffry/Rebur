@@ -925,26 +925,16 @@ export class ScriptRunner {
       return c === "Workspace" || c === "Scene" || c === "";
     };
 
-    // Helper — true for any Assets/Shared sub-container
+    // Helper — true for Assets/Shared and any user-created sub-folders within it
     const isAssetsSharedObj = (c: string | null | undefined) => {
       if (!c) return false;
-      return c === "Assets/Shared" ||
-        c === "Assets/Shared/Models" ||
-        c === "Assets/Shared/Audio" ||
-        c === "Assets/Shared/Textures" ||
-        c === "Assets/Shared/Animations" ||
-        c === "Assets/Shared/Data";
+      return c === "Assets/Shared" || c.startsWith("Assets/Shared/");
     };
 
-    // Helper — true for any Assets/Server sub-container
+    // Helper — true for Assets/Server and any user-created sub-folders within it
     const isAssetsServerObj = (c: string | null | undefined) => {
       if (!c) return false;
-      return c === "Assets/Server" ||
-        c === "Assets/Server/Models" ||
-        c === "Assets/Server/Audio" ||
-        c === "Assets/Server/Textures" ||
-        c === "Assets/Server/Animations" ||
-        c === "Assets/Server/Data";
+      return c === "Assets/Server" || c.startsWith("Assets/Server/");
     };
     const reburWorkspace = {
       find(name: string) {
@@ -1332,6 +1322,15 @@ export class ScriptRunner {
       // Viewport-point ray — vx/vy are 0-1 (top-left origin)
       viewportPointToRay(player: any, vx: number, vy: number, aspectRatio = 16/9) {
         return reburCamera.screenPointToRay(player, vx*2-1, 1-vy*2, aspectRatio);
+      },
+
+      // Safe convenience: cast a ray from the camera forward direction.
+      // Returns null if the player has no camera state (no crash).
+      // opts are the same as Rebur.Workspace.raycast opts.
+      raycast(player: any, opts?: any) {
+        const ray = reburCamera.getForwardRay(player);
+        if (!ray) return null;
+        return reburWorkspace.raycast(ray.origin, ray.direction, opts);
       },
     };
 

@@ -257,7 +257,7 @@ export class MemStorage implements IStorage {
       gameId: script.gameId,
       name: script.name,
       objectId: script.objectId ?? null,
-      container: script.container ?? 'Scripts/Server',
+      container: script.container ?? 'Systems',
       scriptType: script.scriptType ?? 'Script',
       code: script.code ?? '// Write your JavaScript code here\n',
       enabled: script.enabled ?? true,
