@@ -534,6 +534,23 @@ export async function registerRoutes(app: Express, httpServer: Server): Promise<
   // so the same account can only be in one game at a time.
   const activeUserSessions = new Map<string, string>(); // userId → clientId
 
+  // ─── Active players in a game (for editor hierarchy) ─────────────────────
+  app.get("/api/games/:gameId/active-players", (req: any, res) => {
+    const { gameId } = req.params;
+    const sessionIds = gameIdToSessions.get(gameId) ?? new Set<string>();
+    const seen = new Set<string>();
+    const players: { id: string; name: string }[] = [];
+    for (const sid of sessionIds) {
+      const room = gameRooms.get(sid);
+      if (room) {
+        for (const p of room.getActivePlayers()) {
+          if (!seen.has(p.id)) { seen.add(p.id); players.push(p); }
+        }
+      }
+    }
+    res.json(players);
+  });
+
   function broadcast(sessionId: string, message: object, excludeClientId?: string) {
     const str = JSON.stringify(message);
     clients.forEach((client, id) => {

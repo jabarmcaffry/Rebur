@@ -475,7 +475,7 @@ export default function PlayMode({
     renderClient.connect();
 
     const localScripts = scripts.filter(
-      (s) => s.scriptType === "LocalScript" && s.container === "StarterPlayer" && s.enabled !== false
+      (s) => (s.scriptType === "client" || s.scriptType === "ClientScript") && s.enabled !== false
     );
     let clientRunner: ClientScriptRunner | null = null;
     if (localScripts.length > 0) {

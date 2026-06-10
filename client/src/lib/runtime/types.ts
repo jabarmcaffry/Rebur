@@ -45,7 +45,7 @@ export type ContainerName =
   | "Assets"
   | "Assets/Shared"
   | "Assets/Server"
-  | "Systems"
+  | "ServerScripts"
   | "Teams"
   | "Chat"
   | "Network"

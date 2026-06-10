@@ -1,10 +1,10 @@
 /**
  * client-script-runner.ts
  *
- * Runs LocalScripts (StarterPlayer container) in the browser.
+ * Runs ClientScripts (UI/Player, UI/Global, UI/Components containers) in the browser.
  * Provides a minimal Rebur global focused on client ↔ server messaging.
  *
- * API exposed to LocalScripts:
+ * API exposed to ClientScripts:
  *   Rebur.Network.send(event, payload)  — send message to server
  *   Rebur.Network.on(event, fn)         — receive message from server
  *   Rebur.Network.off(event, fn)        — unregister listener
@@ -36,7 +36,7 @@ export class ClientScriptRunner {
   constructor(private renderClient: RenderClient) {}
 
   runScripts(scripts: Script[]) {
-    const enabled = scripts.filter(s => s.enabled !== false && s.scriptType === "LocalScript");
+    const enabled = scripts.filter(s => s.enabled !== false && (s.scriptType === "client" || s.scriptType === "ClientScript"));
     if (enabled.length === 0) return;
 
     this._hookNetworkMessage();
@@ -52,7 +52,7 @@ export class ClientScriptRunner {
     this.renderClient.onNetworkMessage = (event: string, payload: any) => {
       this.prevOnNetworkMessage?.(event, payload);
       for (const h of handlers.get(event) ?? []) {
-        try { h(payload); } catch (e) { console.error("[LocalScript] Network handler error:", e); }
+        try { h(payload); } catch (e) { console.error("[ClientScript] Network handler error:", e); }
       }
     };
   }
@@ -62,9 +62,9 @@ export class ClientScriptRunner {
       const Rebur = this._makeReburGlobal(script.name);
 
       const log = (...args: any[]) =>
-        console.log(`[LocalScript:${script.name}]`, ...args);
+        console.log(`[ClientScript:${script.name}]`, ...args);
       const warn = (...args: any[]) =>
-        console.warn(`[LocalScript:${script.name}]`, ...args);
+        console.warn(`[ClientScript:${script.name}]`, ...args);
 
       const after = (seconds: number, fn: () => void) => {
         const id = setTimeout(fn, seconds * 1000);
@@ -84,7 +84,7 @@ export class ClientScriptRunner {
       );
       fn(Rebur, log, warn, after, every, wait);
     } catch (e) {
-      console.error(`[LocalScript] "${script.name}" runtime error:`, e);
+      console.error(`[ClientScript] "${script.name}" runtime error:`, e);
     }
   }
 
@@ -120,7 +120,7 @@ export class ClientScriptRunner {
             if (i >= 0) tickH.splice(i, 1);
           };
         }
-        console.warn(`[LocalScript:${scriptName}] Rebur.on("${event}") — only "tick" is supported in LocalScripts`);
+        console.warn(`[ClientScript:${scriptName}] Rebur.on("${event}") — only "tick" is supported in ClientScripts`);
         return () => {};
       },
       off(_event: string, fn: (...args: any[]) => void) {
@@ -139,7 +139,7 @@ export class ClientScriptRunner {
       const dt = Math.min((now - this.lastTime) / 1000, 0.1);
       this.lastTime = now;
       for (const h of this.tickHandlers) {
-        try { h(dt); } catch (e) { console.error("[LocalScript] Tick error:", e); }
+        try { h(dt); } catch (e) { console.error("[ClientScript] Tick error:", e); }
       }
       this.rafId = requestAnimationFrame(loop);
     };

@@ -1,5 +1,8 @@
 - [Rebur API implementation](rebur-api.md) — Rebur.* is the ONLY global; no backward compat; real AABB raycast; camera is plain proxy; no onGround.
-- [Hierarchy structure](hierarchy-structure.md) — new container tree: Workspace, Lighting, Players(3 children), UI(3 children), Assets/Shared+Server(each 5 sub-folders), Data, Scripts, Teams, Chat, Network. Sound removed, StarterGui removed.
+- [Hierarchy structure](hierarchy-structure.md) — new container tree: Workspace, Lighting, Players(3 children), UI(3 children), Assets/Shared+Server(each 5 sub-folders), Data, Scripts, Teams, Chat, Network. Sound removed, StarterGui removed. Systems→ServerScripts, LocalScript→ClientScript.
+- [Platform physics](platform-physics.md) — StaticBox has dx/dy/dz/rotDY/cx/cz; Step 2b recomputes bounds each tick; _pushPlayerOutOfStatics returns plat delta; Step 5 carries player; prevObjPositions Map tracks previous frame.
+- [UI element type](ui-element-type.md) — uiElement type in GameObjects (not rendered in 3D); stored with properties.uiType; only in UI containers; AddItemMenu shows Frame/TextLabel/TextButton/ImageLabel/ImageButton/ScrollingFrame.
+- [Active players endpoint](active-players-endpoint.md) — GET /api/games/:gameId/active-players uses gameIdToSessions→gameRooms closure; GameRoom.getActivePlayers() returns {id,name}[]; Editor polls every 4s.
 - [Rebur.Input unified API](rebur-input-api.md) — Input uses .on()/.off() only; callbacks always receive (player, key|entity); no isDown/isDownAny; per-player held state is player.input.key().
 - [player.input API](player-input-api.md) — per-player key polling + edge events; both makePlayerProxy and _makePlayerProxy must stay in sync; backed by perPlayerHeldKeys map in game-room.ts.
 - [Gui.bind enforcement](gui-bind-enforcement.md) — calling Gui.text/bar/image/button on a bound ID throws in dev, warns in prod; guiBoundIds is closure-scoped inside run() in script-runner.ts.

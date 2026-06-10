@@ -61,6 +61,13 @@ import {
   EyeOff,
   Share2,
   X,
+  Music,
+  Type,
+  Layout,
+  MousePointerClick,
+  Image as ImageIcon,
+  ScrollText,
+  User,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -87,6 +94,8 @@ const PRIMITIVES = [
 // Rebur service hierarchy — mirrors the Rebur runtime container model exactly.
 // `allowedScripts` controls which script types (server/client/shared) are valid in this container.
 // `canHoldObjects` controls whether 3D entities can be placed here.
+// `isAssetContainer` shows folder/audio/model items (not 3D primitives) in the + menu.
+// `isUIContainer` shows UI element items (Frame, TextLabel, etc.) in the + menu.
 // `children` defines nested sub-containers within the parent.
 interface ContainerDef {
   name: string;
@@ -95,6 +104,8 @@ interface ContainerDef {
   hint: string;
   allowedScripts: Array<"server" | "client" | "shared">;
   canHoldObjects: boolean;
+  isAssetContainer?: boolean;
+  isUIContainer?: boolean;
   children?: ContainerDef[];
 }
 
@@ -148,22 +159,25 @@ const CONTAINERS: ContainerDef[] = [
     hint: "All UI definitions — screen layouts, HUDs, overlays, and reusable components.",
     allowedScripts: ["client"],
     canHoldObjects: false,
+    isUIContainer: true,
     children: [
       {
         name: "UI/Player",
         displayName: "Player",
         icon: Users,
-        hint: "Per-player private UI: HUD, Inventory, Menus. Client scripts only.",
+        hint: "Per-player private UI: HUD, Inventory, Menus. ClientScripts only.",
         allowedScripts: ["client"],
         canHoldObjects: false,
+        isUIContainer: true,
       },
       {
         name: "UI/Global",
         displayName: "Global",
         icon: Globe,
-        hint: "UI visible to all players: Notifications, SystemOverlays. Client scripts only.",
+        hint: "UI visible to all players: Notifications, SystemOverlays. ClientScripts only.",
         allowedScripts: ["client"],
         canHoldObjects: false,
+        isUIContainer: true,
       },
       {
         name: "UI/Components",
@@ -172,6 +186,7 @@ const CONTAINERS: ContainerDef[] = [
         hint: "Reusable UI building blocks shared across Player and Global UI.",
         allowedScripts: ["client"],
         canHoldObjects: false,
+        isUIContainer: true,
       },
     ],
   },
@@ -187,23 +202,25 @@ const CONTAINERS: ContainerDef[] = [
         name: "Assets/Shared",
         displayName: "Shared",
         icon: Globe,
-        hint: "Replicated to all clients (like ReplicatedStorage). Use the + button to add your own folders and assets.",
+        hint: "Replicated to all clients (like ReplicatedStorage). Use + to add Folders, Models, and Audio.",
         allowedScripts: ["client"],
-        canHoldObjects: true,
+        canHoldObjects: false,
+        isAssetContainer: true,
       },
       {
         name: "Assets/Server",
         displayName: "Server",
         icon: Lock,
-        hint: "Server-only assets, never sent to clients (like ServerStorage). Use the + button to add your own folders and assets.",
+        hint: "Server-only assets, never sent to clients. Use + to add Folders, Models, and Audio.",
         allowedScripts: ["server"],
-        canHoldObjects: true,
+        canHoldObjects: false,
+        isAssetContainer: true,
       },
     ],
   },
   {
-    name: "Systems",
-    displayName: "Systems",
+    name: "ServerScripts",
+    displayName: "ServerScripts",
     icon: FileCode,
     hint: "Global server-authoritative scripts — game managers, round systems, spawn logic. Server scripts only.",
     allowedScripts: ["server"],
@@ -631,6 +648,10 @@ export default function EditorPage() {
   const { data: game } = useQuery<Game>({ queryKey: ["/api/games", gameId] });
   const { data: objects = [] } = useQuery<GameObject[]>({ queryKey: ["/api/games", gameId, "objects"] });
   const { data: scripts = [] } = useQuery<Script[]>({ queryKey: ["/api/games", gameId, "scripts"] });
+  const { data: activePlayers = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/games", gameId, "active-players"],
+    refetchInterval: 4000,
+  });
 
   const selected = objects.find((o) => o.id === selectedId) ?? null;
   const selectedScript = scripts.find((s) => s.id === selectedScriptId) ?? null;
@@ -975,10 +996,11 @@ export default function EditorPage() {
     }
   };
 
-  /** Objects that should appear in the 3D viewport — only Workspace + Lighting. */
+  /** Objects that should appear in the 3D viewport — only Workspace + Lighting, excluding UI elements. */
   const renderableObjects = useMemo(
     () => objects.filter((o) => {
       const c = o.container ?? "Workspace";
+      if (o.type === "uiElement") return false;
       return c === "Workspace" || c === "Scene" || c === "Lighting";
     }),
     [objects]
@@ -1013,7 +1035,7 @@ export default function EditorPage() {
     for (const c of ALL_CONTAINERS) groups[c.name] = [];
     for (const s of scripts) {
       if (s.objectId) continue;
-      const c = s.container ?? "Systems";
+      const c = s.container ?? "ServerScripts";
       if (!groups[c]) groups[c] = [];
       groups[c].push(s);
     }
@@ -1135,6 +1157,64 @@ export default function EditorPage() {
       scaleZ: 1,
       color: type === "folder" ? "#64748b" : "#38bdf8",
       properties: { anchored: true, canCollide: false, transparency: 1 },
+    } as Partial<GameObject>);
+  };
+
+  /** Create an audio placeholder object in an asset container. */
+  const createAudioAsset = (containerName: string, parentId?: string | null) => {
+    const count = objects.filter((o) => o.type === "audio").length + 1;
+    createObjectMutation.mutate({
+      gameId,
+      name: `Audio${count}`,
+      type: "audio",
+      primitiveType: null,
+      container: containerName,
+      parentId: parentId ?? null,
+      positionX: 0, positionY: 0, positionZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1,
+      color: "#22d3ee",
+      properties: { volume: 1, loop: false, autoPlay: false },
+    } as Partial<GameObject>);
+  };
+
+  /** Create a UI element in a UI container. */
+  const createUIElement = (containerName: string, uiType: string, parentId?: string | null) => {
+    const names: Record<string, string> = {
+      frame: "Frame", textLabel: "TextLabel", textButton: "TextButton",
+      imageLabel: "ImageLabel", imageButton: "ImageButton", scrollingFrame: "ScrollingFrame",
+    };
+    const baseName = names[uiType] ?? "UIElement";
+    const count = objects.filter((o) => o.type === "uiElement" && (o.properties as any)?.uiType === uiType).length + 1;
+    createObjectMutation.mutate({
+      gameId,
+      name: `${baseName}${count > 1 ? count : ""}`,
+      type: "uiElement",
+      primitiveType: null,
+      container: containerName,
+      parentId: parentId ?? null,
+      positionX: 0, positionY: 0, positionZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1,
+      color: uiType === "textButton" || uiType === "imageButton" ? "#3b82f6" : "#1e293b",
+      properties: {
+        uiType,
+        posX: 0, posY: 0,
+        sizeX: uiType === "scrollingFrame" ? 300 : 200,
+        sizeY: uiType === "frame" || uiType === "scrollingFrame" ? 150 : 50,
+        anchorX: 0, anchorY: 0,
+        visible: true,
+        zIndex: 0,
+        backgroundColor: uiType === "textButton" || uiType === "imageButton" ? "#3b82f6" : "#1e293b",
+        backgroundTransparency: uiType === "imageLabel" || uiType === "imageButton" ? 0 : 0,
+        ...(uiType === "textLabel" || uiType === "textButton" ? {
+          text: baseName, textColor: "#ffffff", textSize: 16,
+        } : {}),
+        ...(uiType === "imageLabel" || uiType === "imageButton" ? {
+          imageUrl: "", imageColor: "#ffffff", imageTransparency: 0,
+        } : {}),
+        ...(uiType === "scrollingFrame" ? {
+          canvasSizeY: 400, scrollBarThickness: 6,
+        } : {}),
+      },
     } as Partial<GameObject>);
   };
 
@@ -1266,9 +1346,18 @@ export default function EditorPage() {
 
   // Tiny icon for a GameObject row, picked from its primitive type.
   const ObjectIcon = ({ o }: { o: GameObject }) => {
+    const uiType = (o.properties as any)?.uiType as string | undefined;
     const Icon =
       o.type === "light" ? Lightbulb
       : o.type === "particleEmitter" ? Sparkles
+      : o.type === "audio" ? Music
+      : o.type === "uiElement" ? (
+          uiType === "textLabel" ? Type
+          : uiType === "textButton" || uiType === "imageButton" ? MousePointerClick
+          : uiType === "imageLabel" ? ImageIcon
+          : uiType === "scrollingFrame" ? ScrollText
+          : Layout
+        )
       : o.primitiveType === "sphere" ? Circle
       : o.primitiveType === "cylinder" ? Cylinder
       : o.primitiveType === "plane" ? Square
@@ -1352,8 +1441,10 @@ export default function EditorPage() {
 
     const hasObjects = showObjects ?? containerDef.canHoldObjects;
     const hasEffects = showEffects ?? false;
+    const isAsset = containerDef.isAssetContainer ?? false;
+    const isUI = containerDef.isUIContainer ?? false;
     const allowedScripts = containerDef.allowedScripts;
-    if (!hasObjects && !hasEffects && allowedScripts.length === 0) return null;
+    if (!hasObjects && !hasEffects && !isAsset && !isUI && allowedScripts.length === 0) return null;
 
     return (
       <Popover open={open} onOpenChange={setOpen}>
@@ -1382,6 +1473,25 @@ export default function EditorPage() {
               <Item icon={Layers} label="Model"  onClick={() => createGroupObject(containerDef.name, "model",  parentId)} testId={`add-model-${testId}`} />
             </>
           )}
+          {isAsset && (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Asset</div>
+              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} testId={`add-asset-folder-${testId}`} />
+              <Item icon={Layers} label="Model"  onClick={() => createGroupObject(containerDef.name, "model",  parentId)} testId={`add-asset-model-${testId}`} />
+              <Item icon={Music}  label="Audio"  onClick={() => createAudioAsset(containerDef.name, parentId ?? null)} testId={`add-asset-audio-${testId}`} />
+            </>
+          )}
+          {isUI && (
+            <>
+              <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">UI Element</div>
+              <Item icon={Layout}           label="Frame"          onClick={() => createUIElement(containerDef.name, "frame",          parentId)} testId={`add-ui-frame-${testId}`} />
+              <Item icon={Type}             label="TextLabel"      onClick={() => createUIElement(containerDef.name, "textLabel",      parentId)} testId={`add-ui-textlabel-${testId}`} />
+              <Item icon={MousePointerClick} label="TextButton"    onClick={() => createUIElement(containerDef.name, "textButton",     parentId)} testId={`add-ui-textbutton-${testId}`} />
+              <Item icon={ImageIcon}        label="ImageLabel"     onClick={() => createUIElement(containerDef.name, "imageLabel",     parentId)} testId={`add-ui-imagelabel-${testId}`} />
+              <Item icon={ImageIcon}        label="ImageButton"    onClick={() => createUIElement(containerDef.name, "imageButton",    parentId)} testId={`add-ui-imagebutton-${testId}`} />
+              <Item icon={ScrollText}       label="ScrollingFrame" onClick={() => createUIElement(containerDef.name, "scrollingFrame", parentId)} testId={`add-ui-scrollframe-${testId}`} />
+            </>
+          )}
           {hasEffects && (
             <>
               <Separator className="my-1" />
@@ -1396,7 +1506,7 @@ export default function EditorPage() {
           )}
           {allowedScripts.length > 0 && (
             <>
-              {hasObjects && <Separator className="my-1" />}
+              {(hasObjects || isAsset || isUI) && <Separator className="my-1" />}
               <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">Script</div>
               {allowedScripts.includes("server") && (
                 <Item icon={FileCode} label="Server Script" onClick={() => addScriptTo(containerDef.name, "server", parentId ?? undefined)} testId={`add-server-${testId}`} />
@@ -1422,7 +1532,9 @@ export default function EditorPage() {
     const collapsed = !!collapsedContainers[c.name];
     const Icon = c.icon;
     const hasChildren = (c.children ?? []).length > 0;
-    const totalCount = items.length + containerScripts.length;
+    const isPlayersRoot = c.name === "Players";
+    const playersHere = isPlayersRoot ? activePlayers : [];
+    const totalCount = items.length + containerScripts.length + playersHere.length;
     const pl = depth * 10;
     const testId = c.name.replace(/\//g, "-");
 
@@ -1460,7 +1572,27 @@ export default function EditorPage() {
             {(c.children ?? []).map((child) => (
               <ContainerSection key={child.name} c={child} depth={depth + 1} />
             ))}
-            {items.length === 0 && containerScripts.length === 0 && !hasChildren && (
+            {/* Connected players — shown only under the Players root container */}
+            {isPlayersRoot && (
+              playersHere.length === 0 ? (
+                <div className="text-[11px] text-muted-foreground px-3 py-1 italic" style={{ paddingLeft: pl + 12 }}>
+                  No players online
+                </div>
+              ) : (
+                playersHere.map((p) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center gap-2 rounded-md px-1 py-1.5 text-sm text-muted-foreground"
+                    style={{ paddingLeft: pl + 12 }}
+                  >
+                    <User className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate flex-1">{p.name}</span>
+                    <span className="text-[10px] text-green-500 shrink-0">●</span>
+                  </div>
+                ))
+              )
+            )}
+            {items.length === 0 && containerScripts.length === 0 && !hasChildren && !isPlayersRoot && (
               <div className="text-[11px] text-muted-foreground px-3 py-1 italic">empty</div>
             )}
             {containerScripts.map((s) => (
@@ -2003,8 +2135,182 @@ export default function EditorPage() {
             </>
           )}
 
+          {/* ─── UI Element properties ─── */}
+          {selected.type === "uiElement" && (
+            <>
+              <Separator />
+              <div className="space-y-3">
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">UI Element</Label>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Type</Label>
+                  <div className="text-sm text-muted-foreground capitalize">
+                    {(selected.properties as any)?.uiType ?? "frame"}
+                  </div>
+                </div>
+
+                {/* Position */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Pos X</Label>
+                    <Input
+                      type="number"
+                      step={1}
+                      value={(selected.properties as any)?.posX ?? 0}
+                      onChange={(e) => handlePropertyChange({ posX: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Pos Y</Label>
+                    <Input
+                      type="number"
+                      step={1}
+                      value={(selected.properties as any)?.posY ?? 0}
+                      onChange={(e) => handlePropertyChange({ posY: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+
+                {/* Size */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Width</Label>
+                    <Input
+                      type="number"
+                      step={1}
+                      min={0}
+                      value={(selected.properties as any)?.sizeX ?? 200}
+                      onChange={(e) => handlePropertyChange({ sizeX: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Height</Label>
+                    <Input
+                      type="number"
+                      step={1}
+                      min={0}
+                      value={(selected.properties as any)?.sizeY ?? 50}
+                      onChange={(e) => handlePropertyChange({ sizeY: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+
+                {/* Visible + ZIndex */}
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="prop-ui-visible" className="text-xs">Visible</Label>
+                  <Switch
+                    id="prop-ui-visible"
+                    checked={(selected.properties as any)?.visible ?? true}
+                    onCheckedChange={(v) => handlePropertyChange({ visible: v })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">Z-Index</Label>
+                  <Input
+                    type="number"
+                    step={1}
+                    value={(selected.properties as any)?.zIndex ?? 0}
+                    onChange={(e) => handlePropertyChange({ zIndex: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                {/* Background color */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Background Color</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={(selected.properties as any)?.backgroundColor ?? "#1e293b"}
+                      onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
+                      className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                    />
+                    <Input
+                      value={(selected.properties as any)?.backgroundColor ?? "#1e293b"}
+                      onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Background transparency */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Transparency</Label>
+                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                      {((selected.properties as any)?.backgroundTransparency ?? 0).toFixed(2)}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[(selected.properties as any)?.backgroundTransparency ?? 0]}
+                    min={0} max={1} step={0.05}
+                    onValueChange={([v]) => handlePropertyChange({ backgroundTransparency: v })}
+                  />
+                </div>
+
+                {/* Text properties (TextLabel / TextButton) */}
+                {((selected.properties as any)?.uiType === "textLabel" || (selected.properties as any)?.uiType === "textButton") && (
+                  <>
+                    <Separator />
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Text</Label>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Content</Label>
+                      <Input
+                        value={(selected.properties as any)?.text ?? ""}
+                        onChange={(e) => handlePropertyChange({ text: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Text Color</Label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={(selected.properties as any)?.textColor ?? "#ffffff"}
+                          onChange={(e) => handlePropertyChange({ textColor: e.target.value })}
+                          className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
+                        />
+                        <Input
+                          value={(selected.properties as any)?.textColor ?? "#ffffff"}
+                          onChange={(e) => handlePropertyChange({ textColor: e.target.value })}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Text Size</Label>
+                      <Input
+                        type="number"
+                        step={1}
+                        min={6}
+                        max={200}
+                        value={(selected.properties as any)?.textSize ?? 16}
+                        onChange={(e) => handlePropertyChange({ textSize: parseInt(e.target.value) || 16 })}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Image properties (ImageLabel / ImageButton) */}
+                {((selected.properties as any)?.uiType === "imageLabel" || (selected.properties as any)?.uiType === "imageButton") && (
+                  <>
+                    <Separator />
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Image</Label>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Image URL</Label>
+                      <Input
+                        placeholder="https://..."
+                        value={(selected.properties as any)?.imageUrl ?? ""}
+                        onChange={(e) => handlePropertyChange({ imageUrl: e.target.value })}
+                        className="text-xs"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
           {/* ─── Entity (primitive/model) properties ─── */}
-          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "particleEmitter" && (
+          {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "particleEmitter" && selected.type !== "uiElement" && (
             <>
               <div className="space-y-1.5">
                 <Label className="text-xs">Color</Label>

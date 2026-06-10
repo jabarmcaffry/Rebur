@@ -74,7 +74,7 @@ Rebur                      ← single global
 ├── Assets
 │   ├── Shared             ← assets replicated to all clients (add your own folders via +)
 │   └── Server             ← server-only assets, never sent to clients (add folders via +)
-├── Systems                ← global server-authoritative scripts (round manager, spawn logic…)
+├── ServerScripts          ← global server-authoritative scripts (round manager, spawn logic…)
 ├── State                  ← shared session key-value store (resets each session)
 ├── DataStore              ← persistent cross-session storage
 ├── Gui                    ← shared HUD render layer (all players see)
@@ -124,7 +124,7 @@ Some APIs are conceptually **per-player/client** but are currently bridged throu
 | \`Rebur.Input\` | Per-player keyboard/mouse | Server receives player input events, forwarded to scripts |
 | \`Rebur.Camera\` | Per-player camera | Server sets camera params, pushed to each client |
 | \`Rebur.Network.send()\` | Server → all clients / client → server | Symmetric: same method name on both sides |
-| \`Rebur.Network.on()\` | Receive messages | Server: receives from clients. Client (LocalScript): receives from server |
+| \`Rebur.Network.on()\` | Receive messages | Server: receives from clients. Client (ClientScript): receives from server |
 | \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
 
 > **Why this matters:** \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted so you can apply effects correctly.
@@ -163,7 +163,7 @@ Every entity has an **owner**. The owner is the only authority allowed to write 
 
 \`\`\`
 Server writes entity.position  →  replicates to all clients ✓
-Client (LocalScript) reads it  →  always reflects the latest server value ✓
+Client (ClientScript) reads it  →  always reflects the latest server value ✓
 Client writes entity.position  →  no authority; overwritten by next server tick ✗
 \`\`\`
 
@@ -185,16 +185,16 @@ What this means for your scripts:
 - Smooth physics motion (balls, projectiles) will appear fluid even over a moderate connection.
 - There is no client-side extrapolation; if packets are lost, the entity holds its last interpolated position until the next snapshot arrives.
 
-### LocalScript (Client-Side)
+### ClientScript (Client-Side)
 
-A \`LocalScript\` placed in the **StarterPlayer** container runs in each player's browser. Use it for:
+A \`ClientScript\` placed in the **StarterPlayer** container runs in each player's browser. Use it for:
 - **Client → server messaging** — send events up to the server via \`Rebur.Network.send()\`
 - **Server → client reactions** — receive data events from the server via \`Rebur.Network.on()\`
 - **Per-frame client logic** — \`Rebur.on("tick", fn)\` runs at browser frame rate
 
-LocalScripts do **not** have authority over game state. All gameplay logic (health, position, inventory, physics) runs on the server. LocalScripts are a communication layer, not a game logic layer.
+ClientScripts do **not** have authority over game state. All gameplay logic (health, position, inventory, physics) runs on the server. ClientScripts are a communication layer, not a game logic layer.
 
-See the **LocalScript** section at the end of this reference for the full API.
+See the **ClientScript** section at the end of this reference for the full API.
 
 ---
 
@@ -1386,7 +1386,7 @@ Rebur.Tween(entity.position, { y: 10 }, 3, "easeInOut", () => {
 
 ## Rebur.Camera
 
-> **Client-bound API (currently server-proxied).** Camera settings are pushed from the server to all clients each tick. When per-player LocalScripts arrive, each player will have their own camera scope.
+> **Client-bound API (currently server-proxied).** Camera settings are pushed from the server to all clients each tick. When per-player ClientScripts arrive, each player will have their own camera scope.
 
 \`Rebur.Camera\` is a plain writable object — set any property and it is pushed to clients. There are no built-in camera modes. If you want a follow camera, orbit camera, or cutscene, you write the logic yourself in a tick handler.
 
@@ -1513,9 +1513,9 @@ unsub(); // unsubscribe
 
 ## Rebur.Network
 
-The Network API is symmetrical across server and client — both sides use the same three methods. Server Scripts and LocalScripts share the same \`Rebur.Network\` interface.
+The Network API is symmetrical across server and client — both sides use the same three methods. Server Scripts and ClientScripts share the same \`Rebur.Network\` interface.
 
-| | Server | Client (LocalScript) |
+| | Server | Client (ClientScript) |
 |---|---|---|
 | Send to all | \`Rebur.Network.send(event, payload)\` | — |
 | Send to one | \`Rebur.Network.sendTo(player, event, payload)\` | — |
@@ -1559,7 +1559,7 @@ Network is a **data and event bus**. It is not a UI system. Do not use \`Rebur.N
 |----------|------------|-----|
 | Update a shared score label | \`Rebur.State.set("score", n)\` + \`Rebur.Gui.text()\` | State replicates; GUI is the render layer |
 | Update a per-player HP bar | \`player.gui.bar("hp", hp, max)\` | Server routes to the right client directly |
-| Notify a player of a purchase | \`Rebur.Network.sendTo(player, "purchaseResult", data)\` | Data event, not UI — the LocalScript or client handles rendering |
+| Notify a player of a purchase | \`Rebur.Network.sendTo(player, "purchaseResult", data)\` | Data event, not UI — the ClientScript or client handles rendering |
 
 \`\`\`js
 // ✓ Correct: update state and shared HUD together on the server
@@ -1572,19 +1572,19 @@ coin.on("touched", (other) => {
 
 // ✗ Anti-pattern: using Network as a UI pipe
 // Rebur.State.on("score", (val) => { Rebur.Network.send("scoreUpdate", { score: val }); });
-// ...then in LocalScript: Rebur.Gui.text("score", ...)
+// ...then in ClientScript: Rebur.Gui.text("score", ...)
 // This creates a redundant layer — the server already controls Rebur.Gui directly.
 \`\`\`
 
-### Client → Server (LocalScript sends)
+### Client → Server (ClientScript sends)
 
 \`\`\`js
-// LocalScript — send a data event up to the server
+// ClientScript — send a data event up to the server
 Rebur.Network.send("purchaseRequest", { item: "Sword", cost: 50 });
 
 // Listen for the server's data response — then update per-player UI
 Rebur.Network.on("purchaseResult", (payload) => {
-  // payload is data; UI update is the LocalScript's responsibility
+  // payload is data; UI update is the ClientScript's responsibility
   log(payload.success ? "Bought " + payload.item : "Failed: " + payload.reason);
 });
 \`\`\`
@@ -1976,11 +1976,11 @@ Rebur.on("tick", (dt) => {
 
 ---
 
-## LocalScript (Client-Side)
+## ClientScript (Client-Side)
 
-Scripts placed in the **UI/Player** or **UI/Global** containers with type **LocalScript** run in the player's browser, not on the server.
+Scripts placed in the **UI/Player** or **UI/Global** containers with type **ClientScript** run in the player's browser, not on the server.
 
-LocalScripts have access to a smaller API focused on client ↔ server messaging:
+ClientScripts have access to a smaller API focused on client ↔ server messaging:
 
 | API | Description |
 |-----|-------------|
@@ -1990,7 +1990,7 @@ LocalScripts have access to a smaller API focused on client ↔ server messaging
 | \`Rebur.on("tick", fn)\` | Per-frame callback (browser RAF) |
 
 \`\`\`js
-// LocalScript — runs in the player's browser
+// ClientScript — runs in the player's browser
 
 // Send a message to the server when the script starts
 Rebur.Network.send("clientReady", { time: Date.now() });
@@ -2009,12 +2009,12 @@ Rebur.on("tick", (dt) => {
 Server-side Script to pair:
 
 \`\`\`js
-// Script (server-side) — receives from LocalScript
+// Script (server-side) — receives from ClientScript
 Rebur.Network.on("clientReady", (player, data) => {
   log(player.username, "is ready at", data.time);
   Rebur.Network.sendTo(player, "showAlert", { message: "Welcome!" });
 });
 \`\`\`
 
-> LocalScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send\`.
+> ClientScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send\`.
 `;
