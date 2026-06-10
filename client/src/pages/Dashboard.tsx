@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Card, CardFooter, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Gamepad2, Clock, LogOut, User } from "lucide-react";
+import { Plus, Gamepad2, Clock, LogOut, User, Trash2, Pencil } from "lucide-react";
 import { Link } from "wouter";
 import type { Game } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newGameTitle, setNewGameTitle] = useState("");
   const [newGameDescription, setNewGameDescription] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: games, isLoading } = useQuery<Game[]>({
     queryKey: ["/api/games"],
@@ -63,6 +64,20 @@ export default function Dashboard() {
         description: error.message || "Failed to create game",
         variant: "destructive",
       });
+    },
+  });
+
+  const deleteGameMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("DELETE", `/api/games/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/games"] });
+      setDeleteConfirmId(null);
+      toast({ title: "Game deleted" });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete game", variant: "destructive" });
     },
   });
 
@@ -157,9 +172,9 @@ export default function Dashboard() {
         ) : games && games.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {games.map((game) => (
-              <Card key={game.id} className="overflow-hidden hover-elevate" data-testid={`card-game-${game.id}`}>
+              <Card key={game.id} className="overflow-hidden hover-elevate group" data-testid={`card-game-${game.id}`}>
                 <Link href={`/editor/${game.id}`} className="block">
-                  <div className="aspect-video bg-gradient-to-br from-muted/50 to-muted/20 flex items-center justify-center border-b border-card-border">
+                  <div className="aspect-video bg-gradient-to-br from-muted/50 to-muted/20 flex items-center justify-center border-b border-card-border relative">
                     {game.thumbnail ? (
                       <img src={game.thumbnail} alt={game.title} className="w-full h-full object-cover" />
                     ) : (
@@ -178,11 +193,23 @@ export default function Dashboard() {
                     <Clock className="w-3 h-3" />
                     <span>{formatDate(game.updatedAt)}</span>
                   </div>
-                  <Link href={`/editor/${game.id}`}>
-                    <Button size="sm" variant="secondary" data-testid={`button-edit-${game.id}`}>
-                      Edit
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setDeleteConfirmId(game.id)}
+                      data-testid={`button-delete-game-${game.id}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
-                  </Link>
+                    <Link href={`/editor/${game.id}`}>
+                      <Button size="sm" variant="secondary" data-testid={`button-edit-${game.id}`}>
+                        <Pencil className="w-3.5 h-3.5 mr-1" />
+                        Edit
+                      </Button>
+                    </Link>
+                  </div>
                 </CardFooter>
               </Card>
             ))}
@@ -201,6 +228,29 @@ export default function Dashboard() {
           </Card>
         )}
       </main>
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={deleteConfirmId !== null} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Game</DialogTitle>
+            <DialogDescription>
+              This will permanently delete the game and all its objects, scripts, and assets. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={deleteGameMutation.isPending}
+              onClick={() => deleteConfirmId && deleteGameMutation.mutate(deleteConfirmId)}
+              data-testid="button-confirm-delete"
+            >
+              {deleteGameMutation.isPending ? "Deleting..." : "Delete Game"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Game Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

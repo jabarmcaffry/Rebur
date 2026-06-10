@@ -62,11 +62,7 @@ import {
   Share2,
   X,
   Music,
-  Type,
   Layout,
-  MousePointerClick,
-  Image as ImageIcon,
-  ScrollText,
   User,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -1178,42 +1174,32 @@ export default function EditorPage() {
   };
 
   /** Create a UI element in a UI container. */
-  const createUIElement = (containerName: string, uiType: string, parentId?: string | null) => {
-    const names: Record<string, string> = {
-      frame: "Frame", textLabel: "TextLabel", textButton: "TextButton",
-      imageLabel: "ImageLabel", imageButton: "ImageButton", scrollingFrame: "ScrollingFrame",
-    };
-    const baseName = names[uiType] ?? "UIElement";
-    const count = objects.filter((o) => o.type === "uiElement" && (o.properties as any)?.uiType === uiType).length + 1;
+  const createUIElement = (containerName: string, parentId?: string | null) => {
+    const count = objects.filter((o) => o.type === "uiElement").length + 1;
     createObjectMutation.mutate({
       gameId,
-      name: `${baseName}${count > 1 ? count : ""}`,
+      name: `Frame${count > 1 ? count : ""}`,
       type: "uiElement",
       primitiveType: null,
       container: containerName,
       parentId: parentId ?? null,
       positionX: 0, positionY: 0, positionZ: 0,
       scaleX: 1, scaleY: 1, scaleZ: 1,
-      color: uiType === "textButton" || uiType === "imageButton" ? "#3b82f6" : "#1e293b",
+      color: "#1e293b",
       properties: {
-        uiType,
         posX: 0, posY: 0,
-        sizeX: uiType === "scrollingFrame" ? 300 : 200,
-        sizeY: uiType === "frame" || uiType === "scrollingFrame" ? 150 : 50,
+        sizeX: 200, sizeY: 150,
         anchorX: 0, anchorY: 0,
         visible: true,
         zIndex: 0,
-        backgroundColor: uiType === "textButton" || uiType === "imageButton" ? "#3b82f6" : "#1e293b",
-        backgroundTransparency: uiType === "imageLabel" || uiType === "imageButton" ? 0 : 0,
-        ...(uiType === "textLabel" || uiType === "textButton" ? {
-          text: baseName, textColor: "#ffffff", textSize: 16,
-        } : {}),
-        ...(uiType === "imageLabel" || uiType === "imageButton" ? {
-          imageUrl: "", imageColor: "#ffffff", imageTransparency: 0,
-        } : {}),
-        ...(uiType === "scrollingFrame" ? {
-          canvasSizeY: 400, scrollBarThickness: 6,
-        } : {}),
+        backgroundColor: "#1e293b",
+        backgroundTransparency: 0,
+        cornerRadius: 0,
+        // Toggleable components — start disabled, user opts in
+        text:   { enabled: false, content: "Label", color: "#ffffff", size: 16, weight: "normal", align: "center" },
+        image:  { enabled: false, url: "", color: "#ffffff", transparency: 0, scaleType: "fit" },
+        button: { enabled: false, hoverColor: "#2563eb" },
+        scroll: { enabled: false, direction: "vertical", barThickness: 6, canvasSizeY: 400 },
       },
     } as Partial<GameObject>);
   };
@@ -1346,18 +1332,11 @@ export default function EditorPage() {
 
   // Tiny icon for a GameObject row, picked from its primitive type.
   const ObjectIcon = ({ o }: { o: GameObject }) => {
-    const uiType = (o.properties as any)?.uiType as string | undefined;
     const Icon =
       o.type === "light" ? Lightbulb
       : o.type === "particleEmitter" ? Sparkles
       : o.type === "audio" ? Music
-      : o.type === "uiElement" ? (
-          uiType === "textLabel" ? Type
-          : uiType === "textButton" || uiType === "imageButton" ? MousePointerClick
-          : uiType === "imageLabel" ? ImageIcon
-          : uiType === "scrollingFrame" ? ScrollText
-          : Layout
-        )
+      : o.type === "uiElement" ? Layout
       : o.primitiveType === "sphere" ? Circle
       : o.primitiveType === "cylinder" ? Cylinder
       : o.primitiveType === "plane" ? Square
@@ -1484,12 +1463,7 @@ export default function EditorPage() {
           {isUI && (
             <>
               <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">UI Element</div>
-              <Item icon={Layout}           label="Frame"          onClick={() => createUIElement(containerDef.name, "frame",          parentId)} testId={`add-ui-frame-${testId}`} />
-              <Item icon={Type}             label="TextLabel"      onClick={() => createUIElement(containerDef.name, "textLabel",      parentId)} testId={`add-ui-textlabel-${testId}`} />
-              <Item icon={MousePointerClick} label="TextButton"    onClick={() => createUIElement(containerDef.name, "textButton",     parentId)} testId={`add-ui-textbutton-${testId}`} />
-              <Item icon={ImageIcon}        label="ImageLabel"     onClick={() => createUIElement(containerDef.name, "imageLabel",     parentId)} testId={`add-ui-imagelabel-${testId}`} />
-              <Item icon={ImageIcon}        label="ImageButton"    onClick={() => createUIElement(containerDef.name, "imageButton",    parentId)} testId={`add-ui-imagebutton-${testId}`} />
-              <Item icon={ScrollText}       label="ScrollingFrame" onClick={() => createUIElement(containerDef.name, "scrollingFrame", parentId)} testId={`add-ui-scrollframe-${testId}`} />
+              <Item icon={Layout} label="Frame" onClick={() => createUIElement(containerDef.name, parentId)} testId={`add-ui-frame-${testId}`} />
             </>
           )}
           {hasEffects && (
@@ -2136,178 +2110,222 @@ export default function EditorPage() {
           )}
 
           {/* ─── UI Element properties ─── */}
-          {selected.type === "uiElement" && (
-            <>
-              <Separator />
-              <div className="space-y-3">
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">UI Element</Label>
+          {selected.type === "uiElement" && (() => {
+            const props = (selected.properties as any) ?? {};
+            const text   = props.text   ?? { enabled: false, content: "Label", color: "#ffffff", size: 16, weight: "normal", align: "center" };
+            const image  = props.image  ?? { enabled: false, url: "", color: "#ffffff", transparency: 0, scaleType: "fit" };
+            const button = props.button ?? { enabled: false, hoverColor: "#2563eb" };
+            const scroll = props.scroll ?? { enabled: false, direction: "vertical", barThickness: 6, canvasSizeY: 400 };
+            const patchComp = (key: string, patch: object) =>
+              handlePropertyChange({ [key]: { ...(props[key] ?? {}), ...patch } });
+            return (
+              <>
+                <Separator />
+                <div className="space-y-3">
+                  <Label className="text-xs uppercase tracking-wide text-muted-foreground">Frame</Label>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Type</Label>
-                  <div className="text-sm text-muted-foreground capitalize">
-                    {(selected.properties as any)?.uiType ?? "frame"}
-                  </div>
-                </div>
-
-                {/* Position */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Pos X</Label>
-                    <Input
-                      type="number"
-                      step={1}
-                      value={(selected.properties as any)?.posX ?? 0}
-                      onChange={(e) => handlePropertyChange({ posX: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Pos Y</Label>
-                    <Input
-                      type="number"
-                      step={1}
-                      value={(selected.properties as any)?.posY ?? 0}
-                      onChange={(e) => handlePropertyChange({ posY: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                </div>
-
-                {/* Size */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Width</Label>
-                    <Input
-                      type="number"
-                      step={1}
-                      min={0}
-                      value={(selected.properties as any)?.sizeX ?? 200}
-                      onChange={(e) => handlePropertyChange({ sizeX: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[11px] text-muted-foreground">Height</Label>
-                    <Input
-                      type="number"
-                      step={1}
-                      min={0}
-                      value={(selected.properties as any)?.sizeY ?? 50}
-                      onChange={(e) => handlePropertyChange({ sizeY: parseFloat(e.target.value) || 0 })}
-                    />
-                  </div>
-                </div>
-
-                {/* Visible + ZIndex */}
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="prop-ui-visible" className="text-xs">Visible</Label>
-                  <Switch
-                    id="prop-ui-visible"
-                    checked={(selected.properties as any)?.visible ?? true}
-                    onCheckedChange={(v) => handlePropertyChange({ visible: v })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] text-muted-foreground">Z-Index</Label>
-                  <Input
-                    type="number"
-                    step={1}
-                    value={(selected.properties as any)?.zIndex ?? 0}
-                    onChange={(e) => handlePropertyChange({ zIndex: parseInt(e.target.value) || 0 })}
-                  />
-                </div>
-
-                {/* Background color */}
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Background Color</Label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={(selected.properties as any)?.backgroundColor ?? "#1e293b"}
-                      onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
-                      className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
-                    />
-                    <Input
-                      value={(selected.properties as any)?.backgroundColor ?? "#1e293b"}
-                      onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
-                      className="font-mono text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* Background transparency */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs">Transparency</Label>
-                    <span className="text-[10px] text-muted-foreground tabular-nums">
-                      {((selected.properties as any)?.backgroundTransparency ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                  <Slider
-                    value={[(selected.properties as any)?.backgroundTransparency ?? 0]}
-                    min={0} max={1} step={0.05}
-                    onValueChange={([v]) => handlePropertyChange({ backgroundTransparency: v })}
-                  />
-                </div>
-
-                {/* Text properties (TextLabel / TextButton) */}
-                {((selected.properties as any)?.uiType === "textLabel" || (selected.properties as any)?.uiType === "textButton") && (
-                  <>
-                    <Separator />
-                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Text</Label>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Content</Label>
-                      <Input
-                        value={(selected.properties as any)?.text ?? ""}
-                        onChange={(e) => handlePropertyChange({ text: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Text Color</Label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={(selected.properties as any)?.textColor ?? "#ffffff"}
-                          onChange={(e) => handlePropertyChange({ textColor: e.target.value })}
-                          className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer"
-                        />
-                        <Input
-                          value={(selected.properties as any)?.textColor ?? "#ffffff"}
-                          onChange={(e) => handlePropertyChange({ textColor: e.target.value })}
-                          className="font-mono text-xs"
-                        />
-                      </div>
+                  {/* Position */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Pos X</Label>
+                      <Input type="number" step={1} value={props.posX ?? 0}
+                        onChange={(e) => handlePropertyChange({ posX: parseFloat(e.target.value) || 0 })} />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-[11px] text-muted-foreground">Text Size</Label>
-                      <Input
-                        type="number"
-                        step={1}
-                        min={6}
-                        max={200}
-                        value={(selected.properties as any)?.textSize ?? 16}
-                        onChange={(e) => handlePropertyChange({ textSize: parseInt(e.target.value) || 16 })}
-                      />
+                      <Label className="text-[11px] text-muted-foreground">Pos Y</Label>
+                      <Input type="number" step={1} value={props.posY ?? 0}
+                        onChange={(e) => handlePropertyChange({ posY: parseFloat(e.target.value) || 0 })} />
                     </div>
-                  </>
-                )}
+                  </div>
 
-                {/* Image properties (ImageLabel / ImageButton) */}
-                {((selected.properties as any)?.uiType === "imageLabel" || (selected.properties as any)?.uiType === "imageButton") && (
-                  <>
-                    <Separator />
-                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Image</Label>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Image URL</Label>
-                      <Input
-                        placeholder="https://..."
-                        value={(selected.properties as any)?.imageUrl ?? ""}
-                        onChange={(e) => handlePropertyChange({ imageUrl: e.target.value })}
-                        className="text-xs"
-                      />
+                  {/* Size */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Width</Label>
+                      <Input type="number" step={1} min={0} value={props.sizeX ?? 200}
+                        onChange={(e) => handlePropertyChange({ sizeX: parseFloat(e.target.value) || 0 })} />
                     </div>
-                  </>
-                )}
-              </div>
-            </>
-          )}
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-muted-foreground">Height</Label>
+                      <Input type="number" step={1} min={0} value={props.sizeY ?? 150}
+                        onChange={(e) => handlePropertyChange({ sizeY: parseFloat(e.target.value) || 0 })} />
+                    </div>
+                  </div>
+
+                  {/* Visible / Z-Index */}
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="prop-ui-visible" className="text-xs">Visible</Label>
+                    <Switch id="prop-ui-visible" checked={props.visible ?? true}
+                      onCheckedChange={(v) => handlePropertyChange({ visible: v })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Z-Index</Label>
+                    <Input type="number" step={1} value={props.zIndex ?? 0}
+                      onChange={(e) => handlePropertyChange({ zIndex: parseInt(e.target.value) || 0 })} />
+                  </div>
+
+                  {/* Background */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Background</Label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={props.backgroundColor ?? "#1e293b"}
+                        onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
+                        className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer" />
+                      <Input value={props.backgroundColor ?? "#1e293b"}
+                        onChange={(e) => handlePropertyChange({ backgroundColor: e.target.value })}
+                        className="font-mono text-xs" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">Transparency</Label>
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                        {(props.backgroundTransparency ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <Slider value={[props.backgroundTransparency ?? 0]} min={0} max={1} step={0.05}
+                      onValueChange={([v]) => handlePropertyChange({ backgroundTransparency: v })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-muted-foreground">Corner Radius</Label>
+                    <Input type="number" step={1} min={0} value={props.cornerRadius ?? 0}
+                      onChange={(e) => handlePropertyChange({ cornerRadius: parseInt(e.target.value) || 0 })} />
+                  </div>
+                </div>
+
+                {/* ── Text component ── */}
+                <Separator />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Text</Label>
+                    <Switch checked={text.enabled}
+                      onCheckedChange={(v) => patchComp("text", { enabled: v })} />
+                  </div>
+                  {text.enabled && (
+                    <>
+                      <Input placeholder="Label text" value={text.content ?? "Label"}
+                        onChange={(e) => patchComp("text", { content: e.target.value })} />
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={text.color ?? "#ffffff"}
+                          onChange={(e) => patchComp("text", { color: e.target.value })}
+                          className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer" />
+                        <Input value={text.color ?? "#ffffff"}
+                          onChange={(e) => patchComp("text", { color: e.target.value })}
+                          className="font-mono text-xs" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] text-muted-foreground">Size</Label>
+                          <Input type="number" step={1} min={6} max={200} value={text.size ?? 16}
+                            onChange={(e) => patchComp("text", { size: parseInt(e.target.value) || 16 })} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] text-muted-foreground">Align</Label>
+                          <select value={text.align ?? "center"}
+                            onChange={(e) => patchComp("text", { align: e.target.value })}
+                            className="w-full h-9 rounded-md bg-background border border-border px-2 text-xs">
+                            <option value="left">Left</option>
+                            <option value="center">Center</option>
+                            <option value="right">Right</option>
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* ── Image component ── */}
+                <Separator />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Image</Label>
+                    <Switch checked={image.enabled}
+                      onCheckedChange={(v) => patchComp("image", { enabled: v })} />
+                  </div>
+                  {image.enabled && (
+                    <>
+                      <Input placeholder="https://..." value={image.url ?? ""}
+                        onChange={(e) => patchComp("image", { url: e.target.value })}
+                        className="text-xs" />
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Transparency</Label>
+                          <span className="text-[10px] text-muted-foreground tabular-nums">
+                            {(image.transparency ?? 0).toFixed(2)}
+                          </span>
+                        </div>
+                        <Slider value={[image.transparency ?? 0]} min={0} max={1} step={0.05}
+                          onValueChange={([v]) => patchComp("image", { transparency: v })} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">Scale</Label>
+                        <select value={image.scaleType ?? "fit"}
+                          onChange={(e) => patchComp("image", { scaleType: e.target.value })}
+                          className="w-full h-9 rounded-md bg-background border border-border px-2 text-xs">
+                          <option value="fit">Fit</option>
+                          <option value="crop">Crop</option>
+                          <option value="stretch">Stretch</option>
+                          <option value="tile">Tile</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* ── Button component ── */}
+                <Separator />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Button</Label>
+                    <Switch checked={button.enabled}
+                      onCheckedChange={(v) => patchComp("button", { enabled: v })} />
+                  </div>
+                  {button.enabled && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Hover Color</Label>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={button.hoverColor ?? "#2563eb"}
+                          onChange={(e) => patchComp("button", { hoverColor: e.target.value })}
+                          className="w-9 h-9 rounded-md bg-transparent border border-border cursor-pointer" />
+                        <Input value={button.hoverColor ?? "#2563eb"}
+                          onChange={(e) => patchComp("button", { hoverColor: e.target.value })}
+                          className="font-mono text-xs" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Scroll component ── */}
+                <Separator />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wide text-muted-foreground">Scroll</Label>
+                    <Switch checked={scroll.enabled}
+                      onCheckedChange={(v) => patchComp("scroll", { enabled: v })} />
+                  </div>
+                  {scroll.enabled && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">Direction</Label>
+                        <select value={scroll.direction ?? "vertical"}
+                          onChange={(e) => patchComp("scroll", { direction: e.target.value })}
+                          className="w-full h-9 rounded-md bg-background border border-border px-2 text-xs">
+                          <option value="vertical">Vertical</option>
+                          <option value="horizontal">Horizontal</option>
+                          <option value="both">Both</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] text-muted-foreground">Bar Width</Label>
+                        <Input type="number" step={1} min={2} max={20} value={scroll.barThickness ?? 6}
+                          onChange={(e) => patchComp("scroll", { barThickness: parseInt(e.target.value) || 6 })} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
           {/* ─── Entity (primitive/model) properties ─── */}
           {selected.type !== "audio" && selected.type !== "light" && selected.type !== "folder" && selected.type !== "particleEmitter" && selected.type !== "uiElement" && (

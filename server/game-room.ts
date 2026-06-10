@@ -55,11 +55,6 @@ interface StaticBox {
   minY: number; maxY: number;
   minZ: number; maxZ: number;
   name: string;
-  // Platform motion for this tick (updated in Step 2b)
-  dx: number; dy: number; dz: number;
-  rotDY: number;
-  // Center cached for rotation carry
-  cx: number; cz: number;
 }
 
 interface DynamicObj {
@@ -108,9 +103,6 @@ export class GameRoom {
     private readonly broadcastFn: (msg: object) => void,
     private readonly sendToPlayerFn?: (playerId: string, msg: object) => void,
   ) {}
-
-  // Previous frame positions for moved anchored objects — used by platform physics
-  private prevObjPositions = new Map<string, { x: number; y: number; z: number; rotY: number }>();
 
   getSpawnPoint() { return { ...this.spawnPoint }; }
 
@@ -217,8 +209,6 @@ export class GameRoom {
           minX: px - sx/2, maxX: px + sx/2,
           minY: py - sy/2, maxY: py + sy/2,
           minZ: pz - sz/2, maxZ: pz + sz/2,
-          dx: 0, dy: 0, dz: 0, rotDY: 0,
-          cx: px, cz: pz,
         });
       } else if (!isLogicalOnly) {
         this.dynamics.set(o.id, dobj);
@@ -404,26 +394,15 @@ export class GameRoom {
       }
     }
 
-    // ── Step 2b: Update static bounds for anchored objects that moved (platforms) ─
+    // ── Step 2b: Keep static AABB bounds in sync with any scripted movement ─────
+    // Scripts can move anchored objects each tick; rebuild bounds so collisions
+    // use the current position rather than the initial one.
     for (const sb of this.statics) {
-      // Find the matching allObjs entry by name
       for (const obj of this.allObjs.values()) {
         if (obj.name !== sb.name || !obj.anchored) continue;
-        const prev = this.prevObjPositions.get(obj.name);
-        if (prev) {
-          sb.dx = obj.x - prev.x;
-          sb.dy = obj.y - prev.y;
-          sb.dz = obj.z - prev.z;
-          sb.rotDY = obj.rotY - prev.rotY;
-        } else {
-          sb.dx = 0; sb.dy = 0; sb.dz = 0; sb.rotDY = 0;
-        }
-        // Recompute bounds from current obj position
         sb.minX = obj.x - obj.sx/2; sb.maxX = obj.x + obj.sx/2;
         sb.minY = obj.y - obj.sy/2; sb.maxY = obj.y + obj.sy/2;
         sb.minZ = obj.z - obj.sz/2; sb.maxZ = obj.z + obj.sz/2;
-        sb.cx = obj.x; sb.cz = obj.z;
-        this.prevObjPositions.set(obj.name, { x: obj.x, y: obj.y, z: obj.z, rotY: obj.rotY });
         break;
       }
     }
@@ -470,47 +449,50 @@ export class GameRoom {
     }
 
     // ── Step 5: Player physics ────────────────────────────────────────────────
+    // Uses sub-step integration for stable collisions even at low frame rates.
+    const SUBSTEPS = 3;
+    const subDt = dt / SUBSTEPS;
+
     for (const p of this.players.values()) {
       const spd = p.speed * (p.sprint ? SPRINT_MULT : 1);
-
-      p.vy += GRAVITY * dt;
-
       const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
+
+      // Horizontal velocity is set directly from input (no accumulation) for
+      // crisp, predictable controls. Vertical velocity accumulates for arcs.
       p.vx = (-p.moveX * cos - p.moveZ * sin) * spd;
       p.vz = ( p.moveX * sin - p.moveZ * cos) * spd;
 
       if (p.jumpQueued && p.onGround) { p.vy = p.jumpPower; p.onGround = false; }
       p.jumpQueued = false;
 
+      // Face in the direction of movement
       if (Math.abs(p.vx) > 0.01 || Math.abs(p.vz) > 0.01) {
         p.rotY = Math.atan2(p.vx, p.vz);
       }
 
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.z += p.vz * dt;
       p.onGround = false;
 
-      if (p.y - PLAYER_HALF_H < KILL_Y) {
-        this._handlePlayerDeath(p);
-        continue;
+      // Sub-step loop — integrate gravity + resolve collisions multiple times per
+      // tick so high-velocity motion (e.g. fast falling) doesn't tunnel through thin
+      // platforms and collision response is numerically stable.
+      for (let step = 0; step < SUBSTEPS; step++) {
+        // Faster fall when descending (snappier jump feel without changing jump height)
+        const gravScale = p.vy < 0 ? 1.4 : 1.0;
+        p.vy += GRAVITY * gravScale * subDt;
+
+        p.x += p.vx * subDt;
+        p.y += p.vy * subDt;
+        p.z += p.vz * subDt;
+
+        if (p.y - PLAYER_HALF_H < KILL_Y) {
+          this._handlePlayerDeath(p);
+          break;
+        }
+
+        this._pushPlayerOutOfStatics(p);
       }
 
-      const plat = this._pushPlayerOutOfStatics(p);
-      // Carry player with moving/spinning platform
-      if (p.onGround && (plat.dx !== 0 || plat.dy !== 0 || plat.dz !== 0 || plat.rotDY !== 0)) {
-        p.x += plat.dx;
-        p.y += plat.dy;
-        p.z += plat.dz;
-        if (plat.rotDY !== 0) {
-          const relX = p.x - plat.cx;
-          const relZ = p.z - plat.cz;
-          const c = Math.cos(plat.rotDY), s = Math.sin(plat.rotDY);
-          p.x = plat.cx + relX * c - relZ * s;
-          p.z = plat.cz + relX * s + relZ * c;
-          p.rotY += plat.rotDY;
-        }
-      }
+      if (p.health <= 0) continue; // respawned in death handler
 
       // Sync scriptRunner's view of this player
       const sp = (this.scriptRunner as any)?.players?.get(p.id) as ScriptPlayerState | undefined;
@@ -620,8 +602,6 @@ export class GameRoom {
             minX: spec.positionX - spec.scaleX/2, maxX: spec.positionX + spec.scaleX/2,
             minY: spec.positionY - spec.scaleY/2, maxY: spec.positionY + spec.scaleY/2,
             minZ: spec.positionZ - spec.scaleZ/2, maxZ: spec.positionZ + spec.scaleZ/2,
-            dx: 0, dy: 0, dz: 0, rotDY: 0,
-            cx: spec.positionX, cz: spec.positionZ,
           });
         }
         this.scriptObjs.set(spec.name, {
@@ -840,8 +820,7 @@ export class GameRoom {
 
   // ── AABB helpers ──────────────────────────────────────────────────────────────
 
-  private _pushPlayerOutOfStatics(p: PlayerState): { dx: number; dy: number; dz: number; rotDY: number; cx: number; cz: number } {
-    let pdx = 0, pdy = 0, pdz = 0, pRotDY = 0, pcx = 0, pcz = 0;
+  private _pushPlayerOutOfStatics(p: PlayerState): void {
     for (const b of this.statics) {
       const ox = Math.min(p.x+PLAYER_RADIUS, b.maxX) - Math.max(p.x-PLAYER_RADIUS, b.minX);
       const oy = Math.min(p.y+PLAYER_HALF_H, b.maxY) - Math.max(p.y-PLAYER_HALF_H, b.minY);
@@ -849,16 +828,7 @@ export class GameRoom {
       if (ox>0 && oy>0 && oz>0) {
         const min = Math.min(ox, oy, oz);
         if (min === oy) {
-          if (p.y > (b.minY+b.maxY)/2) {
-            p.y += oy;
-            if (p.vy < 0) {
-              p.vy = 0;
-              p.onGround = true;
-              // Record this platform's motion for the carry step
-              pdx = b.dx; pdy = b.dy; pdz = b.dz; pRotDY = b.rotDY;
-              pcx = b.cx; pcz = b.cz;
-            }
-          }
+          if (p.y > (b.minY+b.maxY)/2) { p.y += oy; if (p.vy < 0) { p.vy = 0; p.onGround = true; } }
           else { p.y -= oy; if (p.vy > 0) p.vy = 0; }
         } else if (min === ox) {
           if (p.x > (b.minX+b.maxX)/2) p.x += ox; else p.x -= ox; p.vx = 0;
@@ -867,7 +837,6 @@ export class GameRoom {
         }
       }
     }
-    return { dx: pdx, dy: pdy, dz: pdz, rotDY: pRotDY, cx: pcx, cz: pcz };
   }
 
   private _pushObjOutOfStatics(obj: DynamicObj) {
