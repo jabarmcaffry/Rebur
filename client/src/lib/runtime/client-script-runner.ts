@@ -1,7 +1,7 @@
 /**
  * client-script-runner.ts
  *
- * Runs ClientScripts (UI/Player, UI/Global, UI/Components containers) in the browser.
+ * Runs ClientScripts (GUI/Player, GUI/Global, GUI/Components containers) in the browser.
  * Provides a minimal Rebur global focused on client ↔ server messaging.
  *
  * API exposed to ClientScripts:
