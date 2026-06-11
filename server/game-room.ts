@@ -83,6 +83,9 @@ interface DynamicObj {
   avX: number; avY: number; avZ: number;
   // Accumulated torque (applied each tick, then cleared)
   torqueX: number; torqueY: number; torqueZ: number;
+  // Entity health (synced from scriptObjs each tick)
+  health?: number;
+  maxHealth?: number;
 }
 
 // ── GameRoom ──────────────────────────────────────────────────────────────────
@@ -100,6 +103,8 @@ export class GameRoom {
   private collisionPairs = new Set<string>(); // solid object-object pairs
   private tickNumber = 0;
   private spawnPoint = { x: 0, y: 1.5, z: 0 };
+  /** True when static AABB bounds need a rebuild. Set on setObjects() and when any anchored object moves. */
+  private staticsDirty = true;
   private objIdCounter = 0;
   // Per-player held keys (key: playerId, value: Set of held key strings)
   private playerHeldKeys = new Map<string, Set<string>>();
@@ -140,6 +145,7 @@ export class GameRoom {
     this.allObjs.clear();
     this.scriptObjs.clear();
     this.touchedPairs.clear();
+    this.staticsDirty = true; // full rebuild needed after new object set
 
     const spawnObj = objects.find((o: any) => o.type === "spawn" || o.name === "SpawnLocation");
     if (spawnObj) {
@@ -379,7 +385,7 @@ export class GameRoom {
     let closestDist = Infinity;
     for (const so of this.scriptObjs.values()) {
       if (!so.interactionEnabled || so._destroyed) continue;
-      const maxDist = so.interactionDistance ?? 3;
+      const maxDist = so.interactionDistance ?? 4;
       const dx = so.positionX - player.x, dy = so.positionY - player.y, dz = so.positionZ - player.z;
       const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
       if (dist <= maxDist && dist < closestDist) { closestDist = dist; closest = so; }
@@ -415,16 +421,19 @@ export class GameRoom {
     }
 
     // ── Step 2: Apply script obj changes → allObjs ────────────────────────────
-    let _anyStaticMoved = false;
     if (this.scriptRunner) {
       for (const [name, so] of this.scriptObjs) {
         for (const obj of this.allObjs.values()) {
           if (obj.name !== name) continue;
-          if (obj.anchored && (obj.x !== so.positionX || obj.y !== so.positionY || obj.z !== so.positionZ)) {
-            _anyStaticMoved = true;
+          if (obj.anchored && (
+            obj.x !== so.positionX || obj.y !== so.positionY || obj.z !== so.positionZ ||
+            obj.sx !== so.scaleX   || obj.sy !== so.scaleY   || obj.sz !== so.scaleZ
+          )) {
+            this.staticsDirty = true; // anchored object moved/resized — AABB bounds need update
           }
           obj.x     = so.positionX; obj.y     = so.positionY; obj.z     = so.positionZ;
           obj.rotX  = so.rotationX; obj.rotY  = so.rotationY; obj.rotZ  = so.rotationZ;
+          obj.sx    = so.scaleX;    obj.sy    = so.scaleY;    obj.sz    = so.scaleZ;
           obj.color = so.color;     obj.visible = so.visible;
           obj.transparency = so.transparency ?? obj.transparency;
           if (!obj.anchored) {
@@ -437,14 +446,16 @@ export class GameRoom {
             if (so.torqueZ) { obj.torqueZ += so.torqueZ; so.torqueZ = 0; }
           }
           if (so.gravity !== undefined) obj.gravity = so.gravity;
+          if (so.health    !== undefined) obj.health    = so.health;
+          if (so.maxHealth !== undefined) obj.maxHealth = so.maxHealth;
           break;
         }
       }
     }
 
     // ── Step 2b: Keep static AABB bounds in sync with scripted movement ─────────
-    // Only rebuilt when at least one anchored object was moved by a script this tick.
-    if (_anyStaticMoved) {
+    // Only runs when staticsDirty is true — skipped entirely on quiet ticks (no moves).
+    if (this.staticsDirty) {
       for (const sb of this.statics) {
         for (const obj of this.allObjs.values()) {
           if (obj.name !== sb.name || !obj.anchored) continue;
@@ -456,6 +467,7 @@ export class GameRoom {
           break;
         }
       }
+      this.staticsDirty = false; // bounds are now current — skip until next change
     }
 
     // ── Step 3: Apply script player mutations ─────────────────────────────────
@@ -731,6 +743,7 @@ export class GameRoom {
         this.allObjs.set(id, dobj);
         if (!spec.anchored) this.dynamics.set(id, dobj);
         if (spec.anchored) {
+          this.staticsDirty = true; // new anchored object added at runtime
           this.statics.push({
             name: spec.name,
             minX: spec.positionX - spec.scaleX/2, maxX: spec.positionX + spec.scaleX/2,
@@ -914,6 +927,7 @@ export class GameRoom {
         const playerCamera = perPlayerCam
           ? { mode: perPlayerCam.mode ?? cameraState?.mode ?? "thirdPerson", position: perPlayerCam.position, lookAt: perPlayerCam.lookAt, fov: perPlayerCam.fov ?? cameraState?.fov, distance: perPlayerCam.distance ?? cameraState?.distance }
           : cameraState;
+
         const state: RenderState = {
           tick, serverTime: broadcastTime,
           objects: renderObjects,
@@ -1025,6 +1039,7 @@ export class GameRoom {
     properties: o.properties ?? null,
     modelUrl: o.modelUrl, modelScale: o.modelScale, audioUrl: o.audioUrl,
     animation: o.animation, animationSpeed: o.animationSpeed, animationLoop: o.animationLoop,
+    health: o.health, maxHealth: o.maxHealth,
   });
 
   private _toRenderPlayer = (p: PlayerState): RenderPlayer => ({

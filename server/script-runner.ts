@@ -53,7 +53,7 @@ export interface ScriptObjState {
   autoDestroy?: boolean;    // if true (default), entity is destroyed when health hits 0
   // Interaction (E-key)
   interactionEnabled?: boolean;
-  interactionDistance?: number;  // max distance for E-key prompt (default 3)
+  interactionDistance?: number;  // max distance for E-key interaction (default 4)
   interactionHint?: string;      // hint text shown near entity (default "Press E to interact")
 }
 
@@ -651,11 +651,13 @@ export class ScriptRunner {
           const mh = obj.maxHealth ?? 100;
           const newHP = Math.max(0, Math.min(mh, +v));
           obj.health = newHP;
-          if (newHP <= 0 && obj.autoDestroy !== false && !obj._destroyed) {
-            runner._fireObj(obj.name, "died", ep);
-            obj._destroyed = true; obj.visible = false;
-            runner.destroyQueue.push(obj.name);
-            runner.worldLabels.delete(`__label_${obj.name}`);
+          if (newHP <= 0 && !obj._destroyed) {
+            runner._fireObj(obj.name, "died", ep); // always fires at 0 HP
+            if (obj.autoDestroy !== false) {       // then conditionally destroy
+              obj._destroyed = true; obj.visible = false;
+              runner.destroyQueue.push(obj.name);
+              runner.worldLabels.delete(`__label_${obj.name}`);
+            }
           }
         },
         get maxHealth()         { return obj.maxHealth ?? 100; },
@@ -667,11 +669,13 @@ export class ScriptRunner {
           const current = obj.health ?? mh;
           const newHP = Math.max(0, current - Math.max(0, +amount));
           obj.health = newHP;
-          if (newHP <= 0 && obj.autoDestroy !== false && !obj._destroyed) {
-            runner._fireObj(obj.name, "died", ep);
-            obj._destroyed = true; obj.visible = false;
-            runner.destroyQueue.push(obj.name);
-            runner.worldLabels.delete(`__label_${obj.name}`);
+          if (newHP <= 0 && !obj._destroyed) {
+            runner._fireObj(obj.name, "died", ep); // always fires at 0 HP
+            if (obj.autoDestroy !== false) {       // then conditionally destroy
+              obj._destroyed = true; obj.visible = false;
+              runner.destroyQueue.push(obj.name);
+              runner.worldLabels.delete(`__label_${obj.name}`);
+            }
           }
         },
         heal(amount: number) {
@@ -683,7 +687,7 @@ export class ScriptRunner {
         // ── Interaction (E-key) ─────────────────────────────────────────────
         get interactionEnabled()         { return obj.interactionEnabled ?? false; },
         set interactionEnabled(v: any)   { obj.interactionEnabled = Boolean(v); },
-        get interactionDistance()        { return obj.interactionDistance ?? 3; },
+        get interactionDistance()        { return obj.interactionDistance ?? 4; },
         set interactionDistance(v: any)  { obj.interactionDistance = Math.max(0.1, +v); },
         get interactionHint()            { return obj.interactionHint ?? "Press E to interact"; },
         set interactionHint(v: any)      { obj.interactionHint = String(v); },
@@ -1815,7 +1819,10 @@ export class ScriptRunner {
       getForwardRay(player: any): { origin:{x:number;y:number;z:number}; direction:{x:number;y:number;z:number} } | null {
         const id = typeof player === "string" ? player : player?.id;
         const state = runner.playerCameraStates.get(id);
-        if (!state) return null;
+        if (!state) {
+          runner.logs.push(`[Rebur.Camera.getForwardRay] No camera state for player "${id}" — camera data not yet received from client. Returning null.`);
+          return null;
+        }
         return { origin: { ...state.pos }, direction: { ...state.forward } };
       },
       screenPointToRay(player: any, nx: number, ny: number, aspectRatio = 16/9): { origin:{x:number;y:number;z:number}; direction:{x:number;y:number;z:number} } | null {

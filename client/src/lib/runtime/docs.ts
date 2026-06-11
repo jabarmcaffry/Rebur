@@ -285,7 +285,7 @@ e.transparency = 0.5;              // 0 = opaque, 1 = invisible
 
 ### health · maxHealth · autoDestroy
 
-Entities have a built-in health system. When health reaches 0 the entity fires a `"died"` event and (by default) destroys itself.
+Entities have a built-in health system. When health reaches 0 the entity fires a \`"died"\` event and (by default) destroys itself.
 
 \`\`\`js
 const crate = Rebur.Workspace.find("Crate");
@@ -315,7 +315,7 @@ boss.on("died", () => {
 
 ### interactionEnabled · interactionDistance · interactionHint
 
-Mark an entity as interactable — players walking up and pressing **E** will fire the `"interact"` event on it.
+Mark an entity as interactable — players walking up and pressing **E** will fire the \`"interact"\` event on it.
 
 \`\`\`js
 const chest = Rebur.Workspace.find("Chest");
@@ -719,7 +719,7 @@ if (wall) wall.destroy();
 
 Container for light entities, and the **alternate entry point for world environment settings**. Lights placed here are rendered but not simulated as physics objects.
 
-Every property documented under `Rebur.World` (sky, fog, ambient, sun) is also accessible as `Rebur.Lighting.*` — both namespaces share the same backing store. Use whichever feels more natural.
+Every property documented under \`Rebur.World\` (sky, fog, ambient, sun) is also accessible as \`Rebur.Lighting.*\` — both namespaces share the same backing store. Use whichever feels more natural.
 
 \`\`\`js
 const lamp = Rebur.Lighting.find("StreetLamp");
@@ -1437,7 +1437,205 @@ Color3.lerp("#ff0000", "#0000ff", 0.5);
 ---
 
 ## Quick Start Examples
-none right now.
+
+### FPS Shoot — raycast from camera, deal damage
+
+\`\`\`js
+Rebur.Input.on("press", (player, key) => {
+  if (key !== " ") return;
+
+  const hit = Rebur.Camera.raycast(player, { maxDistance: 100 });
+  if (!hit) return;
+
+  const { entity, point } = hit;
+  entity.takeDamage(25);
+  Rebur.Particles.muzzleFlash(player.position, { x: 0, y: 0, z: -1 });
+  Rebur.Particles.hit(point);
+  log(player.username, "shot", entity.name, "→ HP:", entity.health);
+});
+\`\`\`
+
+---
+
+### AOE Explosion — damage everything within a radius
+
+\`\`\`js
+function explode(position, radius, damage) {
+  const targets = Rebur.Workspace.all();
+  for (const t of targets) {
+    const dx = t.position.x - position.x;
+    const dy = t.position.y - position.y;
+    const dz = t.position.z - position.z;
+    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+    if (dist < radius) {
+      const falloff = 1 - dist / radius;
+      t.takeDamage(Math.round(damage * falloff));
+    }
+  }
+  Rebur.Particles.explosion(position, { count: 50, speed: 12, color: "#ff6600" });
+  Rebur.Sound.playAt("explosion", position, { maxDistance: 40 });
+}
+
+// Wire to a mine entity
+const mine = Rebur.Workspace.find("Mine");
+if (mine) {
+  mine.on("touched", (other) => {
+    if (other.isPlayer) {
+      explode(mine.position, 8, 80);
+      mine.destroy();
+    }
+  });
+}
+\`\`\`
+
+---
+
+### Item Pickup — E-key interaction + inventory
+
+\`\`\`js
+const coin = Rebur.Workspace.find("Coin");
+if (coin) {
+  coin.interactionEnabled = true;
+  coin.interactionHint = "Press E to pick up";
+
+  coin.on("interact", (player) => {
+    player.inventory.add("Coin", { count: 1 });
+    Rebur.Particles.pickup(coin.position);
+    Rebur.Sound.playForPlayer(player, "collect", { volume: 0.8 });
+    coin.destroy();
+    log(player.username, "picked up a coin");
+  });
+}
+\`\`\`
+
+---
+
+### Health Bar HUD — per-player bar that tracks damage
+
+\`\`\`js
+Rebur.on("playerJoined", (player) => {
+  player.gui.bar("hp", player.health, player.maxHealth, {
+    anchor: "bl", x: 20, y: 20,
+    width: 200, height: 16,
+    color: "#22c55e", bg: "#374151",
+  });
+  player.gui.text("hp-label", "HP", {
+    anchor: "bl", x: 20, y: 40,
+    size: 12, color: "#ffffff",
+  });
+});
+
+Rebur.on("tick", () => {
+  for (const p of Rebur.Players.all()) {
+    p.gui.bar("hp", p.health, p.maxHealth);
+    const pct = p.health / p.maxHealth;
+    // green → yellow → red
+    const color = pct > 0.5 ? "#22c55e" : pct > 0.25 ? "#eab308" : "#ef4444";
+    p.gui.bar("hp", p.health, p.maxHealth, { color });
+  }
+});
+\`\`\`
+
+---
+
+### Death Screen — show overlay, auto-respawn after 3 s
+
+\`\`\`js
+Rebur.on("playerDied", (player) => {
+  player.autoRespawn = false;
+
+  player.gui.text("death", "YOU DIED", {
+    anchor: "cc", size: 48, color: "#ef4444",
+  });
+  player.gui.text("death-sub", "Respawning in 3 s…", {
+    anchor: "cc", y: 60, size: 18, color: "#ffffff99",
+  });
+
+  after(3, () => {
+    player.respawn = true;
+    player.health = player.maxHealth;
+    player.gui.clear("death");
+    player.gui.clear("death-sub");
+  });
+});
+\`\`\`
+
+---
+
+### Door Tween — smooth open/close on interact
+
+\`\`\`js
+const door = Rebur.Workspace.find("Door");
+if (door) {
+  door.interactionEnabled = true;
+  door.interactionHint = "Press E to open";
+
+  let open = false;
+  const closedY = door.rotation.y;
+  const openY   = closedY + Math.PI / 2;
+
+  door.on("interact", () => {
+    open = !open;
+    Rebur.Tween(door.rotation, { y: open ? openY : closedY }, 0.4, "easeOutQuad");
+    door.interactionHint = open ? "Press E to close" : "Press E to open";
+    Rebur.Sound.play(open ? "door_open" : "door_close", { volume: 0.6 });
+  });
+}
+\`\`\`
+
+---
+
+### Planet Gravity — walk on a sphere
+
+\`\`\`js
+// Create a spherical gravity well attached to the planet mesh
+const planet = Rebur.Workspace.find("Planet");
+if (planet) {
+  planet.gravity = { strength: 20, radius: 50 };
+}
+
+// Kill global downward gravity so only the planet pulls
+Rebur.Physics.gravity = 0;
+
+log("Planet gravity active — walk on any surface!");
+\`\`\`
+
+---
+
+### NPC Patrol — move between waypoints on tick
+
+\`\`\`js
+const npc       = Rebur.Workspace.find("Guard");
+const waypoints = [
+  { x: -10, y: 1, z: 0 },
+  { x:  10, y: 1, z: 0 },
+  { x:   0, y: 1, z: 10 },
+];
+
+let waypointIndex = 0;
+const SPEED = 4;
+
+Rebur.on("tick", (dt) => {
+  if (!npc || npc.destroyed) return;
+
+  const target = waypoints[waypointIndex];
+  const dx = target.x - npc.position.x;
+  const dz = target.z - npc.position.z;
+  const dist = Math.sqrt(dx * dx + dz * dz);
+
+  if (dist < 0.3) {
+    waypointIndex = (waypointIndex + 1) % waypoints.length;
+    return;
+  }
+
+  npc.position = {
+    x: npc.position.x + (dx / dist) * SPEED * dt,
+    y: npc.position.y,
+    z: npc.position.z + (dz / dist) * SPEED * dt,
+  };
+  npc.rotation = { x: 0, y: Math.atan2(dx, dz), z: 0 };
+});
+\`\`\`
 
 ---
 

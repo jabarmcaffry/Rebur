@@ -518,7 +518,7 @@ export default function PlayMode({
       setLocalPlayer(renderClient.getLocalPlayer());
       setTick((t) => (t + 1) % 1000000);
 
-      // Pick up debug draws and particle events from server
+      // Pick up debug draws, particle events, and interaction prompt from server
       if (renderClient.debugDraws.length > 0) {
         setDebugDraws([...renderClient.debugDraws]);
       }
@@ -526,7 +526,6 @@ export default function PlayMode({
         setParticleEvents(prev => [...prev, ...renderClient.particleEvents]);
         renderClient.particleEvents = [];
       }
-
       // FPS counter
       const fpsd = fpsRef.current;
       fpsd.frames++;
@@ -943,6 +942,8 @@ export default function PlayMode({
           </div>
         </div>
       )}
+
+
 
       {/* ── TOP-RIGHT INDICATORS ── */}
       <div className="absolute top-12 right-2 z-40 flex flex-col items-end gap-2">

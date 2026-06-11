@@ -30,6 +30,8 @@ export interface RenderObject {
   animation?: string | null;
   animationSpeed?: number;
   animationLoop?: boolean;
+  health?: number;
+  maxHealth?: number;
 }
 
 // ── Render-Only Player State ──────────────────────────────────────────────────
