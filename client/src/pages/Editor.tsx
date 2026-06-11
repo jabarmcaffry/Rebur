@@ -731,7 +731,7 @@ export default function Editor() {
   };
 
   const HierarchyPanel = (
-    <div className="flex flex-col h-full bg-card/50 border-r border-border w-64 shrink-0">
+    <div className="flex flex-col h-full bg-card/50 border-r border-border w-64 shrink-0 max-md:hidden">
       <div className="p-2 border-b border-border flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -769,7 +769,7 @@ export default function Editor() {
   const VectorField = ({ label, values, onChange, step = 1, testIdPrefix }: any) => (
     <div className="space-y-1.5">
       <Label className="text-[10px] uppercase font-bold text-muted-foreground">{label}</Label>
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-3 gap-1 sm:gap-2">
         {["X", "Y", "Z"].map((axis, i) => (
           <div key={axis} className="relative">
             <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] font-bold text-muted-foreground/50">{axis}</span>
@@ -788,7 +788,7 @@ export default function Editor() {
   );
 
   const PropertiesPanel = (
-    <div className="flex flex-col h-full bg-card/50 border-l border-border w-72 shrink-0">
+    <div className="flex flex-col h-full bg-card/50 border-l border-border w-72 shrink-0 max-md:hidden">
       <div className="p-2 border-b border-border flex items-center justify-between">
         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
           <SettingsIcon className="w-3.5 h-3.5" /> Properties
@@ -912,7 +912,7 @@ export default function Editor() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-[10px] text-muted-foreground uppercase">Mass</Label>
                   <Input
@@ -1050,43 +1050,51 @@ export default function Editor() {
   return (
     <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden font-sans">
       <header className="flex items-center justify-between h-10 px-3 border-b border-border bg-card/80 backdrop-blur-sm shrink-0">
-        <div className="flex items-center gap-3">
-          <Link href="/dashboard" className="hover:opacity-80 transition-opacity">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/dashboard" className="hover:opacity-80 transition-opacity shrink-0">
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <div className="flex flex-col -space-y-1">
-            <span className="text-[11px] font-bold uppercase tracking-widest text-primary">Rebur Studio</span>
-            <span className="text-xs font-medium truncate max-w-[150px]">{game?.title ?? "Loading..."}</span>
+          <div className="flex flex-col -space-y-1 min-w-0">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-primary hidden sm:inline">Rebur Studio</span>
+            <span className="text-xs font-medium truncate">{game?.title ?? "Loading..."}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setIsPlayMode(true)}>
-            <Play className="w-3 h-3 fill-primary text-primary" /> Play
+            <Play className="w-3 h-3 fill-primary text-primary" /> <span className="hidden sm:inline">Play</span>
           </Button>
-          <Separator orientation="vertical" className="h-4 mx-1" />
+          <Separator orientation="vertical" className="h-4 mx-1 hidden sm:block" />
           <Button variant="default" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setPublishOpen(true)}>
-            <Share2 className="w-3 h-3" /> Publish
+            <Share2 className="w-3 h-3" /> <span className="hidden sm:inline">Publish</span>
           </Button>
         </div>
       </header>
 
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden flex-col md:flex-row">
+        {/* Mobile Hierarchy Sheet */}
+        <Sheet open={isHierarchyOpen && window.innerWidth < 768} onOpenChange={setHierarchyOpen}>
+          <SheetContent side="left" className="w-64 p-0 md:hidden">
+            {HierarchyPanel}
+          </SheetContent>
+        </Sheet>
+
+        {/* Desktop Hierarchy Panel */}
         {isHierarchyOpen && HierarchyPanel}
         
         <div className="flex-1 flex flex-col min-w-0 bg-muted/10 relative">
           <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col">
-            <div className="flex items-center justify-between px-2 border-b border-border bg-card/40 shrink-0">
+            <div className="flex items-center justify-between px-2 border-b border-border bg-card/40 shrink-0 overflow-x-auto">
               <TabsList className="bg-transparent h-9 p-0 gap-1">
                 <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
                 <TabsTrigger value="script" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scripts</TabsTrigger>
-                <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Docs</TabsTrigger>
+                <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted hidden sm:inline-flex">Docs</TabsTrigger>
               </TabsList>
-              <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setHierarchyOpen(!isHierarchyOpen)}>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setHierarchyOpen(!isHierarchyOpen)}>
                   <Menu className="w-3.5 h-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPropertiesOpen(!isPropertiesOpen)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setPropertiesOpen(!isPropertiesOpen)}>
                   <PanelRight className="w-3.5 h-3.5" />
                 </Button>
               </div>
@@ -1153,6 +1161,14 @@ export default function Editor() {
           </Tabs>
         </div>
 
+        {/* Mobile Properties Sheet */}
+        <Sheet open={isPropertiesOpen && window.innerWidth < 768} onOpenChange={setPropertiesOpen}>
+          <SheetContent side="right" className="w-72 p-0 md:hidden">
+            {PropertiesPanel}
+          </SheetContent>
+        </Sheet>
+
+        {/* Desktop Properties Panel */}
         {isPropertiesOpen && PropertiesPanel}
       </main>
 
