@@ -2123,8 +2123,150 @@ export class ScriptRunner {
     }
     for (let i = done.length - 1; i >= 0; i--) this.tweens.splice(done[i], 1);
 
+    // ── Solve constraints (welds, hinges, sliders, springs, ropes, rods) ────
+    this._solveConstraints(dt);
+
     this._fireGlobal("tick", dt);
   }
+
+  /**
+   * Per-tick constraint solver. Best-effort positional/velocity correction —
+   * good enough for doors, simple vehicles, ragdoll-ish chains, swinging
+   * objects. Operates directly on object position/velocity fields. Run after
+   * user scripts so they can mutate motor targets each frame.
+   */
+  private _solveConstraints(dt: number) {
+    if (!this.constraints.size) return;
+    for (const c of this.constraints.values()) {
+      if (!c.enabled) continue;
+      const oa = c.a ? this.objects.get(c.a) : null;
+      const ob = c.b ? this.objects.get(c.b) : null;
+      if (!oa || !ob || oa._destroyed || ob._destroyed) continue;
+
+      try {
+        switch (c.kind) {
+          case "weld": {
+            // B rigidly attached to A by stored offset.
+            ob.positionX = oa.positionX + c.offset.x;
+            ob.positionY = oa.positionY + c.offset.y;
+            ob.positionZ = oa.positionZ + c.offset.z;
+            ob.rotationX = oa.rotationX;
+            ob.rotationY = oa.rotationY;
+            ob.rotationZ = oa.rotationZ;
+            ob.velX = oa.velX ?? 0;
+            ob.velY = oa.velY ?? 0;
+            ob.velZ = oa.velZ ?? 0;
+            break;
+          }
+          case "hinge": {
+            // Drive c.angle toward motor.targetAngle and apply rotation about
+            // the hinge axis to B relative to A's pivot.
+            if (c.motor) {
+              const target = +(c.motor.targetAngle ?? 0);
+              const speed  = +(c.motor.speed ?? 4);
+              const diff   = target - c.angle;
+              const max    = speed * dt;
+              c.angle += Math.max(-max, Math.min(max, diff));
+              if (c.limits) c.angle = Math.max(c.limits.min, Math.min(c.limits.max, c.angle));
+            }
+            // Apply rotation to B (simple Y-axis hinge dominant case)
+            const ax = c.axis;
+            if (Math.abs(ax.y) >= Math.abs(ax.x) && Math.abs(ax.y) >= Math.abs(ax.z)) {
+              ob.rotationY = (oa.rotationY ?? 0) + c.angle;
+            } else if (Math.abs(ax.x) >= Math.abs(ax.z)) {
+              ob.rotationX = (oa.rotationX ?? 0) + c.angle;
+            } else {
+              ob.rotationZ = (oa.rotationZ ?? 0) + c.angle;
+            }
+            // Vehicle wheel integration
+            if (c._vehicleRef) {
+              const v = c._vehicleRef.vehicle;
+              const isFront = c._vehicleRef.index < c._vehicleRef.vehicle.wheels.length / 2;
+              if (isFront) ob.rotationY = (oa.rotationY ?? 0) + v.steer * c._vehicleRef.maxSteer;
+              // Apply forward force to chassis if throttle != 0
+              if (v.throttle !== 0) {
+                const yaw = oa.rotationY ?? 0;
+                const fx = Math.sin(yaw) * v.throttle * c._vehicleRef.maxTorque * dt;
+                const fz = Math.cos(yaw) * v.throttle * c._vehicleRef.maxTorque * dt;
+                oa.velX = (oa.velX ?? 0) + fx;
+                oa.velZ = (oa.velZ ?? 0) + fz;
+              }
+              if (v.brake > 0) {
+                oa.velX = (oa.velX ?? 0) * (1 - v.brake * 0.5);
+                oa.velZ = (oa.velZ ?? 0) * (1 - v.brake * 0.5);
+              }
+            }
+            break;
+          }
+          case "slider": {
+            if (c.motor) {
+              const target = +(c.motor.targetPosition ?? 0);
+              const speed  = +(c.motor.speed ?? 2);
+              const diff   = target - c.position;
+              const max    = speed * dt;
+              c.position += Math.max(-max, Math.min(max, diff));
+              if (c.limits) c.position = Math.max(c.limits.min, Math.min(c.limits.max, c.position));
+            }
+            ob.positionX = oa.positionX + c.axis.x * c.position;
+            ob.positionY = oa.positionY + c.axis.y * c.position;
+            ob.positionZ = oa.positionZ + c.axis.z * c.position;
+            break;
+          }
+          case "ballSocket": {
+            // Keep B anchored at A's pivot point — preserves rotation freedom
+            ob.positionX = oa.positionX + (c.pivot?.x ?? 0);
+            ob.positionY = oa.positionY + (c.pivot?.y ?? 0);
+            ob.positionZ = oa.positionZ + (c.pivot?.z ?? 0);
+            break;
+          }
+          case "spring": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.0001;
+            const stretch = dist - c.restLength;
+            const f = c.stiffness * stretch * dt;
+            const nx = dx / dist, ny = dy / dist, nz = dz / dist;
+            if (!oa.anchored) { oa.velX = (oa.velX ?? 0) + nx * f; oa.velY = (oa.velY ?? 0) + ny * f; oa.velZ = (oa.velZ ?? 0) + nz * f; }
+            if (!ob.anchored) { ob.velX = (ob.velX ?? 0) - nx * f; ob.velY = (ob.velY ?? 0) - ny * f; ob.velZ = (ob.velZ ?? 0) - nz * f; }
+            // Damping
+            const rvx = (ob.velX ?? 0) - (oa.velX ?? 0);
+            const rvy = (ob.velY ?? 0) - (oa.velY ?? 0);
+            const rvz = (ob.velZ ?? 0) - (oa.velZ ?? 0);
+            const damp = c.damping * dt;
+            if (!ob.anchored) { ob.velX -= rvx * damp; ob.velY -= rvy * damp; ob.velZ -= rvz * damp; }
+            break;
+          }
+          case "rope": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (dist > c.length) {
+              const excess = (dist - c.length) / dist;
+              const cx = dx * excess, cy = dy * excess, cz = dz * excess;
+              if (!ob.anchored) {
+                ob.positionX -= cx; ob.positionY -= cy; ob.positionZ -= cz;
+              } else if (!oa.anchored) {
+                oa.positionX += cx; oa.positionY += cy; oa.positionZ += cz;
+              }
+            }
+            break;
+          }
+          case "rod": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.0001;
+            const delta = (dist - c.length) / dist;
+            const cx = dx * delta * 0.5, cy = dy * delta * 0.5, cz = dz * delta * 0.5;
+            if (!oa.anchored) { oa.positionX += cx; oa.positionY += cy; oa.positionZ += cz; }
+            if (!ob.anchored) { ob.positionX -= cx; ob.positionY -= cy; ob.positionZ -= cz; }
+            break;
+          }
+        }
+      } catch { /* isolate constraint errors */ }
+    }
 
   // ── Public event firing (called by GameRoom) ────────────────────────────────
 
