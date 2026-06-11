@@ -148,3 +148,46 @@ export const COMPLETIONS: any[] = [
   { label: "Rebur.Workspace", kind: 5, detail: "Workspace", doc: "Entity container.", insert: "Rebur.Workspace" },
   { label: "Rebur.Players", kind: 5, detail: "Players", doc: "Player container.", insert: "Rebur.Players" }
 ];
+
+export function configureMonacoForEngine(editor: any) {
+  const monaco = (window as any).monaco;
+  if (!monaco) return;
+
+  // Register engine types
+  monaco.languages.typescript.javascriptDefaults.addExtraLib(
+    ENGINE_TYPE_DEFS,
+    "ts:rebur-api.d.ts"
+  );
+
+  // Set up completion provider
+  monaco.languages.registerCompletionItemProvider("javascript", {
+    provideCompletionItems: () => ({
+      suggestions: COMPLETIONS.map((c) => ({
+        ...c,
+        kind: c.kind ?? monaco.languages.CompletionItemKind.Property,
+        insertText: c.insert,
+        insertTextRules: c.snippet
+          ? monaco.languages.CompletionItemInsertReason.Snippet
+          : undefined,
+      })),
+    }),
+  });
+}
+
+export const ENGINE_EDITOR_OPTIONS = {
+  minimap: { enabled: false },
+  fontSize: 13,
+  lineNumbers: "on",
+  roundedSelection: true,
+  scrollBeyondLastLine: false,
+  readOnly: false,
+  automaticLayout: true,
+  tabSize: 2,
+  wordWrap: "on",
+  padding: { top: 8, bottom: 8 },
+  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  fontLigatures: true,
+  cursorBlinking: "smooth",
+  smoothScrolling: true,
+  contextmenu: true,
+};
