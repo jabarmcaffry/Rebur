@@ -2267,6 +2267,7 @@ export class ScriptRunner {
         }
       } catch { /* isolate constraint errors */ }
     }
+  }
 
   // ── Public event firing (called by GameRoom) ────────────────────────────────
 
