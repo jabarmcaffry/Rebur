@@ -283,6 +283,54 @@ e.visible      = false;            // hide
 e.transparency = 0.5;              // 0 = opaque, 1 = invisible
 \`\`\`
 
+### health · maxHealth · autoDestroy
+
+Entities have a built-in health system. When health reaches 0 the entity fires a `"died"` event and (by default) destroys itself.
+
+\`\`\`js
+const crate = Rebur.Workspace.find("Crate");
+crate.maxHealth = 50;          // set max HP
+// crate.health starts at maxHealth (50)
+
+crate.takeDamage(20);          // deals 20 damage → health 30
+crate.heal(5);                 // restores 5 HP → health 35
+crate.health = 0;              // instant kill (fires "died", destroys crate)
+\`\`\`
+
+- \`health\` (read/write) — current HP, clamped to \`[0, maxHealth]\`
+- \`maxHealth\` (read/write) — max HP, default 100
+- \`autoDestroy\` (read/write) — if \`true\` (default) the entity is destroyed when health hits 0; set \`false\` to keep it alive for custom death logic
+
+\`\`\`js
+const boss = Rebur.Workspace.find("Boss");
+boss.maxHealth = 500;
+boss.autoDestroy = false; // keep entity, handle death yourself
+
+boss.on("died", () => {
+  boss.color = "#555555";    // turn grey
+  Rebur.Particles.explosion(boss.position);
+  after(2, () => boss.destroy());
+});
+\`\`\`
+
+### interactionEnabled · interactionDistance · interactionHint
+
+Mark an entity as interactable — players walking up and pressing **E** will fire the `"interact"` event on it.
+
+\`\`\`js
+const chest = Rebur.Workspace.find("Chest");
+chest.interactionEnabled  = true;             // enable E-key detection
+chest.interactionDistance = 4;                // max distance in units (default 3)
+chest.interactionHint     = "Press E to open"; // hint text (shown client-side in future)
+
+chest.on("interact", (player) => {
+  player.inventory.add("Gold", { count: 10 });
+  player.gui.text("msg", "+10 Gold!", { anchor: "tc", y: 60 });
+  after(2, () => player.gui.clear("msg"));
+  chest.interactionEnabled = false; // one-time pickup
+});
+\`\`\`
+
 ### name *(read/write)*, id · type *(read-only)*
 
 \`\`\`js
@@ -460,6 +508,8 @@ crate.on("collisionStarted", (other, impulse) => {
 | \`"collisionStarted"\` | Physical impact begins | \`other: Entity\`, \`impulse: {x,y,z}\` | ✗ | ✓ |
 | \`"collisionEnded"\` | Physical separation | \`other: Entity\` | ✗ | ✓ |
 | \`"clicked"\` | Player clicks this entity in 3D view | \`player: PlayerEntity\` | — | — |
+| \`"died"\` | Entity health reaches 0 | — | — | — |
+| \`"interact"\` | Player presses **E** near this entity (requires \`interactionEnabled = true\`) | \`player: PlayerEntity\` | — | — |
 | \`"predestroy"\` | **Before** entity is destroyed (cleanup hook) | \`entity: Entity\` | — | — |
 | \`"removing"\` | Alias for predestroy | \`entity: Entity\` | — | — |
 | \`"destroyed"\` | After entity is fully removed | — | — | — |
@@ -667,13 +717,30 @@ if (wall) wall.destroy();
 
 ## Rebur.Lighting
 
-Container for light entities. Lights placed here are rendered but not simulated as physics objects.
+Container for light entities, and the **alternate entry point for world environment settings**. Lights placed here are rendered but not simulated as physics objects.
+
+Every property documented under `Rebur.World` (sky, fog, ambient, sun) is also accessible as `Rebur.Lighting.*` — both namespaces share the same backing store. Use whichever feels more natural.
 
 \`\`\`js
 const lamp = Rebur.Lighting.find("StreetLamp");
 if (lamp) lamp.color = "#ffaa66";
 
 const allLights = Rebur.Lighting.all();
+
+// World settings via Rebur.Lighting (same as Rebur.World)
+Rebur.Lighting.skyColor        = "#0d0d1a";    // dark night
+Rebur.Lighting.ambientColor    = "#1a1a3a";
+Rebur.Lighting.ambientIntensity = 0.2;
+Rebur.Lighting.sunIntensity    = 0.1;
+Rebur.Lighting.fogColor        = "#0d0d1a";
+Rebur.Lighting.fogDensity      = 0.015;
+
+// Day/night cycle
+let t = 12;
+Rebur.on("tick", (dt) => {
+  t = (t + dt * 0.1) % 24;
+  Rebur.Lighting.timeOfDay = t;
+});
 \`\`\`
 
 ---
@@ -779,6 +846,7 @@ A player is an entity with \`isPlayer = true\` plus the following additional pro
 | \`jumpPower\` | number | ✓ | ✓ | Jump force (default 8) |
 | \`spawnPoint\` | \`{x,y,z}\` | ✓ | ✓ | Respawn position |
 | \`autoRespawn\` | boolean | ✓ | ✓ | Whether player respawns automatically on death (default true) |
+| \`isKinematic\` | boolean | ✓ | ✓ | When \`true\`, physics is skipped — scripts fully control position/velocity |
 | \`inventory\` | Inventory | ✓ | — | Item inventory |
 | \`gui\` | PlayerGuiAPI | ✓ | — | Private per-player HUD |
 | \`data\` | PlayerDataAPI | ✓ | — | Persistent per-player storage |
@@ -816,6 +884,37 @@ When health reaches 0:
 1. Fires \`Rebur.on("playerDied")\`
 2. If \`autoRespawn\` is true, respawns automatically; otherwise stays dead until \`player.respawn = true\`.
 3. Fires \`Rebur.on("playerRespawned")\`
+
+### Kinematic players
+
+Set \`player.isKinematic = true\` to skip the built-in physics step for that player. This lets scripts directly drive position and velocity every tick — useful for scripted vehicles, moving platforms the player rides, cutscenes, and similar patterns.
+
+\`\`\`js
+// Custom vehicle controller: position the player from the vehicle entity each tick
+const cart = Rebur.Workspace.find("Cart");
+
+Rebur.on("playerJoined", (p) => {
+  p.isKinematic = true;  // disable built-in physics for this player
+});
+
+Rebur.on("tick", (dt) => {
+  for (const p of Rebur.Players.all()) {
+    if (!p.isKinematic) continue;
+    // Snap player to the cart position + seat offset
+    p.position = {
+      x: cart.position.x,
+      y: cart.position.y + 1.2,
+      z: cart.position.z,
+    };
+    p.rotation = { x: 0, y: cart.rotation.y, z: 0 };
+  }
+});
+\`\`\`
+
+While \`isKinematic\` is \`true\`:
+- Gravity, collision, and WASD movement physics are all skipped.
+- Scripts can still read \`player.body.velocity\` and write it freely.
+- Set \`isKinematic = false\` to hand back control to the physics engine.
 
 ---
 
@@ -1338,8 +1437,7 @@ Color3.lerp("#ff0000", "#0000ff", 0.5);
 ---
 
 ## Quick Start Examples
-
-See original examples in the first docs – they remain valid. Add new examples using the documented APIs where needed.
+none right now.
 
 ---
 

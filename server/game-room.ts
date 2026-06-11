@@ -49,6 +49,7 @@ interface PlayerState {
   // Camera state sent by client each input tick
   camWx: number; camWy: number; camWz: number;   // world-space camera position
   camFx: number; camFy: number; camFz: number;   // world-space camera forward (unit vec)
+  isKinematic?: boolean;  // when true, physics step is skipped; scripts fully control movement
 }
 
 interface StaticBox {
@@ -350,6 +351,8 @@ export class GameRoom {
     this.playerHeldKeys.get(playerId)!.add(k);
     this._rebuildHeldKeys();
     this.scriptRunner.fireInputPress(k, this._makeScriptPlayer(player));
+    // E-key interaction: fire "interact" on the closest interactable entity in range
+    if (k === "e") this._fireInteraction(player);
   }
 
   /** Fire Rebur.Input.on("release") when client sends a keyUp message. */
@@ -367,6 +370,24 @@ export class GameRoom {
     const player = this.players.get(playerId);
     if (!player || !this.scriptRunner) return;
     this.scriptRunner.fireNetworkMessage(event, payload, this._makeScriptPlayer(player));
+  }
+
+  /** Fire "interact" event on closest interactable entity within range. */
+  private _fireInteraction(player: PlayerState) {
+    if (!this.scriptRunner) return;
+    let closest: ScriptObjState | null = null;
+    let closestDist = Infinity;
+    for (const so of this.scriptObjs.values()) {
+      if (!so.interactionEnabled || so._destroyed) continue;
+      const maxDist = so.interactionDistance ?? 3;
+      const dx = so.positionX - player.x, dy = so.positionY - player.y, dz = so.positionZ - player.z;
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      if (dist <= maxDist && dist < closestDist) { closestDist = dist; closest = so; }
+    }
+    if (closest) {
+      const pp = this.scriptRunner.makePlayerProxyPublic(this._makeScriptPlayer(player));
+      this.scriptRunner.fireObjEvent(closest.name, "interact", pp);
+    }
   }
 
   /** Rebuild the union of all players' held keys and push to scriptRunner. */
@@ -394,10 +415,14 @@ export class GameRoom {
     }
 
     // ── Step 2: Apply script obj changes → allObjs ────────────────────────────
+    let _anyStaticMoved = false;
     if (this.scriptRunner) {
       for (const [name, so] of this.scriptObjs) {
         for (const obj of this.allObjs.values()) {
           if (obj.name !== name) continue;
+          if (obj.anchored && (obj.x !== so.positionX || obj.y !== so.positionY || obj.z !== so.positionZ)) {
+            _anyStaticMoved = true;
+          }
           obj.x     = so.positionX; obj.y     = so.positionY; obj.z     = so.positionZ;
           obj.rotX  = so.rotationX; obj.rotY  = so.rotationY; obj.rotZ  = so.rotationZ;
           obj.color = so.color;     obj.visible = so.visible;
@@ -417,18 +442,19 @@ export class GameRoom {
       }
     }
 
-    // ── Step 2b: Keep static AABB bounds in sync with any scripted movement ─────
-    // Scripts can move anchored objects each tick; rebuild bounds so collisions
-    // use the current position rather than the initial one.
-    for (const sb of this.statics) {
-      for (const obj of this.allObjs.values()) {
-        if (obj.name !== sb.name || !obj.anchored) continue;
-        sb.minX = obj.x - obj.sx/2; sb.maxX = obj.x + obj.sx/2;
-        sb.minY = obj.y - obj.sy/2; sb.maxY = obj.y + obj.sy/2;
-        sb.minZ = obj.z - obj.sz/2; sb.maxZ = obj.z + obj.sz/2;
-        const so2 = this.scriptObjs.get(obj.name);
-        if (so2) sb.canCollide = so2.canCollide !== false;
-        break;
+    // ── Step 2b: Keep static AABB bounds in sync with scripted movement ─────────
+    // Only rebuilt when at least one anchored object was moved by a script this tick.
+    if (_anyStaticMoved) {
+      for (const sb of this.statics) {
+        for (const obj of this.allObjs.values()) {
+          if (obj.name !== sb.name || !obj.anchored) continue;
+          sb.minX = obj.x - obj.sx/2; sb.maxX = obj.x + obj.sx/2;
+          sb.minY = obj.y - obj.sy/2; sb.maxY = obj.y + obj.sy/2;
+          sb.minZ = obj.z - obj.sz/2; sb.maxZ = obj.z + obj.sz/2;
+          const so2 = this.scriptObjs.get(obj.name);
+          if (so2) sb.canCollide = so2.canCollide !== false;
+          break;
+        }
       }
     }
 
@@ -459,6 +485,7 @@ export class GameRoom {
         if (mut.velZ !== undefined) p.vz = mut.velZ;
         if (mut.heading  !== undefined) p.rotY = mut.heading;
         if (mut.autoRespawn !== undefined) p.autoRespawn = mut.autoRespawn;
+        if (mut.isKinematic !== undefined) p.isKinematic = mut.isKinematic;
         if (p.health <= 0) this._handlePlayerDeath(p);
       }
     }
@@ -509,6 +536,19 @@ export class GameRoom {
     const subDt = dt / SUBSTEPS;
 
     for (const p of this.players.values()) {
+      // ── Kinematic players: scripts fully own position/velocity, skip physics ──
+      if (p.isKinematic) {
+        const sp = (this.scriptRunner as any)?.players?.get(p.id) as ScriptPlayerState | undefined;
+        if (sp) {
+          sp.position = { x: p.x, y: p.y, z: p.z };
+          sp.health = p.health; sp.maxHealth = p.maxHealth;
+          sp.speed = p.speed; sp.jumpPower = p.jumpPower;
+          sp.shirtColor = p.shirtColor; sp.skinColor = p.skinColor; sp.pantsColor = p.pantsColor;
+          sp.heading = p.rotY; sp.vx = p.vx; sp.vy = p.vy; sp.vz = p.vz;
+          sp.isKinematic = true;
+        }
+        continue;
+      }
       const spd = p.speed * (p.sprint ? SPRINT_MULT : 1);
       const cos = Math.cos(p.camY), sin = Math.sin(p.camY);
 
@@ -562,6 +602,7 @@ export class GameRoom {
         sp.speed = p.speed; sp.jumpPower = p.jumpPower;
         sp.shirtColor = p.shirtColor; sp.skinColor = p.skinColor; sp.pantsColor = p.pantsColor;
         sp.heading = p.rotY; // keep rotation.y in sync with physics
+        sp.vx = p.vx; sp.vy = p.vy; sp.vz = p.vz;
       }
     }
 
@@ -1006,6 +1047,8 @@ export class GameRoom {
       onGround: p.onGround,
       shirtColor: p.shirtColor, skinColor: p.skinColor, pantsColor: p.pantsColor,
       spawnX: p.spawnX, spawnY: p.spawnY - PLAYER_HALF_H, spawnZ: p.spawnZ,
+      vx: p.vx, vy: p.vy, vz: p.vz,
+      isKinematic: p.isKinematic,
     };
   }
 

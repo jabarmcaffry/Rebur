@@ -47,6 +47,14 @@ export interface ScriptObjState {
   _tags?: Set<string>;
   _attrs?: Map<string, any>;
   _parentName?: string;     // entity hierarchy — name of parent entity
+  // Entity health
+  health?: number;
+  maxHealth?: number;
+  autoDestroy?: boolean;    // if true (default), entity is destroyed when health hits 0
+  // Interaction (E-key)
+  interactionEnabled?: boolean;
+  interactionDistance?: number;  // max distance for E-key prompt (default 3)
+  interactionHint?: string;      // hint text shown near entity (default "Press E to interact")
 }
 
 export interface ScriptPlayerState {
@@ -66,6 +74,8 @@ export interface ScriptPlayerState {
   heading?: number;          // yaw in radians — player.rotation.y
   _attrs?: Map<string, any>; // per-player setAttribute store
   _autoRespawn?: boolean;
+  vx?: number; vy?: number; vz?: number;  // velocity readback for player.body.velocity
+  isKinematic?: boolean;     // when true physics step is skipped; scripts fully drive movement
 }
 
 export interface ScriptPlayerMutation {
@@ -84,6 +94,7 @@ export interface ScriptPlayerMutation {
   heading?: number;  // yaw in radians — applied to the player's facing angle
   velX?: number; velY?: number; velZ?: number;  // direct velocity assignment (knockback)
   autoRespawn?: boolean;
+  isKinematic?: boolean;
 }
 
 export interface ScriptCreatedObject {
@@ -489,6 +500,7 @@ export class ScriptRunner {
       "clicked", "destroyed", "predestroy", "removing", "woke", "slept",
       "collisionstarted", "collisionended",
       "propertychanged", "changed",
+      "died", "interact",
     ]);
 
     // ── Entity proxy ──────────────────────────────────────────────────────
@@ -632,6 +644,49 @@ export class ScriptRunner {
         set visible(v)     { if (obj._destroyed) { const m = `visible write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.visible = Boolean(v); },
         get transparency() { return obj.transparency ?? 0; },
         set transparency(v){ if (obj._destroyed) { const m = `transparency write on destroyed entity "${obj.name}"`; if (IS_DEV) throw new Error(m); warn(m); return; } obj.transparency = Math.max(0, Math.min(1, +v)); },
+
+        // ── Entity health ───────────────────────────────────────────────────
+        get health() { return obj.health ?? (obj.maxHealth ?? 100); },
+        set health(v: any) {
+          const mh = obj.maxHealth ?? 100;
+          const newHP = Math.max(0, Math.min(mh, +v));
+          obj.health = newHP;
+          if (newHP <= 0 && obj.autoDestroy !== false && !obj._destroyed) {
+            runner._fireObj(obj.name, "died", ep);
+            obj._destroyed = true; obj.visible = false;
+            runner.destroyQueue.push(obj.name);
+            runner.worldLabels.delete(`__label_${obj.name}`);
+          }
+        },
+        get maxHealth()         { return obj.maxHealth ?? 100; },
+        set maxHealth(v: any)   { obj.maxHealth = Math.max(1, +v); if (obj.health === undefined) obj.health = obj.maxHealth; },
+        get autoDestroy()       { return obj.autoDestroy !== false; },
+        set autoDestroy(v: any) { obj.autoDestroy = Boolean(v); },
+        takeDamage(amount: number) {
+          const mh = obj.maxHealth ?? 100;
+          const current = obj.health ?? mh;
+          const newHP = Math.max(0, current - Math.max(0, +amount));
+          obj.health = newHP;
+          if (newHP <= 0 && obj.autoDestroy !== false && !obj._destroyed) {
+            runner._fireObj(obj.name, "died", ep);
+            obj._destroyed = true; obj.visible = false;
+            runner.destroyQueue.push(obj.name);
+            runner.worldLabels.delete(`__label_${obj.name}`);
+          }
+        },
+        heal(amount: number) {
+          const mh = obj.maxHealth ?? 100;
+          const current = obj.health ?? mh;
+          obj.health = Math.min(mh, current + Math.max(0, +amount));
+        },
+
+        // ── Interaction (E-key) ─────────────────────────────────────────────
+        get interactionEnabled()         { return obj.interactionEnabled ?? false; },
+        set interactionEnabled(v: any)   { obj.interactionEnabled = Boolean(v); },
+        get interactionDistance()        { return obj.interactionDistance ?? 3; },
+        set interactionDistance(v: any)  { obj.interactionDistance = Math.max(0.1, +v); },
+        get interactionHint()            { return obj.interactionHint ?? "Press E to interact"; },
+        set interactionHint(v: any)      { obj.interactionHint = String(v); },
 
         get gravity() { return obj.gravity ?? false; },
         set gravity(v: any) {
@@ -2058,6 +2113,31 @@ export class ScriptRunner {
           .filter(o => !o._destroyed && o.container === "Lighting")
           .map(o => makeEntityProxy(o));
       },
+      // World / environment settings — same backing store as Rebur.World (both namespaces work)
+      get skyColor()           { return runner.worldSettings.skyColor ?? "#87ceeb"; },
+      set skyColor(v: any)           { runner.worldSettings.skyColor = String(v); },
+      get fogColor()           { return runner.worldSettings.fogColor ?? null; },
+      set fogColor(v: any)           { runner.worldSettings.fogColor = v ? String(v) : null; },
+      get fogDensity()         { return runner.worldSettings.fogDensity ?? 0; },
+      set fogDensity(v: any)         { runner.worldSettings.fogDensity = Math.max(0, +v); },
+      get fogNear()            { return runner.worldSettings.fogNear ?? 10; },
+      set fogNear(v: any)            { runner.worldSettings.fogNear = +v; },
+      get fogFar()             { return runner.worldSettings.fogFar ?? 100; },
+      set fogFar(v: any)             { runner.worldSettings.fogFar = +v; },
+      get ambientColor()       { return runner.worldSettings.ambientColor ?? "#404040"; },
+      set ambientColor(v: any)       { runner.worldSettings.ambientColor = String(v); },
+      get ambientIntensity()   { return runner.worldSettings.ambientIntensity ?? 0.5; },
+      set ambientIntensity(v: any)   { runner.worldSettings.ambientIntensity = Math.max(0, +v); },
+      get sunColor()           { return runner.worldSettings.sunColor ?? "#ffffff"; },
+      set sunColor(v: any)           { runner.worldSettings.sunColor = String(v); },
+      get sunIntensity()       { return runner.worldSettings.sunIntensity ?? 1; },
+      set sunIntensity(v: any)       { runner.worldSettings.sunIntensity = Math.max(0, +v); },
+      get sunDirection()       { return runner.worldSettings.sunDirection ?? { x: 0.5, y: -1, z: 0.5 }; },
+      set sunDirection(v: any)       { runner.worldSettings.sunDirection = v; },
+      get shadowsEnabled()     { return runner.worldSettings.shadowsEnabled !== false; },
+      set shadowsEnabled(v: any)     { runner.worldSettings.shadowsEnabled = Boolean(v); },
+      get timeOfDay()          { return runner.worldSettings.timeOfDay ?? 12; },
+      set timeOfDay(v: any)          { runner.worldSettings.timeOfDay = Math.max(0, Math.min(24, +v)); },
     };
 
     // ── Rebur.Assets ───────────────────────────────────────────────────────
@@ -2476,6 +2556,8 @@ export class ScriptRunner {
       set respawn(v: any) { if(v) mut().respawn=true; },
       get autoRespawn()   { return p._autoRespawn !== false; },
       set autoRespawn(v: any) { p._autoRespawn=Boolean(v); mut().autoRespawn=Boolean(v); },
+      get isKinematic()       { return p.isKinematic ?? false; },
+      set isKinematic(v: any) { p.isKinematic=Boolean(v); mut().isKinematic=Boolean(v); },
       distanceTo(other: any): number {
         const tx=other?.position?.x??other?.x??0, ty=other?.position?.y??other?.y??0, tz=other?.position?.z??other?.z??0;
         const dx=p.position.x-tx, dy=p.position.y-ty, dz=p.position.z-tz;
@@ -2582,7 +2664,7 @@ export class ScriptRunner {
         },
       },
       body: {
-        get velocity() { return{x:0,y:0,z:0}; },
+        get velocity() { return{x:p.vx??0,y:p.vy??0,z:p.vz??0}; },
         set velocity(v: any) { const m=mut(); m.velX=+(v?.x??0); m.velY=+(v?.y??0); m.velZ=+(v?.z??0); },
         applyForce(f: any) { const dt=0.05; const m=mut(); m.impulseX=(m.impulseX??0)+(+(f?.x??0))*dt; m.impulseY=(m.impulseY??0)+(+(f?.y??0))*dt; m.impulseZ=(m.impulseZ??0)+(+(f?.z??0))*dt; },
         applyImpulse(f: any) { const m=mut(); m.impulseX=(m.impulseX??0)+(+(f?.x??0)); m.impulseY=(m.impulseY??0)+(+(f?.y??0)); m.impulseZ=(m.impulseZ??0)+(+(f?.z??0)); },

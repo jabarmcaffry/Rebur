@@ -52,6 +52,22 @@ interface Entity {
   color: string;
   visible: boolean;
   transparency: number;
+  /** Current HP (0–maxHealth). Setting to 0 fires "died" and destroys (if autoDestroy). */
+  health: number;
+  /** Max HP (default 100). */
+  maxHealth: number;
+  /** If true (default) entity is destroyed when health hits 0. */
+  autoDestroy: boolean;
+  /** Deal damage — reduces health by amount; fires "died" + destroys if health hits 0. */
+  takeDamage(amount: number): void;
+  /** Restore health by amount, capped at maxHealth. */
+  heal(amount: number): void;
+  /** When true, pressing E near this entity fires the "interact" event. */
+  interactionEnabled: boolean;
+  /** Max distance in units for E-key prompt (default 3). */
+  interactionDistance: number;
+  /** Hint text shown near the entity (default "Press E to interact"). */
+  interactionHint: string;
   readonly body: EntityBody;
   readonly parent: Entity | null;
   readonly children: Entity[];
@@ -77,6 +93,8 @@ interface PlayerEntity extends Entity {
   spawnPoint: Vec3;
   /** Set to true to trigger immediate respawn to spawnPoint. */
   respawn: boolean;
+  /** When true, built-in physics is skipped; scripts fully control position/velocity. */
+  isKinematic: boolean;
   readonly inventory: Inventory;
   readonly gui: PlayerGuiAPI;
   readonly data: PlayerDataAPI;
@@ -396,8 +414,8 @@ const COMPLETIONS: CompletionDef[] = [
   {
     label: "Rebur.Lighting",
     kind: K.Variable,
-    detail: "LightingContainer — query lights",
-    doc: "Query API for entities in the Lighting container.\n\nMethods:\n- find(name) — look up a light entity by name\n- get(id) — look up by immutable id\n- all() — all light entities",
+    detail: "LightingContainer — query lights + world settings",
+    doc: "Query API for entities in the Lighting container, plus world environment settings (sky, fog, ambient, sun).\n\nEntity methods:\n- find(name) — look up a light entity by name\n- get(id) — look up by immutable id\n- all() — all light entities\n\nWorld settings (same store as Rebur.World):\n- skyColor, fogColor, fogDensity, fogNear, fogFar\n- ambientColor, ambientIntensity\n- sunColor, sunIntensity, sunDirection\n- shadowsEnabled, timeOfDay",
     insert: "Rebur.Lighting",
   },
   {
@@ -414,6 +432,69 @@ const COMPLETIONS: CompletionDef[] = [
     detail: "Rebur.Lighting.all() → Entity[]",
     doc: "Return all entities in the Lighting container.",
     insert: "Rebur.Lighting.all()",
+  },
+  {
+    label: "Rebur.Lighting.skyColor",
+    kind: K.Property,
+    detail: "string (CSS color)",
+    doc: "Background sky color. Same property as Rebur.World.skyColor.\n\nExample:\n  Rebur.Lighting.skyColor = \"#1a1a2e\"; // dark night sky",
+    insert: "Rebur.Lighting.skyColor",
+  },
+  {
+    label: "Rebur.Lighting.fogColor",
+    kind: K.Property,
+    detail: "string | null",
+    doc: "Fog color. Set to null to disable fog. Defaults to null (no fog).\n\nExample:\n  Rebur.Lighting.fogColor = \"#cccccc\";\n  Rebur.Lighting.fogDensity = 0.02;",
+    insert: "Rebur.Lighting.fogColor",
+  },
+  {
+    label: "Rebur.Lighting.fogDensity",
+    kind: K.Property,
+    detail: "number (0 = off)",
+    doc: "Exponential fog density. 0 = no fog. Typical values 0.01–0.05.\n\nExample:\n  Rebur.Lighting.fogDensity = 0.02;",
+    insert: "Rebur.Lighting.fogDensity",
+  },
+  {
+    label: "Rebur.Lighting.ambientColor",
+    kind: K.Property,
+    detail: "string (CSS color)",
+    doc: "Ambient light color (fills shadows). Default \"#404040\".\n\nExample:\n  Rebur.Lighting.ambientColor = \"#334455\";",
+    insert: "Rebur.Lighting.ambientColor",
+  },
+  {
+    label: "Rebur.Lighting.ambientIntensity",
+    kind: K.Property,
+    detail: "number (default 0.5)",
+    doc: "Ambient light intensity multiplier. Default 0.5.",
+    insert: "Rebur.Lighting.ambientIntensity",
+  },
+  {
+    label: "Rebur.Lighting.sunColor",
+    kind: K.Property,
+    detail: "string (CSS color)",
+    doc: "Directional sun light color. Default \"#ffffff\".",
+    insert: "Rebur.Lighting.sunColor",
+  },
+  {
+    label: "Rebur.Lighting.sunIntensity",
+    kind: K.Property,
+    detail: "number (default 1)",
+    doc: "Directional sun light intensity. Default 1.",
+    insert: "Rebur.Lighting.sunIntensity",
+  },
+  {
+    label: "Rebur.Lighting.timeOfDay",
+    kind: K.Property,
+    detail: "number (0–24)",
+    doc: "Time of day in 24-hour notation. 6 = dawn, 12 = noon, 18 = dusk, 0/24 = midnight.\n\nExample:\n  Rebur.Lighting.timeOfDay = 18; // sunset",
+    insert: "Rebur.Lighting.timeOfDay",
+  },
+  {
+    label: "Rebur.Lighting.shadowsEnabled",
+    kind: K.Property,
+    detail: "boolean (default true)",
+    doc: "Enable or disable shadow rendering from the sun.\n\nExample:\n  Rebur.Lighting.shadowsEnabled = false; // disable for performance",
+    insert: "Rebur.Lighting.shadowsEnabled",
   },
 
   // ─── Rebur.Assets ────────────────────────────────────────────────────────
@@ -768,6 +849,68 @@ const COMPLETIONS: CompletionDef[] = [
     snippet: true,
   },
 
+  // ─── Entity health ────────────────────────────────────────────────────────
+  {
+    label: "entity.health",
+    kind: K.Property,
+    detail: "number (0–maxHealth)",
+    doc: "Current HP. Setting to 0 fires the \"died\" event and destroys the entity (if autoDestroy is true).\n\nDefault value equals maxHealth (100 unless changed).",
+    insert: ".health",
+  },
+  {
+    label: "entity.maxHealth",
+    kind: K.Property,
+    detail: "number (default 100)",
+    doc: "Maximum HP. Setting this after spawn adjusts the cap; health is not automatically changed.",
+    insert: ".maxHealth",
+  },
+  {
+    label: "entity.autoDestroy",
+    kind: K.Property,
+    detail: "boolean (default true)",
+    doc: "When true (default): entity is destroyed when health hits 0.\nSet false to handle death yourself — entity stays alive, \"died\" event still fires.",
+    insert: ".autoDestroy",
+  },
+  {
+    label: "entity.takeDamage",
+    kind: K.Function,
+    detail: "entity.takeDamage(amount) → void",
+    doc: "Reduce entity health by amount (clamped to 0). Fires \"died\" and destroys if health hits 0 and autoDestroy is true.\n\nExample:\n  enemy.takeDamage(25);",
+    insert: ".takeDamage(${1:amount})",
+    snippet: true,
+  },
+  {
+    label: "entity.heal",
+    kind: K.Function,
+    detail: "entity.heal(amount) → void",
+    doc: "Restore entity health by amount, capped at maxHealth.\n\nExample:\n  pickup.on(\"touched\", (other) => { if(other.isPlayer) other.heal(20); });",
+    insert: ".heal(${1:amount})",
+    snippet: true,
+  },
+
+  // ─── Entity interaction ────────────────────────────────────────────────────
+  {
+    label: "entity.interactionEnabled",
+    kind: K.Property,
+    detail: "boolean (default false)",
+    doc: "When true: pressing E while near this entity fires the \"interact\" event.\nPlayers within interactionDistance trigger it.",
+    insert: ".interactionEnabled",
+  },
+  {
+    label: "entity.interactionDistance",
+    kind: K.Property,
+    detail: "number (default 3, units)",
+    doc: "Max distance in world units at which a player can trigger this entity's \"interact\" event. Default 3.",
+    insert: ".interactionDistance",
+  },
+  {
+    label: "entity.interactionHint",
+    kind: K.Property,
+    detail: "string",
+    doc: "Tooltip text shown when the player is close enough to interact. Default \"Press E to interact\".",
+    insert: ".interactionHint",
+  },
+
   // ─── Player-specific properties ───────────────────────────────────────────
   {
     label: "player.username",
@@ -845,6 +988,13 @@ const COMPLETIONS: CompletionDef[] = [
     detail: "boolean (set to true to respawn)",
     doc: "Set to true to teleport the player to their spawnPoint and restore full health.\n\n  player.respawn = true;\n\n  // Change spawn first:\n  player.spawnPoint = { x: 50, y: 5, z: 0 };\n  player.respawn = true;",
     insert: ".respawn = true",
+  },
+  {
+    label: "player.isKinematic",
+    kind: K.Property,
+    detail: "boolean (default false)",
+    doc: "When true, the built-in physics engine is completely skipped for this player — gravity, collision, and WASD movement are all disabled. Scripts then have full control over position and velocity each tick.\n\nUseful for scripted vehicles, moving platforms, cutscenes, and similar patterns.\n\nExample (vehicle):\n  Rebur.on(\"playerJoined\", (p) => {\n    p.isKinematic = true;\n  });\n  Rebur.on(\"tick\", () => {\n    for (const p of Rebur.Players.all()) {\n      p.position = { x: cart.position.x, y: cart.position.y + 1.2, z: cart.position.z };\n    }\n  });\n\nSet back to false to return physics control to the engine.",
+    insert: ".isKinematic",
   },
   {
     label: "player.inventory",
