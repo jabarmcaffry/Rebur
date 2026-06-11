@@ -730,8 +730,8 @@ export default function Editor() {
     );
   };
 
-  const HierarchyPanel = (
-    <div className="flex flex-col h-full bg-card/50 border-r border-border w-64 shrink-0 max-md:hidden">
+  const HierarchyPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
+    <div className={`flex flex-col h-full bg-card/50 border-r border-border w-64 shrink-0 ${!isMobile ? "max-md:hidden" : ""}`}>
       <div className="p-2 border-b border-border flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -787,8 +787,8 @@ export default function Editor() {
     </div>
   );
 
-  const PropertiesPanel = (
-    <div className="flex flex-col h-full bg-card/50 border-l border-border w-72 shrink-0 max-md:hidden">
+  const PropertiesPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
+    <div className={`flex flex-col h-full bg-card/50 border-l border-border w-72 shrink-0 ${!isMobile ? "max-md:hidden" : ""}`}>
       <div className="p-2 border-b border-border flex items-center justify-between">
         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
           <SettingsIcon className="w-3.5 h-3.5" /> Properties
@@ -1075,20 +1075,38 @@ export default function Editor() {
         {/* Mobile Hierarchy Sheet */}
         <Sheet open={isHierarchyOpen && window.innerWidth < 768} onOpenChange={setHierarchyOpen}>
           <SheetContent side="left" className="w-64 p-0 md:hidden">
-            {HierarchyPanel}
+            <HierarchyPanel isMobile={true} />
           </SheetContent>
         </Sheet>
 
         {/* Desktop Hierarchy Panel */}
-        {isHierarchyOpen && HierarchyPanel}
+        {isHierarchyOpen && <HierarchyPanel />}
         
         <div className="flex-1 flex flex-col min-w-0 bg-muted/10 relative">
           <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col">
             <div className="flex items-center justify-between px-2 border-b border-border bg-card/40 shrink-0 overflow-x-auto">
               <TabsList className="bg-transparent h-9 p-0 gap-1">
                 <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
-                <TabsTrigger value="script" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scripts</TabsTrigger>
-                <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted hidden sm:inline-flex">Docs</TabsTrigger>
+                {selectedScript && (
+                  <div className="flex items-center gap-0.5 bg-muted/50 rounded-md px-1">
+                    <TabsTrigger value="script" className="h-7 text-xs px-2 data-[state=active]:bg-muted">
+                      <FileCode className="w-3 h-3 mr-1" /> Scripts
+                    </TabsTrigger>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 hover:bg-muted"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedScriptId(null);
+                        if (activeTab === "script") setActiveTab("scene");
+                      }}
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                )}
+                <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Docs</TabsTrigger>
               </TabsList>
               <div className="flex items-center gap-1 shrink-0">
                 <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setHierarchyOpen(!isHierarchyOpen)}>
@@ -1164,12 +1182,12 @@ export default function Editor() {
         {/* Mobile Properties Sheet */}
         <Sheet open={isPropertiesOpen && window.innerWidth < 768} onOpenChange={setPropertiesOpen}>
           <SheetContent side="right" className="w-72 p-0 md:hidden">
-            {PropertiesPanel}
+            <PropertiesPanel isMobile={true} />
           </SheetContent>
         </Sheet>
 
         {/* Desktop Properties Panel */}
-        {isPropertiesOpen && PropertiesPanel}
+        {isPropertiesOpen && <PropertiesPanel />}
       </main>
 
       {isPlayMode && (
