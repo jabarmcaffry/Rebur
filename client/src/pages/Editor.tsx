@@ -74,7 +74,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import type { Game, GameObject, Script, User } from "@shared/schema";
+import type { Game, GameObject, Script } from "@shared/schema";
 import PlayMode from "@/components/PlayMode";
 import AnimationEditor from "@/components/AnimationEditor";
 import SVGScene from "@/components/SVGScene";
@@ -911,13 +911,6 @@ export default function Editor() {
                     onCheckedChange={(v) => handlePropertyChange({ canCollide: v })}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Is Trigger</Label>
-                  <Switch
-                    checked={getProp("isTrigger", false)}
-                    onCheckedChange={(v) => handlePropertyChange({ isTrigger: v })}
-                  />
-                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -1072,7 +1065,7 @@ export default function Editor() {
             <Play className="w-3 h-3 fill-primary text-primary" /> Play
           </Button>
           <Separator orientation="vertical" className="h-4 mx-1" />
-          <Button variant="primary" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setPublishOpen(true)}>
+          <Button variant="default" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setPublishOpen(true)}>
             <Share2 className="w-3 h-3" /> Publish
           </Button>
         </div>
@@ -1139,7 +1132,7 @@ export default function Editor() {
                       value={scriptDraft}
                       onChange={(v) => setScriptDraft(v ?? "")}
                       onMount={(editor) => configureMonacoForEngine(editor)}
-                      options={ENGINE_EDITOR_OPTIONS}
+                      options={ENGINE_EDITOR_OPTIONS as any}
                     />
                   </>
                 ) : (
@@ -1163,7 +1156,16 @@ export default function Editor() {
         {isPropertiesOpen && PropertiesPanel}
       </main>
 
-      {isPlayMode && <PlayMode gameId={gameId} onExit={() => setIsPlayMode(false)} />}
+      {isPlayMode && (
+        <PlayMode
+          objects={objects}
+          scripts={scripts}
+          username={(user as any)?.username || (user as any)?.email || "Player"}
+          gameId={gameId}
+          userId={(user as any)?.id}
+          onExit={() => setIsPlayMode(false)}
+        />
+      )}
     </div>
   );
 }

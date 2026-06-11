@@ -3,10 +3,11 @@ import {
   RenderPlayer, 
   RenderGuiElement, 
   DebugDraw, 
-  ParticleEvent,
-  WorldSettings,
-  PhysicsSettings
+  ParticleEvent
 } from "../shared/render-types";
+
+type WorldSettings = Record<string, any>;
+type PhysicsSettings = Record<string, any>;
 
 // --- Types & Interfaces ---
 
@@ -22,6 +23,17 @@ export interface ScriptObjState extends RenderObject {
   interactionDistance?: number;
   interactionHint?: string;
   gravity?: any;
+  positionX?: number;
+  positionY?: number;
+  positionZ?: number;
+  rotationX?: number;
+  rotationY?: number;
+  rotationZ?: number;
+  scaleX?: number;
+  scaleY?: number;
+  scaleZ?: number;
+  anchored?: boolean;
+  canCollide?: boolean;
   // Physics body properties
   velX?: number;
   velY?: number;
@@ -44,7 +56,6 @@ export interface ScriptObjState extends RenderObject {
   linearDamping?: number;
   angularDamping?: number;
   isKinematic?: boolean;
-  isTrigger?: boolean;
   constraints?: {
     lockPositionX?: boolean;
     lockPositionY?: boolean;
@@ -57,7 +68,13 @@ export interface ScriptObjState extends RenderObject {
 
 export interface ScriptPlayerState extends RenderPlayer {
   _attrs?: Map<string, any>;
-  onGround?: boolean;
+  onGround: boolean;
+  heading?: number;
+  speed?: number;
+  jumpPower?: number;
+  shirtColor?: string;
+  skinColor?: string;
+  pantsColor?: string;
 }
 
 type EventHandler = (...args: any[]) => void;
@@ -230,8 +247,6 @@ export class ScriptRunner {
         set anchored(v)     { obj.anchored = Boolean(v); },
         get canCollide()    { return obj.canCollide !== false; },
         set canCollide(v)   { obj.canCollide = Boolean(v); },
-        get isTrigger()     { return obj.isTrigger ?? false; },
-        set isTrigger(v)    { obj.isTrigger = Boolean(v); },
         get isKinematic()   { return obj.isKinematic ?? false; },
         set isKinematic(v)  { obj.isKinematic = Boolean(v); },
         get mass()          { return obj.mass ?? 1; },
@@ -437,6 +452,45 @@ export class ScriptRunner {
       };
     };
 
+    const reburTween = {
+      to: (target: any, to: Record<string, number>, duration = 1, opts?: any) => {
+        const from: Record<string, number> = {};
+        for (const key of Object.keys(to)) from[key] = Number(target[key] ?? 0);
+        const entry: TweenEntry = {
+          target,
+          to,
+          from,
+          elapsed: 0,
+          duration: Math.max(0.001, Number(duration) || 0.001),
+          easing: EASINGS[opts?.easing] ?? EASINGS.linear,
+          onDone: opts?.onDone,
+          cancelled: false,
+          next: null,
+        };
+        runner.tweens.push(entry);
+        return {
+          cancel: () => { entry.cancelled = true; },
+          then: (nextTo: Record<string, number>, nextDuration = duration, nextOpts?: any) => {
+            const nextFrom: Record<string, number> = {};
+            for (const key of Object.keys(nextTo)) nextFrom[key] = Number(to[key] ?? target[key] ?? 0);
+            entry.next = {
+              target,
+              to: nextTo,
+              from: nextFrom,
+              elapsed: 0,
+              duration: Math.max(0.001, Number(nextDuration) || 0.001),
+              easing: EASINGS[nextOpts?.easing] ?? EASINGS.linear,
+              onDone: nextOpts?.onDone,
+              cancelled: false,
+              next: null,
+            };
+            return entry;
+          }
+        };
+      },
+      cancel: (target: any) => { for (const t of runner.tweens) if (t.target === target) t.cancelled = true; }
+    };
+
     // ── Rebur Global ──────────────────────────────────────────────────────────
 
     const Rebur = {
@@ -523,8 +577,9 @@ export class ScriptRunner {
           const k = e.toLowerCase();
           if (!runner.inputHandlers.has(k)) runner.inputHandlers.set(k, []);
           runner.inputHandlers.get(k)!.push(fn);
+          return () => runner.inputHandlers.set(k, (runner.inputHandlers.get(k) ?? []).filter(h => h !== fn));
         },
-        key: (k: string) => runner.perPlayerHeldKeys.size > 0 // Simple global key check
+        key: (k: string) => Array.from(runner.perPlayerHeldKeys.values()).some(keys => keys.has(String(k).toLowerCase()))
       },
       Physics: {
         gravity: 9.81, airDrag: 0.01, timeScale: 1.0,
@@ -535,7 +590,12 @@ export class ScriptRunner {
         broadcast: (e: string, p?: any) => runner.networkMessages.push({ event: e, payload: p }),
         send: (p: any, e: string, pay?: any) => runner.networkToPlayer.push({ playerId: p.id, event: e, payload: pay }),
         sendToMany: (ps: any[], e: string, pay?: any) => ps.forEach(p => Rebur.Network.send(p, e, pay)),
-        on: (e: string, fn: EventHandler) => {}
+        on: (e: string, fn: EventHandler) => {
+          const k = e.toLowerCase();
+          if (!runner.networkHandlers.has(k)) runner.networkHandlers.set(k, []);
+          runner.networkHandlers.get(k)!.push(fn);
+          return () => runner.networkHandlers.set(k, (runner.networkHandlers.get(k) ?? []).filter(h => h !== fn));
+        }
       },
       Tags: {
         add: (e: any, t: string) => {},

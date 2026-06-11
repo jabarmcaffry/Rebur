@@ -17,7 +17,6 @@ interface EntityBody {
   linearDamping: number;
   angularDamping: number;
   isKinematic: boolean;
-  isTrigger: boolean;
   readonly velocity: Vec3;
   readonly angularVelocity: Vec3;
   constraints: {

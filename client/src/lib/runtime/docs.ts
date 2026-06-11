@@ -312,7 +312,6 @@ Physics lives on entity.body.
 | body.friction | number | Surface friction (default 0.5) |
 | body.restitution | number | Bounciness 0–1 (default 0) |
 | body.isKinematic | boolean | Script-moved; not affected by forces |
-| body.isTrigger | boolean | Detects overlaps but no collision response |
 | body.velocity | {x,y,z} | Current velocity — read/write |
 | body.angularVelocity | {x,y,z} | Rotational velocity (rad/s) — read/write |
 | body.linearDamping | number | Linear drag coefficient (default 0) |
