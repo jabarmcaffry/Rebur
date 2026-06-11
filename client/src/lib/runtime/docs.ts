@@ -1978,7 +1978,7 @@ Rebur.on("tick", (dt) => {
 
 ## ClientScript (Client-Side)
 
-Scripts placed in the **UI/Player** or **UI/Global** containers with type **ClientScript** run in the player's browser, not on the server.
+Scripts placed in the **GUI/Player** or **GUI/Global** containers with type **ClientScript** run in the player's browser, not on the server.
 
 ClientScripts have access to a smaller API focused on client ↔ server messaging:
 
