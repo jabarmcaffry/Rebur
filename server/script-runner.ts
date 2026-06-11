@@ -260,6 +260,15 @@ export class ScriptRunner {
   debugDraws:     any[] = [];
   particleEvents: any[] = [];
 
+  // ── Engine asset registries (Materials / Textures / Terrain / Constraints) ──
+  // All in-memory; no persistence layer yet. Available to scripts as
+  // Rebur.Materials, Rebur.Textures, Rebur.Terrain, Rebur.Constraints, Rebur.Vehicles.
+  materials = new Map<string, any>();
+  textures  = new Map<string, any>();
+  terrains  = new Map<string, any>();
+  constraints = new Map<string, any>();
+  private constraintIdCounter = 0;
+
   // Per-player camera state sent from client each tick
   private playerCameraStates = new Map<string, { pos: {x:number;y:number;z:number}; forward: {x:number;y:number;z:number} }>();
 
@@ -1609,6 +1618,376 @@ export class ScriptRunner {
       },
     };
 
+    // ══════════════════════════════════════════════════════════════════════
+    // ── Rebur.Materials ───────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Reusable PBR material definitions. Apply to any entity via
+    //   entity.materialId = "wood"  // looks up Rebur.Materials.get("wood")
+    // Definition:
+    //   { baseColor, baseColorMap, roughness, metallic, normalMap,
+    //     emissive, emissiveMap, opacity, repeatX, repeatY }
+    const reburMaterials = {
+      create(name: string, def: any = {}) {
+        const mat = {
+          name,
+          baseColor:   def.baseColor   ?? def.color ?? "#cccccc",
+          baseColorMap: def.baseColorMap ?? def.map ?? def.texture ?? null,
+          roughness:   def.roughness   ?? 0.7,
+          metallic:    def.metallic    ?? 0.0,
+          normalMap:   def.normalMap   ?? null,
+          emissive:    def.emissive    ?? "#000000",
+          emissiveMap: def.emissiveMap ?? null,
+          opacity:     def.opacity     ?? 1.0,
+          repeatX:     def.repeatX     ?? 1,
+          repeatY:     def.repeatY     ?? 1,
+        };
+        runner.materials.set(name, mat);
+        return mat;
+      },
+      get(name: string) { return runner.materials.get(name) ?? null; },
+      update(name: string, patch: any) {
+        const m = runner.materials.get(name);
+        if (!m) return null;
+        Object.assign(m, patch);
+        return m;
+      },
+      remove(name: string) { return runner.materials.delete(name); },
+      all() { return Array.from(runner.materials.values()); },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── Rebur.Textures ────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Register an image URL (uploaded asset CDN URL or external https://) by
+    // name so materials/entities can reference it by name instead of URL.
+    const reburTextures = {
+      create(name: string, url: string, opts: any = {}) {
+        const tex = {
+          name,
+          url,
+          wrap:     opts.wrap     ?? "repeat", // "repeat" | "clamp" | "mirror"
+          filter:   opts.filter   ?? "linear", // "linear" | "nearest"
+          anisotropy: opts.anisotropy ?? 4,
+        };
+        runner.textures.set(name, tex);
+        return tex;
+      },
+      get(name: string) { return runner.textures.get(name) ?? null; },
+      url(name: string) { return runner.textures.get(name)?.url ?? null; },
+      remove(name: string) { return runner.textures.delete(name); },
+      all() { return Array.from(runner.textures.values()); },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── Rebur.Terrain ─────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Heightmap-based terrain. One terrain = one square grid.
+    //   Rebur.Terrain.create("ground", { size: 256, resolution: 64, height: 0 })
+    //   Rebur.Terrain.raise("ground", x, z, radius, strength)
+    //   Rebur.Terrain.flatten("ground", x, z, radius, targetHeight)
+    //   Rebur.Terrain.smooth("ground", x, z, radius)
+    //   Rebur.Terrain.paint("ground", x, z, radius, materialName)
+    //   Rebur.Terrain.getHeight("ground", x, z)  → world height
+    //   Rebur.Terrain.setHeight("ground", x, z, h)
+    //   Rebur.Terrain.raycast("ground", origin, direction, opts)
+    const reburTerrain = {
+      create(name: string, opts: any = {}) {
+        const size = +(opts.size ?? 128);
+        const res  = Math.max(2, +(opts.resolution ?? 64));
+        const baseHeight = +(opts.height ?? 0);
+        const heights = new Float32Array(res * res).fill(baseHeight);
+        const materials = new Uint8Array(res * res); // index into palette
+        const palette: string[] = opts.palette ?? ["grass"];
+        const t = {
+          name,
+          size,                       // world units edge length
+          resolution: res,            // verts per edge
+          origin: { x: +(opts.origin?.x ?? -size/2), z: +(opts.origin?.z ?? -size/2) },
+          heights,
+          materials,
+          palette,
+          waterLevel: opts.waterLevel ?? null,
+          _dirty: true,
+        };
+        runner.terrains.set(name, t);
+        return t;
+      },
+      get(name: string) { return runner.terrains.get(name) ?? null; },
+      all() { return Array.from(runner.terrains.values()); },
+      remove(name: string) { return runner.terrains.delete(name); },
+      _idx(t: any, x: number, z: number): number {
+        const fx = (x - t.origin.x) / t.size * (t.resolution - 1);
+        const fz = (z - t.origin.z) / t.size * (t.resolution - 1);
+        const ix = Math.round(Math.max(0, Math.min(t.resolution - 1, fx)));
+        const iz = Math.round(Math.max(0, Math.min(t.resolution - 1, fz)));
+        return iz * t.resolution + ix;
+      },
+      getHeight(name: string, x: number, z: number): number {
+        const t = runner.terrains.get(name); if (!t) return 0;
+        return t.heights[reburTerrain._idx(t, x, z)] ?? 0;
+      },
+      setHeight(name: string, x: number, z: number, h: number) {
+        const t = runner.terrains.get(name); if (!t) return;
+        t.heights[reburTerrain._idx(t, x, z)] = +h;
+        t._dirty = true;
+      },
+      raise(name: string, x: number, z: number, radius: number, strength: number) {
+        const t = runner.terrains.get(name); if (!t) return;
+        const r2 = radius * radius;
+        const cell = t.size / (t.resolution - 1);
+        const span = Math.ceil(radius / cell);
+        const cx = (x - t.origin.x) / cell;
+        const cz = (z - t.origin.z) / cell;
+        for (let dz = -span; dz <= span; dz++) {
+          for (let dx = -span; dx <= span; dx++) {
+            const ix = Math.round(cx + dx), iz = Math.round(cz + dz);
+            if (ix < 0 || iz < 0 || ix >= t.resolution || iz >= t.resolution) continue;
+            const wx = ix * cell, wz = iz * cell;
+            const d2 = (wx - (x - t.origin.x))**2 + (wz - (z - t.origin.z))**2;
+            if (d2 > r2) continue;
+            const falloff = 1 - Math.sqrt(d2) / radius;
+            t.heights[iz * t.resolution + ix] += strength * falloff;
+          }
+        }
+        t._dirty = true;
+      },
+      flatten(name: string, x: number, z: number, radius: number, target: number) {
+        const t = runner.terrains.get(name); if (!t) return;
+        const cell = t.size / (t.resolution - 1);
+        const span = Math.ceil(radius / cell);
+        const cx = (x - t.origin.x) / cell;
+        const cz = (z - t.origin.z) / cell;
+        const r2 = radius * radius;
+        for (let dz = -span; dz <= span; dz++) {
+          for (let dx = -span; dx <= span; dx++) {
+            const ix = Math.round(cx + dx), iz = Math.round(cz + dz);
+            if (ix < 0 || iz < 0 || ix >= t.resolution || iz >= t.resolution) continue;
+            const wx = ix * cell, wz = iz * cell;
+            const d2 = (wx - (x - t.origin.x))**2 + (wz - (z - t.origin.z))**2;
+            if (d2 > r2) continue;
+            const i = iz * t.resolution + ix;
+            t.heights[i] = t.heights[i] * 0.4 + target * 0.6;
+          }
+        }
+        t._dirty = true;
+      },
+      smooth(name: string, x: number, z: number, radius: number) {
+        const t = runner.terrains.get(name); if (!t) return;
+        const cell = t.size / (t.resolution - 1);
+        const span = Math.ceil(radius / cell);
+        const cx = (x - t.origin.x) / cell;
+        const cz = (z - t.origin.z) / cell;
+        const src = new Float32Array(t.heights);
+        for (let dz = -span; dz <= span; dz++) {
+          for (let dx = -span; dx <= span; dx++) {
+            const ix = Math.round(cx + dx), iz = Math.round(cz + dz);
+            if (ix <= 0 || iz <= 0 || ix >= t.resolution-1 || iz >= t.resolution-1) continue;
+            const i = iz * t.resolution + ix;
+            const avg = (src[i] + src[i-1] + src[i+1] + src[i-t.resolution] + src[i+t.resolution]) / 5;
+            t.heights[i] = avg;
+          }
+        }
+        t._dirty = true;
+      },
+      paint(name: string, x: number, z: number, radius: number, materialName: string) {
+        const t = runner.terrains.get(name); if (!t) return;
+        let palIdx = t.palette.indexOf(materialName);
+        if (palIdx < 0) { t.palette.push(materialName); palIdx = t.palette.length - 1; }
+        const cell = t.size / (t.resolution - 1);
+        const span = Math.ceil(radius / cell);
+        const cx = (x - t.origin.x) / cell;
+        const cz = (z - t.origin.z) / cell;
+        const r2 = radius * radius;
+        for (let dz = -span; dz <= span; dz++) {
+          for (let dx = -span; dx <= span; dx++) {
+            const ix = Math.round(cx + dx), iz = Math.round(cz + dz);
+            if (ix < 0 || iz < 0 || ix >= t.resolution || iz >= t.resolution) continue;
+            const wx = ix * cell, wz = iz * cell;
+            const d2 = (wx - (x - t.origin.x))**2 + (wz - (z - t.origin.z))**2;
+            if (d2 > r2) continue;
+            t.materials[iz * t.resolution + ix] = palIdx;
+          }
+        }
+        t._dirty = true;
+      },
+      raycast(name: string, origin: any, direction: any, opts: any = {}) {
+        const t = runner.terrains.get(name); if (!t) return null;
+        const maxDist = +(opts.maxDistance ?? 500);
+        const step = +(opts.step ?? 0.5);
+        const ox = +origin.x, oy = +origin.y, oz = +origin.z;
+        const rlen = Math.sqrt(direction.x**2 + direction.y**2 + direction.z**2) || 1;
+        const dx = direction.x / rlen, dy = direction.y / rlen, dz = direction.z / rlen;
+        for (let d = 0; d < maxDist; d += step) {
+          const x = ox + dx*d, y = oy + dy*d, z = oz + dz*d;
+          const h = reburTerrain.getHeight(name, x, z);
+          if (y <= h) return { distance: d, point: { x, y: h, z }, normal: { x: 0, y: 1, z: 0 } };
+        }
+        return null;
+      },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── Rebur.Constraints ─────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Joints, welds, hinges (with motors), sliders, springs, ropes, rods.
+    // Solved each tick after script user code runs. Constraints store entity
+    // NAMES (not proxies) so they survive entity recreation.
+    function _newConstraintId() { return `c_${++runner.constraintIdCounter}`; }
+    function _entName(e: any): string | null {
+      if (!e) return null;
+      if (typeof e === "string") return e;
+      return e.name ?? null;
+    }
+    function _makeConstraintHandle(id: string) {
+      return {
+        get id() { return id; },
+        get kind() { return runner.constraints.get(id)?.kind ?? null; },
+        get alive() { return runner.constraints.has(id); },
+        setMotor(motor: any) {
+          const c = runner.constraints.get(id); if (!c) return;
+          c.motor = { ...(c.motor ?? {}), ...motor };
+        },
+        setLimits(limits: any) {
+          const c = runner.constraints.get(id); if (!c) return;
+          c.limits = { ...(c.limits ?? {}), ...limits };
+        },
+        setEnabled(on: boolean) {
+          const c = runner.constraints.get(id); if (!c) return;
+          c.enabled = !!on;
+        },
+        destroy() { runner.constraints.delete(id); },
+      };
+    }
+    const reburConstraints = {
+      weld(a: any, b: any) {
+        const id = _newConstraintId();
+        const aName = _entName(a), bName = _entName(b);
+        if (!aName || !bName) { warn("Constraints.weld: invalid entity"); return _makeConstraintHandle(id); }
+        const oa = runner.objects.get(aName), ob = runner.objects.get(bName);
+        const offset = oa && ob ? {
+          x: ob.positionX - oa.positionX,
+          y: ob.positionY - oa.positionY,
+          z: ob.positionZ - oa.positionZ,
+        } : { x: 0, y: 0, z: 0 };
+        runner.constraints.set(id, { id, kind: "weld", a: aName, b: bName, offset, enabled: true });
+        return _makeConstraintHandle(id);
+      },
+      hinge(a: any, b: any, opts: any = {}) {
+        const id = _newConstraintId();
+        const aName = _entName(a), bName = _entName(b);
+        runner.constraints.set(id, {
+          id, kind: "hinge", a: aName, b: bName,
+          pivot: opts.pivot ?? { x: 0, y: 0, z: 0 },
+          axis:  opts.axis  ?? { x: 0, y: 1, z: 0 },
+          limits: opts.limits ?? null,       // { min, max } radians
+          motor:  opts.motor  ?? null,       // { targetAngle, speed, force }
+          angle: 0,
+          enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      slider(a: any, b: any, opts: any = {}) {
+        const id = _newConstraintId();
+        runner.constraints.set(id, {
+          id, kind: "slider",
+          a: _entName(a), b: _entName(b),
+          axis: opts.axis ?? { x: 1, y: 0, z: 0 },
+          limits: opts.limits ?? null,       // { min, max }
+          motor:  opts.motor  ?? null,       // { targetPosition, speed, force }
+          position: 0,
+          enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      ballSocket(a: any, b: any, pivot: any = { x: 0, y: 0, z: 0 }) {
+        const id = _newConstraintId();
+        runner.constraints.set(id, {
+          id, kind: "ballSocket",
+          a: _entName(a), b: _entName(b),
+          pivot, enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      spring(a: any, b: any, opts: any = {}) {
+        const id = _newConstraintId();
+        runner.constraints.set(id, {
+          id, kind: "spring",
+          a: _entName(a), b: _entName(b),
+          restLength: +(opts.restLength ?? 1),
+          stiffness:  +(opts.stiffness  ?? 20),
+          damping:    +(opts.damping    ?? 1),
+          enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      rope(a: any, b: any, length?: number) {
+        const id = _newConstraintId();
+        runner.constraints.set(id, {
+          id, kind: "rope",
+          a: _entName(a), b: _entName(b),
+          length: +(length ?? 2),
+          enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      rod(a: any, b: any, length?: number) {
+        const id = _newConstraintId();
+        const aName = _entName(a), bName = _entName(b);
+        const oa = runner.objects.get(aName ?? ""), ob = runner.objects.get(bName ?? "");
+        const dflt = oa && ob
+          ? Math.sqrt((ob.positionX-oa.positionX)**2 + (ob.positionY-oa.positionY)**2 + (ob.positionZ-oa.positionZ)**2)
+          : 1;
+        runner.constraints.set(id, {
+          id, kind: "rod",
+          a: aName, b: bName,
+          length: +(length ?? dflt),
+          enabled: true,
+        });
+        return _makeConstraintHandle(id);
+      },
+      get(id: string) { return runner.constraints.has(id) ? _makeConstraintHandle(id) : null; },
+      all() { return Array.from(runner.constraints.keys()).map(_makeConstraintHandle); },
+      destroy(id: string) { return runner.constraints.delete(id); },
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ── Rebur.Vehicles — convenience wrapper over constraints ─────────────
+    // ══════════════════════════════════════════════════════════════════════
+    // Rebur.Vehicles.create({ chassis, wheels: [w1,w2,w3,w4], steerAxle:"front",
+    //                         driveAxle:"rear", maxSteer: 0.6, maxTorque: 50 })
+    // Returns { setThrottle, setSteer, setBrake, destroy }.
+    const reburVehicles = {
+      create(opts: any) {
+        const chassis = opts.chassis;
+        const wheels  = Array.isArray(opts.wheels) ? opts.wheels : [];
+        const handles: any[] = [];
+        for (const w of wheels) {
+          handles.push(reburConstraints.hinge(chassis, w, {
+            axis: { x: 1, y: 0, z: 0 },
+            motor: { targetAngle: 0, speed: 0, force: +(opts.maxTorque ?? 50) },
+          }));
+        }
+        let throttle = 0, steer = 0, brake = 0;
+        const vehicle = {
+          chassis, wheels, handles,
+          setThrottle(v: number) { throttle = Math.max(-1, Math.min(1, +v)); },
+          setSteer(v: number)    { steer    = Math.max(-1, Math.min(1, +v)); },
+          setBrake(v: number)    { brake    = Math.max(0,  Math.min(1, +v)); },
+          get throttle() { return throttle; },
+          get steer()    { return steer; },
+          get brake()    { return brake; },
+          destroy() { for (const h of handles) h.destroy(); },
+        };
+        // Apply throttle/steer to wheel motors on each tick via the constraint solver
+        for (let i = 0; i < handles.length; i++) {
+          const h = handles[i];
+          const c = runner.constraints.get(h.id);
+          if (c) c._vehicleRef = { vehicle, index: i, maxSteer: +(opts.maxSteer ?? 0.6), maxTorque: +(opts.maxTorque ?? 50) };
+        }
+        return vehicle;
+      },
+    };
+
     // ── Rebur global ───────────────────────────────────────────────────────
     const Rebur = {
       on(event: string, fn: EventHandler) {
@@ -1643,6 +2022,11 @@ export class ScriptRunner {
       Tags:       reburTags,
       Debug:      reburDebug,
       Particles:  reburParticles,
+      Materials:  reburMaterials,
+      Textures:   reburTextures,
+      Terrain:    reburTerrain,
+      Constraints: reburConstraints,
+      Vehicles:   reburVehicles,
     };
 
     // ── AsyncFunction sandbox ──────────────────────────────────────────────
@@ -1739,7 +2123,150 @@ export class ScriptRunner {
     }
     for (let i = done.length - 1; i >= 0; i--) this.tweens.splice(done[i], 1);
 
+    // ── Solve constraints (welds, hinges, sliders, springs, ropes, rods) ────
+    this._solveConstraints(dt);
+
     this._fireGlobal("tick", dt);
+  }
+
+  /**
+   * Per-tick constraint solver. Best-effort positional/velocity correction —
+   * good enough for doors, simple vehicles, ragdoll-ish chains, swinging
+   * objects. Operates directly on object position/velocity fields. Run after
+   * user scripts so they can mutate motor targets each frame.
+   */
+  private _solveConstraints(dt: number) {
+    if (!this.constraints.size) return;
+    for (const c of this.constraints.values()) {
+      if (!c.enabled) continue;
+      const oa = c.a ? this.objects.get(c.a) : null;
+      const ob = c.b ? this.objects.get(c.b) : null;
+      if (!oa || !ob || oa._destroyed || ob._destroyed) continue;
+
+      try {
+        switch (c.kind) {
+          case "weld": {
+            // B rigidly attached to A by stored offset.
+            ob.positionX = oa.positionX + c.offset.x;
+            ob.positionY = oa.positionY + c.offset.y;
+            ob.positionZ = oa.positionZ + c.offset.z;
+            ob.rotationX = oa.rotationX;
+            ob.rotationY = oa.rotationY;
+            ob.rotationZ = oa.rotationZ;
+            ob.velX = oa.velX ?? 0;
+            ob.velY = oa.velY ?? 0;
+            ob.velZ = oa.velZ ?? 0;
+            break;
+          }
+          case "hinge": {
+            // Drive c.angle toward motor.targetAngle and apply rotation about
+            // the hinge axis to B relative to A's pivot.
+            if (c.motor) {
+              const target = +(c.motor.targetAngle ?? 0);
+              const speed  = +(c.motor.speed ?? 4);
+              const diff   = target - c.angle;
+              const max    = speed * dt;
+              c.angle += Math.max(-max, Math.min(max, diff));
+              if (c.limits) c.angle = Math.max(c.limits.min, Math.min(c.limits.max, c.angle));
+            }
+            // Apply rotation to B (simple Y-axis hinge dominant case)
+            const ax = c.axis;
+            if (Math.abs(ax.y) >= Math.abs(ax.x) && Math.abs(ax.y) >= Math.abs(ax.z)) {
+              ob.rotationY = (oa.rotationY ?? 0) + c.angle;
+            } else if (Math.abs(ax.x) >= Math.abs(ax.z)) {
+              ob.rotationX = (oa.rotationX ?? 0) + c.angle;
+            } else {
+              ob.rotationZ = (oa.rotationZ ?? 0) + c.angle;
+            }
+            // Vehicle wheel integration
+            if (c._vehicleRef) {
+              const v = c._vehicleRef.vehicle;
+              const isFront = c._vehicleRef.index < c._vehicleRef.vehicle.wheels.length / 2;
+              if (isFront) ob.rotationY = (oa.rotationY ?? 0) + v.steer * c._vehicleRef.maxSteer;
+              // Apply forward force to chassis if throttle != 0
+              if (v.throttle !== 0) {
+                const yaw = oa.rotationY ?? 0;
+                const fx = Math.sin(yaw) * v.throttle * c._vehicleRef.maxTorque * dt;
+                const fz = Math.cos(yaw) * v.throttle * c._vehicleRef.maxTorque * dt;
+                oa.velX = (oa.velX ?? 0) + fx;
+                oa.velZ = (oa.velZ ?? 0) + fz;
+              }
+              if (v.brake > 0) {
+                oa.velX = (oa.velX ?? 0) * (1 - v.brake * 0.5);
+                oa.velZ = (oa.velZ ?? 0) * (1 - v.brake * 0.5);
+              }
+            }
+            break;
+          }
+          case "slider": {
+            if (c.motor) {
+              const target = +(c.motor.targetPosition ?? 0);
+              const speed  = +(c.motor.speed ?? 2);
+              const diff   = target - c.position;
+              const max    = speed * dt;
+              c.position += Math.max(-max, Math.min(max, diff));
+              if (c.limits) c.position = Math.max(c.limits.min, Math.min(c.limits.max, c.position));
+            }
+            ob.positionX = oa.positionX + c.axis.x * c.position;
+            ob.positionY = oa.positionY + c.axis.y * c.position;
+            ob.positionZ = oa.positionZ + c.axis.z * c.position;
+            break;
+          }
+          case "ballSocket": {
+            // Keep B anchored at A's pivot point — preserves rotation freedom
+            ob.positionX = oa.positionX + (c.pivot?.x ?? 0);
+            ob.positionY = oa.positionY + (c.pivot?.y ?? 0);
+            ob.positionZ = oa.positionZ + (c.pivot?.z ?? 0);
+            break;
+          }
+          case "spring": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.0001;
+            const stretch = dist - c.restLength;
+            const f = c.stiffness * stretch * dt;
+            const nx = dx / dist, ny = dy / dist, nz = dz / dist;
+            if (!oa.anchored) { oa.velX = (oa.velX ?? 0) + nx * f; oa.velY = (oa.velY ?? 0) + ny * f; oa.velZ = (oa.velZ ?? 0) + nz * f; }
+            if (!ob.anchored) { ob.velX = (ob.velX ?? 0) - nx * f; ob.velY = (ob.velY ?? 0) - ny * f; ob.velZ = (ob.velZ ?? 0) - nz * f; }
+            // Damping
+            const rvx = (ob.velX ?? 0) - (oa.velX ?? 0);
+            const rvy = (ob.velY ?? 0) - (oa.velY ?? 0);
+            const rvz = (ob.velZ ?? 0) - (oa.velZ ?? 0);
+            const damp = c.damping * dt;
+            if (!ob.anchored) { ob.velX -= rvx * damp; ob.velY -= rvy * damp; ob.velZ -= rvz * damp; }
+            break;
+          }
+          case "rope": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            if (dist > c.length) {
+              const excess = (dist - c.length) / dist;
+              const cx = dx * excess, cy = dy * excess, cz = dz * excess;
+              if (!ob.anchored) {
+                ob.positionX -= cx; ob.positionY -= cy; ob.positionZ -= cz;
+              } else if (!oa.anchored) {
+                oa.positionX += cx; oa.positionY += cy; oa.positionZ += cz;
+              }
+            }
+            break;
+          }
+          case "rod": {
+            const dx = ob.positionX - oa.positionX;
+            const dy = ob.positionY - oa.positionY;
+            const dz = ob.positionZ - oa.positionZ;
+            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.0001;
+            const delta = (dist - c.length) / dist;
+            const cx = dx * delta * 0.5, cy = dy * delta * 0.5, cz = dz * delta * 0.5;
+            if (!oa.anchored) { oa.positionX += cx; oa.positionY += cy; oa.positionZ += cz; }
+            if (!ob.anchored) { ob.positionX -= cx; ob.positionY -= cy; ob.positionZ -= cz; }
+            break;
+          }
+        }
+      } catch { /* isolate constraint errors */ }
+    }
   }
 
   // ── Public event firing (called by GameRoom) ────────────────────────────────

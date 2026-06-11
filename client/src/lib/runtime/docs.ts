@@ -2017,4 +2017,159 @@ Rebur.Network.on("clientReady", (player, data) => {
 \`\`\`
 
 > ClientScripts **cannot** modify game objects or player data directly — those operations must go through the server via \`Rebur.Network.send\`.
+
+---
+
+## Materials & Textures
+
+\`\`\`js
+// Register a reusable image as a texture
+Rebur.Textures.create("wood_diffuse", "https://cdn.example.com/wood.jpg", { wrap: "repeat" });
+
+// Build a PBR material that uses it
+Rebur.Materials.create("oak", {
+  baseColor: "#a07040",
+  baseColorMap: Rebur.Textures.url("wood_diffuse"),
+  roughness: 0.8,
+  metallic: 0.0,
+  repeatX: 2, repeatY: 2,
+});
+
+// Apply material to any entity
+const crate = Rebur.Workspace.find("Crate");
+crate.materialId = "oak";
+\`\`\`
+
+| API | Description |
+|-----|-------------|
+| \`Rebur.Materials.create(name, def)\` | Define PBR material (baseColor, roughness, metallic, baseColorMap, normalMap, emissive, opacity, repeatX, repeatY) |
+| \`Rebur.Materials.get(name)\` / \`.update(name, patch)\` / \`.remove(name)\` / \`.all()\` | Material CRUD |
+| \`Rebur.Textures.create(name, url, opts)\` | Register a texture URL with wrap/filter/anisotropy |
+| \`Rebur.Textures.get(name)\` / \`.url(name)\` / \`.remove(name)\` / \`.all()\` | Texture CRUD |
+
+---
+
+## Terrain (heightmap)
+
+\`\`\`js
+const t = Rebur.Terrain.create("ground", { size: 256, resolution: 128, height: 0, palette: ["grass","rock","sand"] });
+
+// Sculpt
+Rebur.Terrain.raise("ground", 0, 0, 20, 4);     // hill
+Rebur.Terrain.flatten("ground", 30, 0, 8, 2);   // plateau
+Rebur.Terrain.smooth("ground", 0, 0, 30);       // blur
+Rebur.Terrain.paint("ground", 0, 0, 25, "rock");
+
+// Query
+const h = Rebur.Terrain.getHeight("ground", player.position.x, player.position.z);
+const hit = Rebur.Terrain.raycast("ground", { x:0, y:100, z:0 }, { x:0, y:-1, z:0 });
+\`\`\`
+
+---
+
+## Constraints (joints, motors)
+
+Build doors, levers, sliding gates, ropes, springs, vehicles. All constraints are solved each tick automatically; you only set targets.
+
+\`\`\`js
+// HINGED DOOR
+const frame = Rebur.Workspace.find("DoorFrame");   // anchored
+const door  = Rebur.Workspace.find("Door");
+const hinge = Rebur.Constraints.hinge(frame, door, {
+  pivot: { x: -0.5, y: 0, z: 0 },
+  axis:  { x: 0, y: 1, z: 0 },
+  limits: { min: 0, max: Math.PI / 2 },
+  motor:  { targetAngle: 0, speed: 4 },
+});
+// Open
+hinge.setMotor({ targetAngle: Math.PI / 2, speed: 4 });
+
+// SLIDING DOOR
+const slider = Rebur.Constraints.slider(frame, door, {
+  axis: { x: 1, y: 0, z: 0 },
+  limits: { min: 0, max: 3 },
+  motor:  { targetPosition: 0, speed: 2 },
+});
+slider.setMotor({ targetPosition: 3 });
+
+// WELD a sign to a wall
+Rebur.Constraints.weld(wall, sign);
+
+// SPRING / ROPE / ROD
+Rebur.Constraints.spring(anchor, ball, { restLength: 2, stiffness: 30, damping: 1 });
+Rebur.Constraints.rope(anchor, weight, 4);
+Rebur.Constraints.rod(linkA, linkB);            // fixed-length rigid link
+Rebur.Constraints.ballSocket(torso, arm);       // ragdoll joint
+\`\`\`
+
+| API | Returns | Use case |
+|-----|---------|----------|
+| \`Constraints.weld(a, b)\` | handle | rigid attach (assemblies) |
+| \`Constraints.hinge(a, b, { pivot, axis, limits, motor })\` | handle | doors, levers, wheels |
+| \`Constraints.slider(a, b, { axis, limits, motor })\` | handle | pistons, sliding doors |
+| \`Constraints.ballSocket(a, b, pivot)\` | handle | ragdolls, chains |
+| \`Constraints.spring(a, b, { restLength, stiffness, damping })\` | handle | suspension, soft attach |
+| \`Constraints.rope(a, b, length)\` | handle | swinging weights (max distance only) |
+| \`Constraints.rod(a, b, length?)\` | handle | rigid distance link |
+
+**Handle API:** \`handle.setMotor({...})\`, \`handle.setLimits({...})\`, \`handle.setEnabled(bool)\`, \`handle.destroy()\`, \`handle.id\`, \`handle.kind\`, \`handle.alive\`.
+
+---
+
+## Vehicles
+
+\`\`\`js
+const car = Rebur.Vehicles.create({
+  chassis: Rebur.Workspace.find("CarBody"),
+  wheels:  [WheelFL, WheelFR, WheelRL, WheelRR],  // first half = front (steered)
+  maxSteer: 0.6,
+  maxTorque: 50,
+});
+
+Rebur.Input.on("press", (player, key) => {
+  if (key === "w") car.setThrottle(1);
+  if (key === "s") car.setThrottle(-1);
+  if (key === "a") car.setSteer(-1);
+  if (key === "d") car.setSteer(1);
+  if (key === " ") car.setBrake(1);
+});
+Rebur.Input.on("release", () => { car.setThrottle(0); car.setSteer(0); car.setBrake(0); });
+\`\`\`
+
+---
+
+## Cookbook — copy-paste recipes
+
+**Auto-opening door on player proximity**
+\`\`\`js
+const door = Rebur.Workspace.find("Door");
+const hinge = Rebur.Constraints.hinge(Rebur.Workspace.find("DoorFrame"), door, {
+  pivot:{x:-0.5,y:0,z:0}, axis:{x:0,y:1,z:0}, limits:{min:0,max:Math.PI/2},
+  motor:{ targetAngle:0, speed:5 }
+});
+every(0.1, () => {
+  const near = Rebur.Players.all().some(p =>
+    Math.hypot(p.position.x - door.position.x, p.position.z - door.position.z) < 3);
+  hinge.setMotor({ targetAngle: near ? Math.PI/2 : 0, speed: 5 });
+});
+\`\`\`
+
+**Breakable joint**
+\`\`\`js
+const j = Rebur.Constraints.weld(a, b);
+every(0.05, () => {
+  if (Math.hypot(a.velocity.x, a.velocity.y, a.velocity.z) > 30) j.destroy();
+});
+\`\`\`
+
+**Procedural terrain hill**
+\`\`\`js
+Rebur.Terrain.create("ground", { size: 200, resolution: 100 });
+for (let i = 0; i < 50; i++) {
+  const x = random(-90, 90), z = random(-90, 90);
+  Rebur.Terrain.raise("ground", x, z, random(5, 15), random(2, 8));
+}
+Rebur.Terrain.smooth("ground", 0, 0, 100);
+\`\`\`
 `;
+
