@@ -620,26 +620,39 @@ export default function Editor() {
       </button>
     );
 
+    // Asset containers or Folders should be able to hold other Folders/Models
+    const canHoldGroups = showObjects || containerDef.canHoldObjects || containerDef.isAssetContainer || containerDef.name.includes("Assets");
+    const canHoldScripts = containerDef.allowedScripts.length > 0;
+    const canHoldPrimitives = showObjects || containerDef.canHoldObjects;
+
+    if (!canHoldGroups && !canHoldScripts && !canHoldPrimitives) return null;
+
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity">
+          <button className="md:opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity">
             <Plus className="w-3.5 h-3.5" />
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-48 p-1">
-          {(showObjects ?? containerDef.canHoldObjects) && (
+          {canHoldPrimitives && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Entities</div>
               <Item icon={Box} label="Cube" onClick={() => addPrimitiveTo(containerDef.name, "cube", parentId)} />
               <Item icon={Circle} label="Sphere" onClick={() => addPrimitiveTo(containerDef.name, "sphere", parentId)} />
               <Item icon={Lightbulb} label="Light" onClick={() => addPrimitiveTo(containerDef.name, "light", parentId)} />
-              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} />
-              <Separator className="my-1" />
             </>
           )}
-          {containerDef.allowedScripts.length > 0 && (
+          {canHoldGroups && (
             <>
+              <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Organization</div>
+              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} />
+              <Item icon={Layers} label="Model" onClick={() => createGroupObject(containerDef.name, "model", parentId)} />
+            </>
+          )}
+          {canHoldScripts && (
+            <>
+              <Separator className="my-1" />
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Scripts</div>
               {containerDef.allowedScripts.includes("server") && <Item icon={FileCode} label="Server Script" onClick={() => addScriptTo(containerDef.name, "server", parentId)} />}
               {containerDef.allowedScripts.includes("client") && <Item icon={FileCode} label="Client Script" onClick={() => addScriptTo(containerDef.name, "client", parentId)} />}
