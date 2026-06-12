@@ -78,14 +78,17 @@ All scripts run **server-side** inside a secure VM sandbox. The only global is *
 ## Architecture
 Rebur ← single global
 ├── Workspace ← live 3D world: rendered + simulated entities
+│   ├── 3D Objects (Cube, Sphere, Light, etc.)
+│   ├── GUI Elements (screen-space HUD when at root level)
+│   └── Nested Objects
+│       └── GUI Elements (world-space UI attached to parent)
 ├── Lighting ← environment settings + light entities
 ├── Assets
-│ ├── Shared ← assets replicated to all clients
-│ └── Server ← server-only assets, never sent to clients
+│   ├── Shared ← assets replicated to all clients
+│   └── Server ← server-only assets, never sent to clients
 ├── Players ← active player entities
 ├── State ← shared session key-value store (resets each session)
 ├── DataStore ← persistent cross-session storage
-├── Gui ← shared HUD (all players see)
 ├── Sound ← audio playback
 ├── Tween ← property animation
 ├── Camera ← camera control
@@ -104,6 +107,11 @@ player ← a PlayerEntity (also an Entity)
 ├── player.gui ← per-player private HUD
 ├── player.data ← per-player persistent data store
 └── player.input ← per-player held keys + edge events
+
+**GUI System (Unified):**
+- **Screen-space GUI:** GUI elements added directly to Workspace (no parent) render as 2D overlays on the screen.
+- **World-space GUI:** GUI elements added as children of 3D objects render as planes in the 3D world, attached to their parent.
+- **Nested GUI:** GUI elements can be nested inside other GUI elements, inheriting the parent's space (screen or world).
 
 **Key rules:**
 - \`Rebur\` is the **primary** engine global — all subsystems hang off it.

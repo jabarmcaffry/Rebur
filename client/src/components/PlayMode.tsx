@@ -352,6 +352,7 @@ export default function PlayMode({
   const [renderPlayers, setRenderPlayers] = useState<RenderPlayer[]>([]);
   const [localPlayer, setLocalPlayer] = useState<RenderPlayer | null>(null);
   const [guiElements, setGuiElements] = useState<RenderGuiElement[]>([]);
+  const [worldSpaceGui, setWorldSpaceGui] = useState<RenderGuiElement[]>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
   const clientRunnerRef = useRef<ClientScriptRunner | null>(null);
@@ -523,7 +524,35 @@ export default function PlayMode({
       // Merge server GUI and client-side GUI
       const serverGui = renderClient.gui;
       const clientGui = clientRunnerRef.current ? Array.from(clientRunnerRef.current.clientGuiElements.values()) : [];
-      setGuiElements([...serverGui, ...clientGui]);
+      const allGui = [...serverGui, ...clientGui];
+      
+      // Classify GUI as screen-space or world-space based on parent hierarchy
+      // Build a map of all objects by ID
+      const objectsById = new Map<string, RenderObject>();
+      interp.objects.forEach(obj => objectsById.set(obj.id, obj));
+      
+      // Separate screen-space GUI (no parent or parent is GUI) from world-space GUI (parent is 3D object)
+      const screenSpaceGui: RenderGuiElement[] = [];
+      const worldSpaceGui: RenderGuiElement[] = [];
+      
+      allGui.forEach(gui => {
+        if (!gui.parentId) {
+          // Top-level GUI is screen-space
+          screenSpaceGui.push(gui);
+        } else {
+          const parent = objectsById.get(gui.parentId);
+          if (parent && parent.type?.startsWith('gui')) {
+            // Parent is GUI, so this is screen-space
+            screenSpaceGui.push(gui);
+          } else {
+            // Parent is a 3D object, so this is world-space
+            worldSpaceGui.push(gui);
+          }
+        }
+      });
+      
+      setGuiElements(screenSpaceGui);
+      setWorldSpaceGui(worldSpaceGui);
 
       // Pick up debug draws, particle events, and interaction prompt from server
       if (renderClient.debugDraws.length > 0) {
@@ -774,6 +803,20 @@ export default function PlayMode({
             <ParticleEmitterLayer renderableObjects={renderableObjects} />
             <DebugDrawLayer draws={debugDraws} />
             <ParticleLayer events={particleEvents} onDone={() => setParticleEvents([])} />
+            {worldSpaceGui.map((gui) => {
+              const parent = renderableObjects.find(o => o.id === gui.parentId);
+              if (!parent) return null;
+              const width = gui.width ?? 1;
+              const height = gui.height ?? 1;
+              return (
+                <group key={gui.id} position={[parent.position.x, parent.position.y, parent.position.z]} rotation={[parent.rotation.x, parent.rotation.y, parent.rotation.z]}>
+                  <mesh position={[0, 0, 0.5]} scale={[width, height, 1]}>
+                    <planeGeometry args={[1, 1]} />
+                    <meshStandardMaterial color={gui.backgroundColor ?? "#3b82f6"} transparent opacity={gui.opacity ?? 0.8} />
+                  </mesh>
+                </group>
+              );
+            })}
           </Canvas>
         </PlayCanvasErrorBoundary>
       ) : (
