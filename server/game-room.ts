@@ -159,6 +159,33 @@ export class GameRoom {
       const canCollide = props.canCollide !== false;
       const container = o.container ?? "Workspace";
 
+      // If this is a GUI object, add it to the GUI elements map
+      if (o.type?.startsWith("gui")) {
+        const guiKind = o.type.replace("gui", "").toLowerCase() || "frame";
+        this.scriptRunner.guiElements.set(o.id, {
+          id: o.id,
+          kind: guiKind as "text" | "button" | "image" | "bar" | "frame",
+          text: o.name,
+          x: px * 100,
+          y: py * 100,
+          width: sx * 100,
+          height: sy * 100,
+          anchor: "topLeft",
+          color: o.color ?? "#ffffff",
+          fontSize: 14,
+          backgroundColor: o.color ?? "#3b82f6",
+          visible: props.visible !== false,
+          parentId: o.parentId ?? null,
+          zIndex: props.zIndex,
+          opacity: props.opacity,
+          borderRadius: props.borderRadius,
+          borderWidth: props.borderWidth,
+          borderColor: props.borderColor,
+          padding: props.padding,
+          shadow: props.shadow,
+        });
+      }
+
       const dobj: DynamicObj = {
         id: o.id,
         name: o.name ?? "Part",
@@ -920,6 +947,14 @@ export class GameRoom {
       maxValue: g.maxValue,
       visible: g.visible !== false,
       clickable: g.clickable,
+      parentId: g.parentId,
+      zIndex: g.zIndex,
+      opacity: g.opacity,
+      borderRadius: g.borderRadius,
+      borderWidth: g.borderWidth,
+      borderColor: g.borderColor,
+      padding: g.padding,
+      shadow: g.shadow,
     };
   }
 
