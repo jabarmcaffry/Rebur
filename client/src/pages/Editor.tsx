@@ -110,7 +110,7 @@ const CONTAINERS: ContainerDef[] = [
     name: "Workspace",
     displayName: "Workspace",
     icon: Box,
-    hint: "Freeform 3D world — organize it however your game needs. Scripts attach directly to entities.",
+    hint: "Freeform world — add 3D objects, GUI elements, and organize however your game needs. GUI at root level is screen-space; GUI nested in objects is world-space.",
     allowedScripts: ["server", "client"],
     canHoldObjects: true,
   },
@@ -148,44 +148,7 @@ const CONTAINERS: ContainerDef[] = [
       },
     ],
   },
-  {
-    name: "GUI",
-    displayName: "GUI",
-    icon: Eye,
-    hint: "All GUI definitions — screen layouts, HUDs, overlays, and reusable components.",
-    allowedScripts: ["client"],
-    canHoldObjects: false,
-    isUIContainer: true,
-    children: [
-      {
-        name: "GUI/Player",
-        displayName: "Player",
-        icon: Users,
-        hint: "Per-player private GUI: HUD, Inventory, Menus. ClientScripts only.",
-        allowedScripts: ["client"],
-        canHoldObjects: false,
-        isUIContainer: true,
-      },
-      {
-        name: "GUI/Global",
-        displayName: "Global",
-        icon: Globe,
-        hint: "GUI visible to all players: Notifications, SystemOverlays. ClientScripts only.",
-        allowedScripts: ["client"],
-        canHoldObjects: false,
-        isUIContainer: true,
-      },
-      {
-        name: "GUI/Components",
-        displayName: "Components",
-        icon: Sparkles,
-        hint: "Reusable GUI building blocks shared across Player and Global GUI.",
-        allowedScripts: ["client"],
-        canHoldObjects: false,
-        isUIContainer: true,
-      },
-    ],
-  },
+
   {
     name: "Assets",
     displayName: "Assets",
@@ -695,7 +658,7 @@ export default function Editor() {
               <Item icon={Lightbulb} label="Light" onClick={() => addPrimitiveTo(containerDef.name, "light", parentId)} />
             </>
           )}
-          {containerDef.isUIContainer && (
+          {(containerDef.name === "Workspace" || canHoldGroups) && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">GUI Elements</div>
               <Item icon={Folder} label="Frame" onClick={() => createGroupObject(containerDef.name, "guiFrame", isTopLevelContainer ? null : parentId)} />
@@ -704,7 +667,7 @@ export default function Editor() {
               <Item icon={Circle} label="Image" onClick={() => createGroupObject(containerDef.name, "guiImage", isTopLevelContainer ? null : parentId)} />
             </>
           )}
-          {canHoldGroups && !containerDef.isUIContainer && (
+          {canHoldGroups && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Organization</div>
               <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", isTopLevelContainer ? null : parentId)} />
@@ -1345,19 +1308,34 @@ export default function Editor() {
                   {objects.map((o) => {
                     const isGUI = o.type?.startsWith("gui");
                     const isSelected = o.id === selectedId;
-                    // Skip GUI elements in 3D rendering
-                    if (isGUI) return null;
+                    // Render world-space GUI (GUI with a parent) in 3D
+                    // Skip screen-space GUI (GUI with no parent)
+                    if (isGUI && !o.parentId) return null;
                     return (
                       <group key={o.id} position={[o.positionX, o.positionY, o.positionZ]}>
-                        <mesh
-                          position={[0, 0, 0]}
-                          rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                          scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                          onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                        >
-                          {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
-                          <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
-                        </mesh>
+                        {isGUI ? (
+                          // World-space GUI rendered as a plane
+                          <mesh
+                            position={[0, 0, 0]}
+                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                          >
+                            <planeGeometry args={[1, 1]} />
+                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 0.8} />
+                          </mesh>
+                        ) : (
+                          // 3D object
+                          <mesh
+                            position={[0, 0, 0]}
+                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                          >
+                            {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
+                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
+                          </mesh>
+                        )}
                         {isSelected && (
                           <TransformControls mode={transformMode} onObjectChange={() => {}} position={[0, 0, 0]}>
                             <mesh>
@@ -1371,11 +1349,13 @@ export default function Editor() {
                   })}
                   <OrbitControls makeDefault />
                 </Canvas>
-                {/* 2D GUI Overlay */}
+                {/* 2D GUI Overlay - Screen-space UI only */}
                 <div className="absolute inset-0 pointer-events-none">
                   {objects.map((o) => {
                     const isGUI = o.type?.startsWith("gui");
                     if (!isGUI) return null;
+                    // Only render screen-space GUI (GUI at root level of Workspace with no parent)
+                    if (o.parentId) return null;
                     const isSelected = o.id === selectedId;
                     const width = o.scaleX * 100;
                     const height = o.scaleY * 100;
