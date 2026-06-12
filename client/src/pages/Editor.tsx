@@ -636,17 +636,23 @@ export default function Editor() {
       </button>
     );
 
-    // Asset containers or Folders should be able to hold other Folders/Models
-    const canHoldGroups = showObjects || containerDef.canHoldObjects || containerDef.isAssetContainer || containerDef.name.includes("Assets");
+    // Determine what this container can hold
+    // Top-level containers (parentId === null) should allow direct item creation
+    // Folders/Models (parentId !== null) should allow children
+    const isTopLevelContainer = parentId === null;
+    const canHoldPrimitives = (isTopLevelContainer && containerDef.canHoldObjects) || (parentId !== null && showObjects);
     const canHoldScripts = containerDef.allowedScripts.length > 0;
-    const canHoldPrimitives = showObjects || containerDef.canHoldObjects;
+    const canHoldGroups = (isTopLevelContainer && (containerDef.canHoldObjects || containerDef.isAssetContainer || containerDef.name.includes("Assets"))) || (parentId !== null && showObjects);
 
     if (!canHoldGroups && !canHoldScripts && !canHoldPrimitives) return null;
 
     return (
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button className="md:opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity">
+          <button 
+            onClick={(e) => { e.stopPropagation(); }}
+            className="md:opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent transition-opacity"
+          >
             <Plus className="w-3.5 h-3.5" />
           </button>
         </PopoverTrigger>
@@ -662,17 +668,17 @@ export default function Editor() {
           {containerDef.isUIContainer && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">GUI Elements</div>
-              <Item icon={Folder} label="Frame" onClick={() => createGroupObject(containerDef.name, "guiFrame", parentId)} />
-              <Item icon={FileCode} label="Text Label" onClick={() => createGroupObject(containerDef.name, "guiText", parentId)} />
-              <Item icon={Square} label="Button" onClick={() => createGroupObject(containerDef.name, "guiButton", parentId)} />
-              <Item icon={Circle} label="Image" onClick={() => createGroupObject(containerDef.name, "guiImage", parentId)} />
+              <Item icon={Folder} label="Frame" onClick={() => createGroupObject(containerDef.name, "guiFrame", isTopLevelContainer ? null : parentId)} />
+              <Item icon={FileCode} label="Text Label" onClick={() => createGroupObject(containerDef.name, "guiText", isTopLevelContainer ? null : parentId)} />
+              <Item icon={Square} label="Button" onClick={() => createGroupObject(containerDef.name, "guiButton", isTopLevelContainer ? null : parentId)} />
+              <Item icon={Circle} label="Image" onClick={() => createGroupObject(containerDef.name, "guiImage", isTopLevelContainer ? null : parentId)} />
             </>
           )}
           {canHoldGroups && !containerDef.isUIContainer && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Organization</div>
-              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} />
-              <Item icon={Layers} label="Model" onClick={() => createGroupObject(containerDef.name, "model", parentId)} />
+              <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", isTopLevelContainer ? null : parentId)} />
+              <Item icon={Layers} label="Model" onClick={() => createGroupObject(containerDef.name, "model", isTopLevelContainer ? null : parentId)} />
             </>
           )}
           {canHoldScripts && (
@@ -1305,9 +1311,9 @@ export default function Editor() {
                   </div>
                 )}
               </TabsContent>
-              <TabsContent value="docs" className="h-full m-0 p-0">
-                <ScrollArea className="h-full p-4">
-                  <div className="max-w-3xl mx-auto prose prose-invert prose-sm">
+              <TabsContent value="docs" className="h-full m-0 p-0 overflow-hidden">
+                <ScrollArea className="h-full w-full">
+                  <div className="p-4 max-w-4xl prose prose-invert prose-sm dark">
                     <div dangerouslySetInnerHTML={{ __html: marked.parse(SCRIPTING_DOCS) as string }} />
                   </div>
                 </ScrollArea>
