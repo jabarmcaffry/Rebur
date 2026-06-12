@@ -1336,8 +1336,8 @@ export default function Editor() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-hidden">
-              <TabsContent value="scene" className="h-full m-0 p-0">
+            <div className="flex-1 overflow-hidden relative">
+              <TabsContent value="scene" className="h-full m-0 p-0 relative">
                 <Canvas shadows camera={{ position: [5, 5, 5], fov: 50 }}>
                   <ambientLight intensity={0.5} />
                   <pointLight position={[10, 10, 10]} castShadow />
@@ -1345,31 +1345,19 @@ export default function Editor() {
                   {objects.map((o) => {
                     const isGUI = o.type?.startsWith("gui");
                     const isSelected = o.id === selectedId;
+                    // Skip GUI elements in 3D rendering
+                    if (isGUI) return null;
                     return (
                       <group key={o.id} position={[o.positionX, o.positionY, o.positionZ]}>
-                        {isGUI ? (
-                          // GUI elements rendered as 2D planes
-                          <mesh
-                            position={[0, 0, 0]}
-                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                          >
-                            <planeGeometry args={[1, 1]} />
-                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 0.8} />
-                          </mesh>
-                        ) : (
-                          // 3D objects
-                          <mesh
-                            position={[0, 0, 0]}
-                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                          >
-                            {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
-                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
-                          </mesh>
-                        )}
+                        <mesh
+                          position={[0, 0, 0]}
+                          rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                          scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                          onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                        >
+                          {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
+                          <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
+                        </mesh>
                         {isSelected && (
                           <TransformControls mode={transformMode} onObjectChange={() => {}} position={[0, 0, 0]}>
                             <mesh>
@@ -1383,6 +1371,62 @@ export default function Editor() {
                   })}
                   <OrbitControls makeDefault />
                 </Canvas>
+                {/* 2D GUI Overlay */}
+                <div className="absolute inset-0 pointer-events-none">
+                  {objects.map((o) => {
+                    const isGUI = o.type?.startsWith("gui");
+                    if (!isGUI) return null;
+                    const isSelected = o.id === selectedId;
+                    const width = o.scaleX * 100;
+                    const height = o.scaleY * 100;
+                    const left = (o.positionX + 0.5) * 100;
+                    const top = (o.positionY + 0.5) * 100;
+                    return (
+                      <div
+                        key={o.id}
+                        className={`absolute pointer-events-auto cursor-pointer transition-all ${
+                          isSelected ? "ring-2 ring-yellow-400" : "hover:ring-1 hover:ring-yellow-300"
+                        }`}
+                        style={{
+                          left: `${left}%`,
+                          top: `${top}%`,
+                          width: `${width}%`,
+                          height: `${height}%`,
+                          transform: `translate(-50%, -50%) rotate(${o.rotationZ}rad)`,
+                          backgroundColor: o.color,
+                          opacity: 1 - (o.properties as any)?.transparency || 0.8,
+                          borderRadius: "4px",
+                        }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                        onMouseDown={(e) => {
+                          if (!isSelected) return;
+                          e.preventDefault();
+                          const startX = e.clientX;
+                          const startY = e.clientY;
+                          const startLeft = o.positionX;
+                          const startTop = o.positionY;
+                          const handleMouseMove = (moveEvent: MouseEvent) => {
+                            const deltaX = (moveEvent.clientX - startX) / window.innerWidth;
+                            const deltaY = (moveEvent.clientY - startY) / window.innerHeight;
+                            handleTransformUpdate(
+                              { x: startLeft + deltaX, y: startTop + deltaY, z: o.positionZ },
+                              { x: o.rotationX, y: o.rotationY, z: o.rotationZ },
+                              { x: o.scaleX, y: o.scaleY, z: o.scaleZ }
+                            );
+                          };
+                          const handleMouseUp = () => {
+                            window.removeEventListener("mousemove", handleMouseMove);
+                            window.removeEventListener("mouseup", handleMouseUp);
+                          };
+                          window.addEventListener("mousemove", handleMouseMove);
+                          window.addEventListener("mouseup", handleMouseUp);
+                        }}
+                      >
+                        <div className="text-xs text-white font-semibold p-2 truncate">{o.name}</div>
+                      </div>
+                    );
+                  })}
+                </div>
               </TabsContent>
               <TabsContent value="script" className="h-full m-0 p-0 flex flex-col">
                 {selectedScript ? (
