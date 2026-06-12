@@ -65,10 +65,13 @@ All scripts run **server-side** inside a secure VM sandbox. The only global is *
 32. [Rebur.Labels — World-Space 3D Text](#reburlabels)
 33. [Rebur.Scene — Scene Transitions & Restart](#reburscene)
 34. [Rebur.Debug — Runtime Visualisation](#reburdebug)
-35. [Timers](#timers)
-36. [Logging](#logging)
-37. [Vector3 & Color3](#vector3--color3)
-38. [Quick Start Examples](#quick-start-examples)
+35. [Rebur.Gui — Visual GUI Designer](#reburgui-designer)
+36. [Rebur.Workspace.raycast — Raycasting](#raycasting)
+37. [Particles — Particle Emitters & Events](#particles)
+38. [Timers](#timers)
+39. [Logging](#logging)
+40. [Vector3 & Color3](#vector3--color3)
+41. [Quick Start Examples](#quick-start-examples)
 
 ---
 
@@ -133,9 +136,12 @@ Some APIs are conceptually per-player/client but are bridged through the server:
 
 > \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted.
 
-### ClientScript (Client-Side) – Planned
+### ClientScript (Client-Side)
 
-A \`ClientScript\` placed in the **StarterPlayer** container will run in each player's browser. **Not yet implemented** — currently all scripts are server-side.
+A \`ClientScript\` runs in each player's browser. It is ideal for local HUD updates, camera effects, and immediate input handling. Place them in **GUI** or **StarterCharacter** containers.
+- Conceptually similar to Server scripts but runs on the client.
+- Use for high-frequency UI updates or local-only visual effects.
+- Accesses the same \`Rebur\` global, but some authoritative APIs (like Physics) are read-only.
 
 ---
 
@@ -776,17 +782,77 @@ Rebur.DataStore.keys();       // string[]
 \`\`\`
 
 ## Rebur.Gui
-Global HUD (all players see). API identical to player.gui except input methods (input) are not available globally.
+Global HUD (all players see). API identical to player.gui.
+
+### GUI Element Types
+- **text**: Display labels.
+- **button**: Clickable elements with callbacks.
+- **bar**: Progress/health bars.
+- **image**: Display textures/icons.
+- **frame**: Containers for other elements with backgrounds and borders.
+
+### GUI Methods
+\`\`\`js
+// Create elements
+Rebur.Gui.text("id", "Hello", { anchor: "center", color: "#ffffff" });
+Rebur.Gui.button("btn", "Click Me", { anchor: "bottomCenter", y: -50 }, () => log("Clicked!"));
+Rebur.Gui.frame("bg", { width: 300, height: 200, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10 });
+
+// Styling Options
+// anchor: "topLeft", "topCenter", "topRight", "centerLeft", "center", "centerRight", "bottomLeft", "bottomCenter", "bottomRight"
+// x, y: Offsets from anchor
+// width, height: Size in pixels
+// zIndex: Stacking order
+// opacity: 0-1
+// borderRadius: Corner rounding
+// borderWidth, borderColor: Border styling
+// shadow: boolean (drop shadow)
+
+Rebur.Gui.clear("id"); // Remove specific element
+Rebur.Gui.clear();     // Remove all global GUI
+\`\`\`
+
+## Rebur.Workspace.raycast — Raycasting
+Detect objects along a line in 3D space.
 
 \`\`\`js
-Rebur.Gui.text("timer", "00:00", { anchor: "tc", y: 20, size: 24 });
-Rebur.Gui.bar("progress", 50, 100, { x: 20, y: 20, width: 200 });
-Rebur.Gui.image("logo", "logo.png", { anchor: "tl", x: 10, y: 10, width: 80 });
-Rebur.Gui.button("restart", "Restart", { anchor: "br", x: 20, y: 20 }, () => {
-  Rebur.Scene.restart();
+const origin = { x: 0, y: 5, z: 0 };
+const direction = { x: 0, y: -1, z: 0 };
+const hit = Rebur.Workspace.raycast(origin, direction, { 
+  maxDistance: 100,
+  ignore: [someEntity] // optional array of entities to ignore
 });
-Rebur.Gui.clear("timer");
-Rebur.Gui.clear();
+
+if (hit) {
+  log("Hit:", hit.entity.name);
+  log("Position:", hit.position); // world position of hit
+  log("Normal:", hit.normal);     // surface normal at hit
+  log("Distance:", hit.distance); // distance from origin
+}
+\`\`\`
+
+## Particles
+Visual effects system using emitters and one-shot events.
+
+### Particle Emitters (Persistent)
+Create a **ParticleEmitter** object in the editor to have continuous effects.
+- **rate**: Particles per second.
+- **lifetime**: How long each particle lasts.
+- **effectType**: "smoke", "fire", "sparkle", "explosion", "custom".
+
+### Particle Events (One-shot)
+Trigger bursts from scripts:
+\`\`\`js
+// Burst at position
+Rebur.Workspace.emitParticles({ x: 0, y: 5, z: 0 }, {
+  effectType: "explosion",
+  count: 50,
+  speed: 10,
+  color: "#ffaa00"
+});
+
+// Attach to entity
+entity.emitParticles({ effectType: "smoke", count: 10 });
 \`\`\`
 
 ## Rebur.Sound

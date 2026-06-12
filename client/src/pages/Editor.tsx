@@ -81,6 +81,7 @@ import SVGScene from "@/components/SVGScene";
 import { DEFAULT_SCRIPT, SCRIPTING_DOCS } from "@/lib/runtime/docs";
 import { isWebGLAvailable } from "@/lib/webgl";
 import { configureMonacoForEngine, ENGINE_EDITOR_OPTIONS } from "@/lib/runtime/scripting/monaco-config";
+import { marked } from "marked";
 
 type TransformMode = "translate" | "rotate" | "scale";
 
@@ -754,7 +755,7 @@ export default function Editor() {
           {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           <c.icon className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-xs font-semibold flex-1">{c.displayName}</span>
-          <AddItemMenu containerDef={c} parentId={null} />
+          <AddItemMenu containerDef={c} parentId={null} showObjects={true} />
         </div>
         {!collapsed && (
           <div className="space-y-0.5">
@@ -1307,7 +1308,7 @@ export default function Editor() {
               <TabsContent value="docs" className="h-full m-0 p-0">
                 <ScrollArea className="h-full p-4">
                   <div className="max-w-3xl mx-auto prose prose-invert prose-sm">
-                    <div dangerouslySetInnerHTML={{ __html: SCRIPTING_DOCS }} />
+                    <div dangerouslySetInnerHTML={{ __html: marked.parse(SCRIPTING_DOCS) as string }} />
                   </div>
                 </ScrollArea>
               </TabsContent>

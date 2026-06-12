@@ -354,6 +354,7 @@ export default function PlayMode({
   const [guiElements, setGuiElements] = useState<RenderGuiElement[]>([]);
   const [scriptLogs, setScriptLogs] = useState<string[]>([]);
   const [tick, setTick] = useState(0);
+  const clientRunnerRef = useRef<ClientScriptRunner | null>(null);
 
   const [showConsole, setShowConsole] = useState(false);
   const [isMobile] = useState(() =>
@@ -477,14 +478,15 @@ export default function PlayMode({
     const localScripts = scripts.filter(
       (s) => (s.scriptType === "client" || s.scriptType === "ClientScript") && s.enabled !== false
     );
-    let clientRunner: ClientScriptRunner | null = null;
+    const runner = new ClientScriptRunner(renderClient);
     if (localScripts.length > 0) {
-      clientRunner = new ClientScriptRunner(renderClient);
-      clientRunner.runScripts(localScripts);
+      runner.runScripts(localScripts);
     }
+    clientRunnerRef.current = runner;
 
     return () => {
-      clientRunner?.destroy();
+      runner.destroy();
+      clientRunnerRef.current = null;
       renderClient.disconnect();
     };
   }, [renderClient, scripts]);
@@ -517,6 +519,11 @@ export default function PlayMode({
       setRenderPlayers(interp.players);
       setLocalPlayer(renderClient.getLocalPlayer());
       setTick((t) => (t + 1) % 1000000);
+
+      // Merge server GUI and client-side GUI
+      const serverGui = renderClient.gui;
+      const clientGui = clientRunnerRef.current ? Array.from(clientRunnerRef.current.clientGuiElements.values()) : [];
+      setGuiElements([...serverGui, ...clientGui]);
 
       // Pick up debug draws, particle events, and interaction prompt from server
       if (renderClient.debugDraws.length > 0) {

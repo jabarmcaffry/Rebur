@@ -206,7 +206,9 @@ export class ClientScriptRunner {
     const reburPlayer = new Proxy({} as any, {
       get(_t, key: string) {
         if (!rc.localPlayerId) return undefined;
-        const p = rc.players.get(rc.localPlayerId);
+        // In Rebur, the local player is often handled separately or is the only player in some contexts.
+        // We use rc.getLocalPlayer() which is more reliable.
+        const p = rc.getLocalPlayer();
         if (!p) return undefined;
         if (key === "position") return { ...p.position };
         if (key === "velocity") return { ...p.velocity };
