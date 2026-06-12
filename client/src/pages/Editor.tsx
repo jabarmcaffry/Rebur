@@ -495,6 +495,36 @@ export default function Editor() {
     return (p[key] ?? fallback) as T;
   };
 
+  // Handle keyboard shortcuts for transform modes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "m" || e.key === "M") setTransformMode("translate");
+      if (e.key === "r" || e.key === "R") setTransformMode("rotate");
+      if (e.key === "s" || e.key === "S") setTransformMode("scale");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Handle transform updates from the 3D canvas
+  const handleTransformUpdate = (newPos: any, newRot: any, newScale: any) => {
+    if (!selected) return;
+    updateObjectMutation.mutate({
+      id: selected.id,
+      updates: {
+        positionX: newPos?.x ?? selected.positionX,
+        positionY: newPos?.y ?? selected.positionY,
+        positionZ: newPos?.z ?? selected.positionZ,
+        rotationX: newRot?.x ?? selected.rotationX,
+        rotationY: newRot?.y ?? selected.rotationY,
+        rotationZ: newRot?.z ?? selected.rotationZ,
+        scaleX: newScale?.x ?? selected.scaleX,
+        scaleY: newScale?.y ?? selected.scaleY,
+        scaleZ: newScale?.z ?? selected.scaleZ,
+      },
+    });
+  };
+
   const handleScriptFieldChange = (field: keyof Script, value: any) => {
     if (!selectedScript) return;
     updateScriptMutation.mutate({ id: selectedScript.id, updates: { [field]: value } });
@@ -1228,8 +1258,9 @@ export default function Editor() {
         <div className="flex-1 flex flex-col min-w-0 bg-muted/10 relative">
           <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col">
             <div className="flex items-center justify-between px-2 border-b border-border bg-card/40 shrink-0 overflow-x-auto">
-              <TabsList className="bg-transparent h-9 p-0 gap-1">
-                <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
+              <div className="flex items-center gap-2">
+                <TabsList className="bg-transparent h-9 p-0 gap-1">
+                  <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
                 {selectedScript && (
                   <div className="flex items-center gap-0.5 bg-muted/50 rounded-md px-1">
                     <TabsTrigger value="script" className="h-7 text-xs px-2 data-[state=active]:bg-muted">
@@ -1250,7 +1281,51 @@ export default function Editor() {
                   </div>
                 )}
                 <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Docs</TabsTrigger>
-              </TabsList>
+                </TabsList>
+                {activeTab === "scene" && selectedId && (
+                  <div className="flex items-center gap-0.5 ml-2 pl-2 border-l border-border">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={transformMode === "translate" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setTransformMode("translate")}
+                        >
+                          <MoveIcon className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Move (M)</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={transformMode === "rotate" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setTransformMode("rotate")}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Rotate (R)</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={transformMode === "scale" ? "default" : "ghost"}
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setTransformMode("scale")}
+                        >
+                          <Maximize className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Scale (S)</TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-1 shrink-0">
                 <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setHierarchyOpen(!isHierarchyOpen)}>
                   <Menu className="w-3.5 h-3.5" />
@@ -1267,18 +1342,45 @@ export default function Editor() {
                   <ambientLight intensity={0.5} />
                   <pointLight position={[10, 10, 10]} castShadow />
                   <Grid infiniteGrid fadeDistance={50} sectionSize={1} />
-                  {objects.map((o) => (
-                    <mesh
-                      key={o.id}
-                      position={[o.positionX, o.positionY, o.positionZ]}
-                      rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                      scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                      onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                    >
-                      {o.primitiveType === "sphere" ? <sphereGeometry /> : <boxGeometry />}
-                      <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
-                    </mesh>
-                  ))}
+                  {objects.map((o) => {
+                    const isGUI = o.type?.startsWith("gui");
+                    const isSelected = o.id === selectedId;
+                    return (
+                      <group key={o.id} position={[o.positionX, o.positionY, o.positionZ]}>
+                        {isGUI ? (
+                          // GUI elements rendered as 2D planes
+                          <mesh
+                            position={[0, 0, 0]}
+                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                          >
+                            <planeGeometry args={[1, 1]} />
+                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 0.8} />
+                          </mesh>
+                        ) : (
+                          // 3D objects
+                          <mesh
+                            position={[0, 0, 0]}
+                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                          >
+                            {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
+                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
+                          </mesh>
+                        )}
+                        {isSelected && (
+                          <TransformControls mode={transformMode} onObjectChange={() => {}} position={[0, 0, 0]}>
+                            <mesh>
+                              <boxGeometry args={[0.1, 0.1, 0.1]} />
+                              <meshStandardMaterial color="#ffff00" wireframe />
+                            </mesh>
+                          </TransformControls>
+                        )}
+                      </group>
+                    );
+                  })}
                   <OrbitControls makeDefault />
                 </Canvas>
               </TabsContent>
@@ -1311,10 +1413,10 @@ export default function Editor() {
                   </div>
                 )}
               </TabsContent>
-              <TabsContent value="docs" className="h-full m-0 p-0 overflow-hidden">
-                <ScrollArea className="h-full w-full">
-                  <div className="p-4 max-w-4xl prose prose-invert prose-sm dark">
-                    <div dangerouslySetInnerHTML={{ __html: marked.parse(SCRIPTING_DOCS) as string }} />
+              <TabsContent value="docs" className="h-full m-0 p-0 overflow-hidden flex flex-col">
+                <ScrollArea className="flex-1 w-full">
+                  <div className="p-4 w-full">
+                    <div className="prose prose-invert prose-sm dark max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(SCRIPTING_DOCS) as string }} />
                   </div>
                 </ScrollArea>
               </TabsContent>
