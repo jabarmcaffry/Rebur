@@ -148,37 +148,37 @@ const CONTAINERS: ContainerDef[] = [
     ],
   },
   {
-    name: "UI",
-    displayName: "UI",
+    name: "GUI",
+    displayName: "GUI",
     icon: Eye,
-    hint: "All UI definitions — screen layouts, HUDs, overlays, and reusable components.",
+    hint: "All GUI definitions — screen layouts, HUDs, overlays, and reusable components.",
     allowedScripts: ["client"],
     canHoldObjects: false,
     isUIContainer: true,
     children: [
       {
-        name: "UI/Player",
+        name: "GUI/Player",
         displayName: "Player",
         icon: Users,
-        hint: "Per-player private UI: HUD, Inventory, Menus. ClientScripts only.",
+        hint: "Per-player private GUI: HUD, Inventory, Menus. ClientScripts only.",
         allowedScripts: ["client"],
         canHoldObjects: false,
         isUIContainer: true,
       },
       {
-        name: "UI/Global",
+        name: "GUI/Global",
         displayName: "Global",
         icon: Globe,
-        hint: "UI visible to all players: Notifications, SystemOverlays. ClientScripts only.",
+        hint: "GUI visible to all players: Notifications, SystemOverlays. ClientScripts only.",
         allowedScripts: ["client"],
         canHoldObjects: false,
         isUIContainer: true,
       },
       {
-        name: "UI/Components",
+        name: "GUI/Components",
         displayName: "Components",
         icon: Sparkles,
-        hint: "Reusable UI building blocks shared across Player and Global UI.",
+        hint: "Reusable GUI building blocks shared across Player and Global GUI.",
         allowedScripts: ["client"],
         canHoldObjects: false,
         isUIContainer: true,
@@ -499,19 +499,34 @@ export default function Editor() {
     updateScriptMutation.mutate({ id: selectedScript.id, updates: { [field]: value } });
   };
 
-  const createGroupObject = (containerName: string, type: "folder" | "model", parentId?: string | null) => {
+  const createGroupObject = (containerName: string, type: "folder" | "model" | "guiFrame" | "guiText" | "guiButton" | "guiImage" | "particleEmitter", parentId?: string | null) => {
     const count = objects.filter((o) => o.type === type).length + 1;
+    const typeNames: Record<string, string> = {
+      folder: "Folder",
+      model: "Model",
+      guiFrame: "Frame",
+      guiText: "TextLabel",
+      guiButton: "Button",
+      guiImage: "Image",
+      particleEmitter: "ParticleEmitter"
+    };
+    const displayName = typeNames[type] || type;
+    const isGUI = type.startsWith("gui");
+    const isParticle = type === "particleEmitter";
+    
     createObjectMutation.mutate({
       gameId,
-      name: `${type === "folder" ? "Folder" : "Model"}${count}`,
+      name: `${displayName}${count}`,
       type,
       primitiveType: null,
       container: containerName,
       parentId: parentId ?? null,
       positionX: 0, positionY: 0, positionZ: 0,
-      scaleX: 1, scaleY: 1, scaleZ: 1,
-      color: type === "folder" ? "#64748b" : "#38bdf8",
-      properties: { anchored: true, canCollide: false, transparency: 1 },
+      scaleX: isGUI ? 0.1 : (isParticle ? 1 : 1),
+      scaleY: isGUI ? 0.05 : (isParticle ? 1 : 1),
+      scaleZ: isGUI ? 0.1 : (isParticle ? 1 : 1),
+      color: isGUI ? "#ffffff" : (isParticle ? "#ffaa00" : "#38bdf8"),
+      properties: { anchored: true, canCollide: false, transparency: isGUI ? 0 : 0, effectType: isParticle ? "smoke" : undefined },
     } as Partial<GameObject>);
   };
 
@@ -643,7 +658,16 @@ export default function Editor() {
               <Item icon={Lightbulb} label="Light" onClick={() => addPrimitiveTo(containerDef.name, "light", parentId)} />
             </>
           )}
-          {canHoldGroups && (
+          {containerDef.isUIContainer && (
+            <>
+              <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">GUI Elements</div>
+              <Item icon={Folder} label="Frame" onClick={() => createGroupObject(containerDef.name, "guiFrame", parentId)} />
+              <Item icon={FileCode} label="Text Label" onClick={() => createGroupObject(containerDef.name, "guiText", parentId)} />
+              <Item icon={Square} label="Button" onClick={() => createGroupObject(containerDef.name, "guiButton", parentId)} />
+              <Item icon={Circle} label="Image" onClick={() => createGroupObject(containerDef.name, "guiImage", parentId)} />
+            </>
+          )}
+          {canHoldGroups && !containerDef.isUIContainer && (
             <>
               <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Organization</div>
               <Item icon={Folder} label="Folder" onClick={() => createGroupObject(containerDef.name, "folder", parentId)} />
@@ -902,6 +926,105 @@ export default function Editor() {
             </div>
 
             <Separator className="opacity-50" />
+
+            {/* --- PARTICLE EMITTER SECTION --- */}
+            {selected.type === "particleEmitter" && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-yellow-400">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Particle Emitter</span>
+                  </div>
+                  <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Effect Type</Label>
+                      <Select value={getProp("effectType", "smoke")} onValueChange={(v) => handlePropertyChange({ effectType: v })}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="smoke">Smoke</SelectItem>
+                          <SelectItem value="fire">Fire</SelectItem>
+                          <SelectItem value="sparkle">Sparkle</SelectItem>
+                          <SelectItem value="explosion">Explosion</SelectItem>
+                          <SelectItem value="custom">Custom</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground uppercase">Rate</Label>
+                        <Input type="number" className="h-7 text-xs bg-background/50" value={getProp("rate", 10)} onChange={(e) => handlePropertyChange({ rate: parseFloat(e.target.value) || 10 })} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground uppercase">Lifetime</Label>
+                        <Input type="number" className="h-7 text-xs bg-background/50" value={getProp("lifetime", 2)} onChange={(e) => handlePropertyChange({ lifetime: parseFloat(e.target.value) || 2 })} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
+
+            {/* --- GUI ELEMENT SECTION --- */}
+            {selected.container?.includes("GUI") && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-cyan-400">
+                    <Layout className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">GUI Properties</span>
+                  </div>
+                  <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Element Type</Label>
+                      <Select value={getProp("guiKind", "frame")} onValueChange={(v) => handlePropertyChange({ guiKind: v })}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="frame">Frame</SelectItem>
+                          <SelectItem value="text">Text Label</SelectItem>
+                          <SelectItem value="button">Button</SelectItem>
+                          <SelectItem value="image">Image</SelectItem>
+                          <SelectItem value="bar">Progress Bar</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground uppercase">Width</Label>
+                        <Input type="number" className="h-7 text-xs bg-background/50" value={getProp("guiWidth", 100)} onChange={(e) => handlePropertyChange({ guiWidth: parseFloat(e.target.value) || 100 })} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground uppercase">Height</Label>
+                        <Input type="number" className="h-7 text-xs bg-background/50" value={getProp("guiHeight", 50)} onChange={(e) => handlePropertyChange({ guiHeight: parseFloat(e.target.value) || 50 })} />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Anchor Point</Label>
+                      <Select value={getProp("guiAnchor", "center")} onValueChange={(v) => handlePropertyChange({ guiAnchor: v })}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="topLeft">Top Left</SelectItem>
+                          <SelectItem value="topCenter">Top Center</SelectItem>
+                          <SelectItem value="topRight">Top Right</SelectItem>
+                          <SelectItem value="centerLeft">Center Left</SelectItem>
+                          <SelectItem value="center">Center</SelectItem>
+                          <SelectItem value="centerRight">Center Right</SelectItem>
+                          <SelectItem value="bottomLeft">Bottom Left</SelectItem>
+                          <SelectItem value="bottomCenter">Bottom Center</SelectItem>
+                          <SelectItem value="bottomRight">Bottom Right</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
 
             {/* --- PHYSICS SECTION --- */}
             <div className="space-y-4">
