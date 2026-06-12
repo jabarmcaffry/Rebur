@@ -83,9 +83,11 @@ export interface RenderGuiElement {
   parentId?: string | null;
   zIndex?: number;
   opacity?: number;
-  cornerRadius?: number;
+  borderRadius?: number;
   borderWidth?: number;
   borderColor?: string;
+  padding?: number | string;
+  shadow?: boolean;
 }
 
 // ── Debug Visualization ───────────────────────────────────────────────────────

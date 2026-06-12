@@ -2,7 +2,7 @@ import type { RenderGuiElement } from "@shared/render-types";
 
 /**
  * HUD overlay that renders GUI elements from server state.
- * Supports text labels, clickable buttons, progress bars, and images.
+ * Supports text labels, clickable buttons, progress bars, images, and frames.
  */
 export default function GuiOverlay({
   gui,
@@ -27,6 +27,9 @@ export default function GuiOverlay({
           fontFamily: "Inter, system-ui, sans-serif",
           fontWeight: 600,
           lineHeight: 1.2,
+          zIndex: el.zIndex ?? 1,
+          opacity: el.opacity ?? 1,
+          pointerEvents: el.clickable ? "auto" : "none",
         };
 
         // Parse anchor position (e.g., "topLeft", "center", "bottomRight")
@@ -58,22 +61,43 @@ export default function GuiOverlay({
         if (transforms.length) style.transform = transforms.join(" ");
 
         // Render based on element kind
+        if (el.kind === "frame") {
+          return (
+            <div
+              key={el.id}
+              style={{
+                ...style,
+                width: el.width ?? 200,
+                height: el.height ?? 100,
+                background: el.backgroundColor ?? "rgba(0,0,0,0.5)",
+                border: el.borderWidth ? `${el.borderWidth}px solid ${el.borderColor ?? "#ffffff"}` : undefined,
+                borderRadius: el.borderRadius ?? 8,
+                padding: el.padding ?? 8,
+                boxShadow: el.shadow ? "0 4px 12px rgba(0,0,0,0.3)" : undefined,
+                overflow: "hidden",
+              }}
+              data-testid={`gui-frame-${el.id}`}
+            />
+          );
+        }
+
         if (el.kind === "button") {
           return (
             <button
               key={el.id}
               style={{
                 ...style,
-                width: el.width,
-                height: el.height,
+                width: el.width ?? 100,
+                height: el.height ?? 40,
                 background: el.backgroundColor ?? "#3b82f6",
-                padding: "8px 14px",
-                borderRadius: 6,
+                padding: el.padding ?? "8px 14px",
+                borderRadius: el.borderRadius ?? 6,
                 cursor: "pointer",
-                pointerEvents: "auto",
-                border: "1px solid rgba(255,255,255,0.18)",
+                border: el.borderWidth ? `${el.borderWidth}px solid ${el.borderColor ?? "rgba(255,255,255,0.18)"}` : "1px solid rgba(255,255,255,0.18)",
                 whiteSpace: "nowrap",
                 textShadow: "none",
+                boxShadow: el.shadow ? "0 2px 8px rgba(0,0,0,0.2)" : undefined,
+                transition: "all 150ms ease-out",
               }}
               onClick={() => onGuiClick(el.id)}
               data-testid={`gui-button-${el.id}`}
@@ -96,8 +120,9 @@ export default function GuiOverlay({
                 width: el.width ?? 100,
                 height: el.height ?? 12,
                 background: el.backgroundColor ?? "#374151",
-                borderRadius: 6,
+                borderRadius: el.borderRadius ?? 6,
                 overflow: "hidden",
+                border: el.borderWidth ? `${el.borderWidth}px solid ${el.borderColor ?? "transparent"}` : undefined,
               }}
               data-testid={`gui-bar-${el.id}`}
             >
@@ -124,6 +149,8 @@ export default function GuiOverlay({
                 width: el.width ?? 64,
                 height: el.height ?? 64,
                 objectFit: "contain",
+                borderRadius: el.borderRadius ?? 4,
+                border: el.borderWidth ? `${el.borderWidth}px solid ${el.borderColor ?? "transparent"}` : undefined,
               }}
               data-testid={`gui-image-${el.id}`}
             />
@@ -137,10 +164,12 @@ export default function GuiOverlay({
             style={{
               ...style,
               background: el.backgroundColor,
-              padding: el.backgroundColor ? "4px 8px" : 0,
-              borderRadius: 6,
+              padding: el.padding ?? (el.backgroundColor ? "4px 8px" : 0),
+              borderRadius: el.borderRadius ?? 6,
               whiteSpace: "nowrap",
               textShadow: el.backgroundColor ? undefined : "0 1px 2px rgba(0,0,0,0.7)",
+              border: el.borderWidth ? `${el.borderWidth}px solid ${el.borderColor ?? "transparent"}` : undefined,
+              boxShadow: el.shadow ? "0 2px 8px rgba(0,0,0,0.2)" : undefined,
             }}
             data-testid={`gui-text-${el.id}`}
           >
