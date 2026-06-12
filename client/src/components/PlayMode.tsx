@@ -531,23 +531,28 @@ export default function PlayMode({
       const objectsById = new Map<string, RenderObject>();
       interp.objects.forEach(obj => objectsById.set(obj.id, obj));
       
-      // Separate screen-space GUI (no parent or parent is GUI) from world-space GUI (parent is 3D object)
+      // Helper function to recursively find the first non-GUI ancestor
+      const findNonGuiAncestor = (objId: string | undefined): RenderObject | null => {
+        if (!objId) return null;
+        const obj = objectsById.get(objId);
+        if (!obj) return null;
+        if (!obj.type?.startsWith('gui')) return obj;
+        // Recursively check parent
+        return findNonGuiAncestor(obj.parentId);
+      };
+      
+      // Separate screen-space GUI (no 3D ancestor) from world-space GUI (has 3D ancestor)
       const screenSpaceGui: RenderGuiElement[] = [];
       const worldSpaceGui: RenderGuiElement[] = [];
       
       allGui.forEach(gui => {
-        if (!gui.parentId) {
-          // Top-level GUI is screen-space
+        const nonGuiAncestor = findNonGuiAncestor(gui.parentId);
+        if (!nonGuiAncestor) {
+          // No 3D ancestor found, so this is screen-space
           screenSpaceGui.push(gui);
         } else {
-          const parent = objectsById.get(gui.parentId);
-          if (parent && parent.type?.startsWith('gui')) {
-            // Parent is GUI, so this is screen-space
-            screenSpaceGui.push(gui);
-          } else {
-            // Parent is a 3D object, so this is world-space
-            worldSpaceGui.push(gui);
-          }
+          // Has a 3D ancestor, so this is world-space
+          worldSpaceGui.push(gui);
         }
       });
       

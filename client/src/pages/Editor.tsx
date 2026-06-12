@@ -1308,9 +1308,17 @@ export default function Editor() {
                   {objects.map((o) => {
                     const isGUI = o.type?.startsWith("gui");
                     const isSelected = o.id === selectedId;
-                    // Render world-space GUI (GUI with a parent) in 3D
-                    // Skip screen-space GUI (GUI with no parent)
-                    if (isGUI && !o.parentId) return null;
+                    // Helper: find first non-GUI ancestor
+                    const findNonGuiAncestor = (objId: string | null | undefined): typeof objects[0] | null => {
+                      if (!objId) return null;
+                      const parent = objects.find(x => x.id === objId);
+                      if (!parent) return null;
+                      if (!parent.type?.startsWith("gui")) return parent;
+                      return findNonGuiAncestor(parent.parentId);
+                    };
+                    // Render world-space GUI (GUI with a 3D ancestor) in 3D
+                    // Skip screen-space GUI (GUI with no 3D ancestor)
+                    if (isGUI && !findNonGuiAncestor(o.parentId)) return null;
                     return (
                       <group key={o.id} position={[o.positionX, o.positionY, o.positionZ]}>
                         {isGUI ? (
@@ -1354,8 +1362,16 @@ export default function Editor() {
                   {objects.map((o) => {
                     const isGUI = o.type?.startsWith("gui");
                     if (!isGUI) return null;
-                    // Only render screen-space GUI (GUI at root level of Workspace with no parent)
-                    if (o.parentId) return null;
+                    // Helper: find first non-GUI ancestor
+                    const findNonGuiAncestor = (objId: string | null | undefined): typeof objects[0] | null => {
+                      if (!objId) return null;
+                      const parent = objects.find(x => x.id === objId);
+                      if (!parent) return null;
+                      if (!parent.type?.startsWith("gui")) return parent;
+                      return findNonGuiAncestor(parent.parentId);
+                    };
+                    // Only render screen-space GUI (GUI with no 3D ancestor)
+                    if (findNonGuiAncestor(o.parentId)) return null;
                     const isSelected = o.id === selectedId;
                     const width = o.scaleX * 100;
                     const height = o.scaleY * 100;
