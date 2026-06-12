@@ -65,13 +65,13 @@ export interface RenderPlayer {
 
 export interface RenderGuiElement {
   id: string;
-  kind: "text" | "button" | "image" | "bar";
+  kind: "text" | "button" | "image" | "bar" | "frame";
   text?: string;
   x: number;
   y: number;
-  width?: number;
-  height?: number;
-  anchor: string;
+  width: number;
+  height: number;
+  anchor: "topLeft" | "topCenter" | "topRight" | "centerLeft" | "center" | "centerRight" | "bottomLeft" | "bottomCenter" | "bottomRight";
   color: string;
   fontSize: number;
   backgroundColor?: string;
@@ -80,6 +80,12 @@ export interface RenderGuiElement {
   maxValue?: number;
   visible: boolean;
   clickable?: boolean;
+  parentId?: string | null;
+  zIndex?: number;
+  opacity?: number;
+  cornerRadius?: number;
+  borderWidth?: number;
+  borderColor?: string;
 }
 
 // ── Debug Visualization ───────────────────────────────────────────────────────
@@ -118,6 +124,9 @@ export interface ParticleEvent {
   lifetime?: number;
   direction?: Vec3;
   spread?: number;
+  isPersistent?: boolean; // If true, this is a continuous emitter, not a one-shot burst
+  rate?: number;         // Particles per second for persistent emitters
+  objectId?: string;    // If attached to an object
 }
 
 // ── Complete Render State ─────────────────────────────────────────────────────

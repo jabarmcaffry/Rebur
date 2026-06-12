@@ -199,6 +199,9 @@ export class GameRoom {
   loadScripts(scripts: { code: string; name: string; enabled: boolean }[]) {
     const currentPlayers = Array.from(this.players.values()).map((p) => this._makeScriptPlayer(p));
     this.scriptRunner = new ScriptRunner();
+    // Inject raycast helper into runner
+    (this.scriptRunner as any)._doRaycast = (o: any, d: any, dist: number, ignore: any[]) => this._doRaycast(o, d, dist, ignore);
+    
     for (const p of currentPlayers) this.scriptRunner.players.set(p.id, p);
 
     const objs = Array.from(this.scriptObjs.values());
@@ -349,6 +352,74 @@ export class GameRoom {
     if (this.players.size > 0) {
       this.broadcastFn({ type: "worldState", state: this._makeRenderState(null) });
     }
+  }
+
+  private _doRaycast(origin: any, direction: any, distance: number, ignoreList: any[] = []) {
+    const ox = num(origin.x), oy = num(origin.y), oz = num(origin.z);
+    const dx = num(direction.x), dy = num(direction.y), dz = num(direction.z);
+    const mag = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    const nx = dx / mag, ny = dy / mag, nz = dz / mag;
+
+    let closestDist = distance;
+    let hitObj: any = null;
+    let hitPos = { x: ox + nx * distance, y: oy + ny * distance, z: oz + nz * distance };
+    let hitNormal = { x: 0, y: 1, z: 0 };
+
+    const ignoreIds = new Set(ignoreList.map(i => typeof i === "string" ? i : i.id || i.name));
+
+    // Simple AABB raycast against all collidable objects
+    for (const obj of this.allObjs.values()) {
+      if (!obj.canCollide || ignoreIds.has(obj.id) || ignoreIds.has(obj.name)) continue;
+
+      const sx = obj.sx / 2, sy = obj.sy / 2, sz = obj.sz / 2;
+      const minX = obj.x - sx, maxX = obj.x + sx;
+      const minY = obj.y - sy, maxY = obj.y + sy;
+      const minZ = obj.z - sz, maxZ = obj.z + sz;
+
+      // Slab method for AABB ray intersection
+      let tmin = -Infinity, tmax = Infinity;
+
+      if (nx !== 0) {
+        let t1 = (minX - ox) / nx, t2 = (maxX - ox) / nx;
+        tmin = Math.max(tmin, Math.min(t1, t2));
+        tmax = Math.min(tmax, Math.max(t1, t2));
+      } else if (ox < minX || ox > maxX) continue;
+
+      if (ny !== 0) {
+        let t1 = (minY - oy) / ny, t2 = (maxY - oy) / ny;
+        tmin = Math.max(tmin, Math.min(t1, t2));
+        tmax = Math.min(tmax, Math.max(t1, t2));
+      } else if (oy < minY || oy > maxY) continue;
+
+      if (nz !== 0) {
+        let t1 = (minZ - oz) / nz, t2 = (maxZ - oz) / nz;
+        tmin = Math.max(tmin, Math.min(t1, t2));
+        tmax = Math.min(tmax, Math.max(t1, t2));
+      } else if (oz < minZ || oz > maxZ) continue;
+
+      if (tmax >= tmin && tmin > 0 && tmin < closestDist) {
+        closestDist = tmin;
+        hitObj = obj;
+        hitPos = { x: ox + nx * tmin, y: oy + ny * tmin, z: oz + nz * tmin };
+        // Approximate normal based on which side was hit
+        const cx = Math.abs(hitPos.x - obj.x) / sx;
+        const cy = Math.abs(hitPos.y - obj.y) / sy;
+        const cz = Math.abs(hitPos.z - obj.z) / sz;
+        if (cx > cy && cx > cz) hitNormal = { x: hitPos.x > obj.x ? 1 : -1, y: 0, z: 0 };
+        else if (cy > cx && cy > cz) hitNormal = { x: 0, y: hitPos.y > obj.y ? 1 : -1, z: 0 };
+        else hitNormal = { x: 0, y: 0, z: hitPos.z > obj.z ? 1 : -1 };
+      }
+    }
+
+    if (!hitObj) return null;
+
+    // Convert hitObj to proxy-like structure for script
+    return {
+      entity: { id: hitObj.id, name: hitObj.name },
+      position: hitPos,
+      normal: hitNormal,
+      distance: closestDist
+    };
   }
 
   private _simulatePlayers(dt: number) {

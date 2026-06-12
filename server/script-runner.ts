@@ -239,6 +239,12 @@ export class ScriptRunner {
     Color3.fromHex = (hex: string) => hex;
     Color3.lerp = (a: string, b: string, t: number) => a; // Stub
 
+    const Ray = (origin: any, direction: any) => ({
+      origin: Vector3(origin.x, origin.y, origin.z),
+      direction: Vector3(direction.x, direction.y, direction.z).normalize(),
+      at(t: number) { return this.origin.add(this.direction.scale(t)); }
+    });
+
     // ── Proxies ──────────────────────────────────────────────────────────────
 
     const makeEntityProxy = (obj: ScriptObjState): any => {
@@ -356,6 +362,15 @@ export class ScriptRunner {
           arr.push(fn);
           runner.objHandlers.set(key, arr);
           return () => runner.objHandlers.set(key, (runner.objHandlers.get(key)??[]).filter(h=>h!==fn));
+        },
+        emitParticles(effectType: string, options: any = {}) {
+          runner.particleEvents.push({
+            id: Math.random().toString(36).substr(2, 9),
+            position: ep.position,
+            effectType: effectType as any,
+            ...options,
+            objectId: obj.id
+          });
         }
       };
       return ep;
@@ -511,7 +526,12 @@ export class ScriptRunner {
           if (!src) return null;
           return Rebur.Workspace.create(src.type as any, { ...src, ...o, id: `id_${Date.now()}` });
         },
-        raycast: (o: any, d: any, opts?: any) => null
+        raycast: (o: any, d: any, distance = 100, ignoreList: any[] = []) => {
+          if ((runner as any)._doRaycast) {
+            return (runner as any)._doRaycast(o, d, distance, ignoreList);
+          }
+          return null;
+        }
       },
       Players: {
         all: () => Array.from(runner.players.values()).map(p => makePlayerProxy(p)),
@@ -549,11 +569,40 @@ export class ScriptRunner {
         keys: () => Array.from(runner.dataStore.keys())
       },
       Gui: {
-        text: (id: string, text: string, opts?: any) => runner.guiElements.set(id, { id, kind:"text", text, ...opts, visible:true }),
-        button: (id: string, text: string, opts?: any, onClick?: EventHandler) => { runner.guiElements.set(id, { id, kind:"button", text, ...opts, visible:true, clickable:true }); if (onClick) runner.guiClickHandlers.set(id, onClick); },
-        bar: (id: string, value: number, maxValue: number, opts?: any) => runner.guiElements.set(id, { id, kind:"bar", value, maxValue, ...opts, visible:true }),
-        image: (id: string, url: string, opts?: any) => runner.guiElements.set(id, { id, kind:"image", imageUrl:url, ...opts, visible:true }),
-        clear: (id?: string) => { if (id) { runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); } else { runner.guiElements.clear(); runner.guiClickHandlers.clear(); } }
+        text: (id: string, text: string, opts?: any) => runner.guiElements.set(id, { id, kind:"text", text, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true }),
+        button: (id: string, text: string, opts?: any, onClick?: EventHandler) => { runner.guiElements.set(id, { id, kind:"button", text, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true, clickable:true }); if (onClick) runner.guiClickHandlers.set(id, onClick); },
+        bar: (id: string, value: number, maxValue: number, opts?: any) => runner.guiElements.set(id, { id, kind:"bar", value, maxValue, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true }),
+        image: (id: string, url: string, opts?: any) => runner.guiElements.set(id, { id, kind:"image", imageUrl:url, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true }),
+        frame: (id: string, opts?: any) => runner.guiElements.set(id, { id, kind:"frame", width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true }),
+        clear: (id?: string) => { if (id) { runner.guiElements.delete(id); runner.guiClickHandlers.delete(id); } else { runner.guiElements.clear(); runner.guiClickHandlers.clear(); } },
+        forPlayer: (playerId: string) => ({
+          text: (id: string, text: string, opts?: any) => {
+            if (!runner.perPlayerGui.has(playerId)) runner.perPlayerGui.set(playerId, new Map());
+            runner.perPlayerGui.get(playerId)!.set(id, { id, kind:"text", text, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true });
+          },
+          button: (id: string, text: string, opts?: any, onClick?: EventHandler) => {
+            if (!runner.perPlayerGui.has(playerId)) runner.perPlayerGui.set(playerId, new Map());
+            runner.perPlayerGui.get(playerId)!.set(id, { id, kind:"button", text, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true, clickable:true });
+            if (onClick) runner.guiClickHandlers.set(`${playerId}::${id}`, onClick);
+          },
+          bar: (id: string, value: number, maxValue: number, opts?: any) => {
+            if (!runner.perPlayerGui.has(playerId)) runner.perPlayerGui.set(playerId, new Map());
+            runner.perPlayerGui.get(playerId)!.set(id, { id, kind:"bar", value, maxValue, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true });
+          },
+          image: (id: string, url: string, opts?: any) => {
+            if (!runner.perPlayerGui.has(playerId)) runner.perPlayerGui.set(playerId, new Map());
+            runner.perPlayerGui.get(playerId)!.set(id, { id, kind:"image", imageUrl:url, width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true });
+          },
+          frame: (id: string, opts?: any) => {
+            if (!runner.perPlayerGui.has(playerId)) runner.perPlayerGui.set(playerId, new Map());
+            runner.perPlayerGui.get(playerId)!.set(id, { id, kind:"frame", width: 100, height: 50, anchor: "center", x: 0, y: 0, color: "#ffffff", fontSize: 14, ...opts, visible:true });
+          },
+          clear: (id?: string) => {
+            const m = runner.perPlayerGui.get(playerId);
+            if (!m) return;
+            if (id) m.delete(id); else m.clear();
+          }
+        })
       },
       Sound: {
         play: (id: string, opts?: any) => runner.soundQueue.push({ soundId: id, options: opts }),
