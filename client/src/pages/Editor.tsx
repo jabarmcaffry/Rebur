@@ -161,7 +161,7 @@ const CONTAINERS: ContainerDef[] = [
         name: "Assets/Shared",
         displayName: "Shared",
         icon: Globe,
-        hint: "Replicated to all clients (like ReplicatedStorage). Use + to add Folders, Models, and Audio.",
+        hint: "Replicated to all clients (like ReplicatedStorage). Use + to add Folders and Models.",
         allowedScripts: ["client"],
         canHoldObjects: false,
         isAssetContainer: true,
@@ -170,7 +170,7 @@ const CONTAINERS: ContainerDef[] = [
         name: "Assets/Server",
         displayName: "Server",
         icon: Lock,
-        hint: "Server-only assets, never sent to clients. Use + to add Folders, Models, and Audio.",
+        hint: "Server-only assets, never sent to clients. Use + to add Folders and Models.",
         allowedScripts: ["server"],
         canHoldObjects: false,
         isAssetContainer: true,
@@ -524,6 +524,22 @@ export default function Editor() {
     } as Partial<GameObject>);
   };
 
+  const createAudioObject = (containerName: string, parentId?: string | null) => {
+    const count = objects.filter((o) => o.type === "audio").length + 1;
+    createObjectMutation.mutate({
+      gameId,
+      name: `Sound${count}`,
+      type: "audio",
+      primitiveType: null,
+      container: containerName,
+      parentId: parentId ?? null,
+      positionX: 0, positionY: 0, positionZ: 0,
+      scaleX: 1, scaleY: 1, scaleZ: 1,
+      color: "#888888",
+      properties: { audioUrl: "", volume: 1, loop: false, autoPlay: false, maxDistance: 50 },
+    } as Partial<GameObject>);
+  };
+
   const addPrimitiveTo = (
     containerName: string,
     primitiveType: "cube" | "sphere" | "cylinder" | "plane" | "light",
@@ -665,6 +681,12 @@ export default function Editor() {
               <Item icon={FileCode} label="Text Label" onClick={() => createGroupObject(containerDef.name, "guiText", isTopLevelContainer ? null : parentId)} />
               <Item icon={Square} label="Button" onClick={() => createGroupObject(containerDef.name, "guiButton", isTopLevelContainer ? null : parentId)} />
               <Item icon={Circle} label="Image" onClick={() => createGroupObject(containerDef.name, "guiImage", isTopLevelContainer ? null : parentId)} />
+            </>
+          )}
+          {containerDef.name === "Workspace" && (
+            <>
+              <div className="px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">Audio</div>
+              <Item icon={Music} label="Sound" onClick={() => createAudioObject(containerDef.name, isTopLevelContainer ? null : parentId)} />
             </>
           )}
           {canHoldGroups && (
@@ -824,7 +846,17 @@ export default function Editor() {
     </div>
   );
 
-  const PropertiesPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
+  const PropertiesPanel = ({ isMobile = false }: { isMobile?: boolean }) => {
+    const isAudio     = selected?.type === "audio";
+    const isGUI       = !!(selected?.type?.startsWith("gui"));
+    const isLight     = selected?.type === "light";
+    const isParticle  = selected?.type === "particleEmitter";
+    const isPart      = selected?.type === "primitive";
+    const isOrganizer = selected?.type === "folder" || selected?.type === "model";
+    const showAppearance = !isAudio && !isOrganizer;
+    const showPhysics    = isPart;
+
+    return (
     <div className={`flex flex-col h-full bg-card/50 border-l border-border w-72 shrink-0 ${!isMobile ? "max-md:hidden" : ""}`}>
       <div className="p-2 border-b border-border flex items-center justify-between">
         <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -888,47 +920,96 @@ export default function Editor() {
             <Separator className="opacity-50" />
 
             {/* --- APPEARANCE SECTION --- */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-1.5 text-blue-400">
-                <Eye className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-bold uppercase tracking-wider">Appearance</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">Color</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    className="w-7 h-7 rounded-md border border-border cursor-pointer overflow-hidden p-0 bg-transparent"
-                    value={selected.color ?? "#888888"}
-                    onChange={(e) => handleObjectFieldChange("color", e.target.value)}
-                  />
-                  <span className="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded uppercase">{selected.color}</span>
+            {showAppearance && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-blue-400">
+                    <Eye className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Appearance</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">Color</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        className="w-7 h-7 rounded-md border border-border cursor-pointer overflow-hidden p-0 bg-transparent"
+                        value={selected.color ?? "#888888"}
+                        onChange={(e) => handleObjectFieldChange("color", e.target.value)}
+                      />
+                      <span className="text-[10px] font-mono text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded uppercase">{selected.color}</span>
+                    </div>
+                  </div>
+                  {!isLight && (
+                    <>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs text-muted-foreground">Transparency</Label>
+                          <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{(getProp("transparency", 0) * 100).toFixed(0)}%</span>
+                        </div>
+                        <Slider
+                          value={[getProp("transparency", 0)]}
+                          min={0} max={1} step={0.01}
+                          onValueChange={([v]) => handlePropertyChange({ transparency: v })}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-muted-foreground">Visible</Label>
+                        <Switch
+                          checked={getProp("visible", true)}
+                          onCheckedChange={(v) => handlePropertyChange({ visible: v })}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Transparency</Label>
-                  <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{(getProp("transparency", 0) * 100).toFixed(0)}%</span>
-                </div>
-                <Slider
-                  value={[getProp("transparency", 0)]}
-                  min={0} max={1} step={0.01}
-                  onValueChange={([v]) => handlePropertyChange({ transparency: v })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label className="text-xs text-muted-foreground">Visible</Label>
-                <Switch
-                  checked={getProp("visible", true)}
-                  onCheckedChange={(v) => handlePropertyChange({ visible: v })}
-                />
-              </div>
-            </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
 
-            <Separator className="opacity-50" />
+            {/* --- LIGHT SECTION --- */}
+            {isLight && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-yellow-300">
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Light</span>
+                  </div>
+                  <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-muted-foreground">Intensity</Label>
+                        <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{getProp("intensity", 1).toFixed(1)}</span>
+                      </div>
+                      <Slider
+                        value={[getProp("intensity", 1)]}
+                        min={0} max={10} step={0.1}
+                        onValueChange={([v]) => handlePropertyChange({ intensity: v })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Range</Label>
+                      <Input
+                        type="number"
+                        className="h-7 text-xs bg-background/50"
+                        value={getProp("range", 10)}
+                        onChange={(e) => handlePropertyChange({ range: parseFloat(e.target.value) || 10 })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Cast Shadow</Label>
+                      <Switch
+                        checked={getProp("castShadow", false)}
+                        onCheckedChange={(v) => handlePropertyChange({ castShadow: v })}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
 
             {/* --- PARTICLE EMITTER SECTION --- */}
-            {selected.type === "particleEmitter" && (
+            {isParticle && (
               <>
                 <div className="space-y-4">
                   <div className="flex items-center gap-1.5 text-yellow-400">
@@ -968,7 +1049,7 @@ export default function Editor() {
             )}
 
             {/* --- GUI ELEMENT SECTION --- */}
-            {selected.container?.includes("GUI") && (
+            {isGUI && (
               <>
                 <div className="space-y-4">
                   <div className="flex items-center gap-1.5 text-cyan-400">
@@ -1026,62 +1107,131 @@ export default function Editor() {
               </>
             )}
 
-            {/* --- PHYSICS SECTION --- */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-1.5 text-green-400">
-                <Zap className="w-3.5 h-3.5" />
-                <span className="text-[11px] font-bold uppercase tracking-wider">Physics</span>
-              </div>
-              <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Anchored</Label>
-                  <Switch
-                    checked={getProp("anchored", true)}
-                    onCheckedChange={(v) => handlePropertyChange({ anchored: v })}
-                  />
+            {/* --- AUDIO SECTION --- */}
+            {isAudio && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-purple-400">
+                    <Music className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Sound</span>
+                  </div>
+                  <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Mode</Label>
+                      <div className={`text-[10px] px-2 py-1.5 rounded font-semibold text-center ${selected.parentId ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-green-500/20 text-green-400 border border-green-500/30"}`}>
+                        {selected.parentId ? "📍 Spatial — plays at parent's position" : "🌐 Global — plays everywhere"}
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Audio URL</Label>
+                      <Input
+                        className="h-7 text-xs bg-background/50"
+                        placeholder="https://..."
+                        value={getProp("audioUrl", "")}
+                        onChange={(e) => handlePropertyChange({ audioUrl: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs text-muted-foreground">Volume</Label>
+                        <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{Math.round(getProp("volume", 1) * 100)}%</span>
+                      </div>
+                      <Slider
+                        value={[getProp("volume", 1)]}
+                        min={0} max={1} step={0.01}
+                        onValueChange={([v]) => handlePropertyChange({ volume: v })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Loop</Label>
+                      <Switch
+                        checked={getProp("loop", false)}
+                        onCheckedChange={(v) => handlePropertyChange({ loop: v })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Auto Play</Label>
+                      <Switch
+                        checked={getProp("autoPlay", false)}
+                        onCheckedChange={(v) => handlePropertyChange({ autoPlay: v })}
+                      />
+                    </div>
+                    {selected.parentId && (
+                      <div className="space-y-1">
+                        <Label className="text-[10px] text-muted-foreground uppercase">Max Distance</Label>
+                        <Input
+                          type="number"
+                          className="h-7 text-xs bg-background/50"
+                          value={getProp("maxDistance", 50)}
+                          onChange={(e) => handlePropertyChange({ maxDistance: parseFloat(e.target.value) || 50 })}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Can Collide</Label>
-                  <Switch
-                    checked={getProp("canCollide", true)}
-                    onCheckedChange={(v) => handlePropertyChange({ canCollide: v })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground uppercase">Mass</Label>
-                  <Input
-                    type="number"
-                    className="h-7 text-xs bg-background/50"
-                    value={getProp("mass", 1)}
-                    onChange={(e) => handlePropertyChange({ mass: parseFloat(e.target.value) || 1 })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[10px] text-muted-foreground uppercase">Friction</Label>
-                  <Input
-                    type="number"
-                    className="h-7 text-xs bg-background/50"
-                    value={getProp("friction", 0.5)}
-                    onChange={(e) => handlePropertyChange({ friction: parseFloat(e.target.value) || 0.5 })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Elasticity</Label>
-                  <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{(getProp("restitution", 0) * 100).toFixed(0)}%</span>
-                </div>
-                <Slider
-                  value={[getProp("restitution", 0)]}
-                  min={0} max={1} step={0.01}
-                  onValueChange={([v]) => handlePropertyChange({ restitution: v })}
-                />
-              </div>
-            </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
 
-            <Separator className="opacity-50" />
+            {/* --- PHYSICS SECTION --- */}
+            {showPhysics && (
+              <>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-1.5 text-green-400">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider">Physics</span>
+                  </div>
+                  <div className="space-y-3 bg-muted/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Anchored</Label>
+                      <Switch
+                        checked={getProp("anchored", true)}
+                        onCheckedChange={(v) => handlePropertyChange({ anchored: v })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Can Collide</Label>
+                      <Switch
+                        checked={getProp("canCollide", true)}
+                        onCheckedChange={(v) => handlePropertyChange({ canCollide: v })}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Mass</Label>
+                      <Input
+                        type="number"
+                        className="h-7 text-xs bg-background/50"
+                        value={getProp("mass", 1)}
+                        onChange={(e) => handlePropertyChange({ mass: parseFloat(e.target.value) || 1 })}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-muted-foreground uppercase">Friction</Label>
+                      <Input
+                        type="number"
+                        className="h-7 text-xs bg-background/50"
+                        value={getProp("friction", 0.5)}
+                        onChange={(e) => handlePropertyChange({ friction: parseFloat(e.target.value) || 0.5 })}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Elasticity</Label>
+                      <span className="text-[10px] font-mono tabular-nums bg-muted/50 px-1.5 py-0.5 rounded">{(getProp("restitution", 0) * 100).toFixed(0)}%</span>
+                    </div>
+                    <Slider
+                      value={[getProp("restitution", 0)]}
+                      min={0} max={1} step={0.01}
+                      onValueChange={([v]) => handlePropertyChange({ restitution: v })}
+                    />
+                  </div>
+                </div>
+                <Separator className="opacity-50" />
+              </>
+            )}
 
             {/* --- DATA SECTION --- */}
             <div className="space-y-4">
@@ -1181,7 +1331,8 @@ export default function Editor() {
         )}
       </ScrollArea>
     </div>
-  );
+    );
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden font-sans">

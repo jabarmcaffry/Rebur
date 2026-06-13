@@ -459,15 +459,34 @@ export default function PlayMode({
       // Look up audio object by name in the current render objects
       const objs = renderClient.getInterpolatedState().objects;
       const audioObj = objs.find((o) => o.type === "audio" && o.name === soundId);
-      const url = audioObj?.audioUrl;
+      const url = audioObj?.audioUrl || (options as any)?.audioUrl;
       if (!url) {
         console.warn(`[Sound] No audio object named "${soundId}" found`);
         return;
       }
       try {
+        const props = (audioObj?.properties ?? {}) as Record<string, any>;
+        let vol = Math.max(0, Math.min(1, options?.volume ?? props.volume ?? 1));
+
+        // Spatial audio: if the sound object is parented to an entity, attenuate
+        // based on distance between the parent and the player's current position.
+        if (audioObj?.parentId && objs) {
+          const parent = objs.find((o) => o.id === audioObj.parentId);
+          const player = objs.find((o) => (o as any).isPlayer);
+          if (parent && player) {
+            const dx = parent.position.x - player.position.x;
+            const dy = parent.position.y - player.position.y;
+            const dz = parent.position.z - player.position.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const maxDist = props.maxDistance ?? (options as any)?.maxDistance ?? 50;
+            const attenuation = Math.max(0, 1 - dist / maxDist);
+            vol = vol * attenuation;
+          }
+        }
+
         const audio = new Audio(url);
-        audio.volume = Math.max(0, Math.min(1, options?.volume ?? 1));
-        audio.loop = options?.loop ?? false;
+        audio.volume = vol;
+        audio.loop = options?.loop ?? props.loop ?? false;
         audio.play().catch((err) => console.warn("[Sound] Play blocked:", err));
       } catch (err) {
         console.warn("[Sound] Error playing audio:", err);

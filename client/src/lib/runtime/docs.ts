@@ -80,8 +80,10 @@ Rebur ← single global
 ├── Workspace ← live 3D world: rendered + simulated entities
 │   ├── 3D Objects (Cube, Sphere, Light, etc.)
 │   ├── GUI Elements (screen-space HUD when at root level)
+│   ├── Audio (Sound objects — global when at root, spatial when under a part)
 │   └── Nested Objects
-│       └── GUI Elements (world-space UI attached to parent)
+│       ├── GUI Elements (world-space UI attached to parent)
+│       └── Audio (spatial — plays at parent's world position)
 ├── Lighting ← environment settings + light entities
 ├── Assets
 │   ├── Shared ← assets replicated to all clients
@@ -89,7 +91,7 @@ Rebur ← single global
 ├── Players ← active player entities
 ├── State ← shared session key-value store (resets each session)
 ├── DataStore ← persistent cross-session storage
-├── Sound ← audio playback
+├── Sound ← audio playback API (Rebur.Sound.*)
 ├── Tween ← property animation
 ├── Camera ← camera control
 ├── Input ← global keyboard/mouse events (all players)
@@ -864,21 +866,29 @@ entity.emitParticles({ effectType: "smoke", count: 10 });
 \`\`\`
 
 ## Rebur.Sound
-\`\`\`js
-// Global sound (all players)
-Rebur.Sound.play("collect", { volume: 0.8, loop: false, pitch: 1.0 });
 
-// Positional 3D sound at a world position
-Rebur.Sound.playAt("explosion", { x: 10, y: 5, z: 0 }, { maxDistance: 30, rolloff: 1 });
+Sound objects live in the **Workspace hierarchy** — add them via the "+" button in the editor.
+
+- **Global audio**: Sound placed directly under Workspace root → plays everywhere at full volume (background music, UI sounds).
+- **Spatial audio**: Sound placed under a 3D part → volume attenuates with distance from that part's position. Set **Max Distance** in the properties panel.
+
+Configure each Sound's **Audio URL**, **Volume**, **Loop**, and **Auto Play** from its Properties panel.
+
+\`\`\`js
+// Trigger a sound by its name (respects Global vs Spatial automatically)
+Rebur.Sound.play("collect", { volume: 0.8, loop: false });
+
+// Positional 3D sound at an explicit world position (overrides hierarchy position)
+Rebur.Sound.playAt("explosion", { x: 10, y: 5, z: 0 }, { maxDistance: 30 });
 
 // Sound for a specific player only
 Rebur.Sound.playForPlayer(player, "notification", { volume: 1.0 });
 
-// Stop
+// Stop a looping sound
 Rebur.Sound.stop("collect");
 
-// Fade volume
-Rebur.Sound.fade("music", 0, 2); // fade to volume 0 over 2s
+// Fade volume over time
+Rebur.Sound.fade("music", 0, 2); // fade to 0 over 2s
 \`\`\`
 
 ## Rebur.Tween
