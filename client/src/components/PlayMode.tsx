@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   X, Terminal, Heart, Settings, MessageSquare, Send,
-  RotateCcw, LogOut, Gauge, Lock, Play, Users, BarChart3,
+  RotateCcw, LogOut, Gauge, Lock, Play, Users, BarChart3, Trophy,
 } from "lucide-react";
 import { getAvatarConfig } from "@/lib/avatarConfig";
 import type { GameObject, Script } from "@shared/schema";
@@ -1082,48 +1082,89 @@ export default function PlayMode({
       )}
 
       {/* ── LEADERBOARD (right side) — anchored just below the top bar ── */}
-      {showLeaderboard && (
-        <div className="absolute right-2 z-50 w-56" style={{ top: "48px" }}>
-          <div className="rounded-xl overflow-hidden border border-white/10 bg-neutral-900/95 backdrop-blur shadow-2xl">
-            <div className="px-3 py-2 border-b border-white/10 bg-neutral-800/70 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="w-3.5 h-3.5 text-neutral-200" />
-                <span className="text-white/80 text-xs font-semibold uppercase tracking-wide">Players</span>
-              </div>
-              <span className="text-white/40 text-xs">{totalPlayers}</span>
-            </div>
-            <div className="p-1.5 space-y-0.5 max-h-60 overflow-y-auto">
-              {/* Local player — always at top */}
-              <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-white/10 border border-white/15">
-                <div className="w-[22px] h-[22px] rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: avatarCfg.shirtColor }}>
-                  {username.charAt(0).toUpperCase()}
+      {showLeaderboard && (() => {
+        const allPlayers = [
+          {
+            key: "local",
+            name: username,
+            health: player.health,
+            maxHealth: player.maxHealth,
+            color: avatarCfg.shirtColor,
+            isLocal: true,
+          },
+          ...renderPlayers.map((rp) => ({
+            key: rp.id,
+            name: rp.name,
+            health: rp.health ?? 100,
+            maxHealth: rp.maxHealth ?? 100,
+            color: rp.colors?.shirt ?? "#3b82f6",
+            isLocal: false,
+          })),
+        ];
+        const rankEmoji = (i: number) => i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`;
+        return (
+          <div className="absolute right-2 z-50 w-60" style={{ top: "48px" }}>
+            <div className="rounded-xl overflow-hidden border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl">
+              {/* Header */}
+              <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trophy className="w-3.5 h-3.5 text-yellow-400" />
+                  <span className="text-white text-xs font-bold uppercase tracking-wider">Players</span>
                 </div>
-                <span className="text-white text-xs font-semibold flex-1 truncate">{username}</span>
-                <span className="text-white/40 text-[10px] tabular-nums">{Math.round(player.health)}</span>
-                <Heart className="w-2.5 h-2.5 text-red-400 shrink-0" />
+                <span className="text-white/40 text-[11px] tabular-nums">{totalPlayers} online</span>
               </div>
-              {/* Remote players */}
-              {renderPlayers.map((rp) => (
-                <div key={rp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
-                  <div className="w-[22px] h-[22px] rounded-md shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: rp.colors?.shirt ?? "#3b82f6" }}>
-                    {rp.name.charAt(0).toUpperCase()}
+
+              {/* Player rows */}
+              <div className="p-1.5 space-y-0.5 max-h-72 overflow-y-auto">
+                {allPlayers.map((p, i) => {
+                  const hpPct = Math.max(0, Math.min(100, (p.health / (p.maxHealth || 100)) * 100));
+                  const hpColor = hpPct > 60 ? "#22c55e" : hpPct > 25 ? "#eab308" : "#ef4444";
+                  return (
+                    <div
+                      key={p.key}
+                      className={`rounded-lg px-2 pt-1.5 pb-1 ${p.isLocal ? "bg-white/10 border border-white/15" : "hover:bg-white/5"}`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] w-5 text-center shrink-0 leading-none">
+                          {rankEmoji(i)}
+                        </span>
+                        <div
+                          className="w-5 h-5 rounded shrink-0 flex items-center justify-center text-[9px] font-black text-white"
+                          style={{ backgroundColor: p.color }}
+                        >
+                          {p.name.charAt(0).toUpperCase()}
+                        </div>
+                        <span className={`text-[11px] flex-1 truncate font-medium leading-none ${p.isLocal ? "text-white" : "text-white/80"}`}>
+                          {p.name}
+                          {p.isLocal && <span className="text-white/35 font-normal ml-1 text-[10px]">you</span>}
+                        </span>
+                        <span className="text-[10px] text-white/45 tabular-nums shrink-0">{Math.round(p.health)}</span>
+                      </div>
+                      {/* HP bar */}
+                      <div className="mt-1 ml-[26px] h-[3px] rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${hpPct}%`, backgroundColor: hpColor }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {allPlayers.length <= 1 && (
+                  <div className="py-2 text-center text-white/25 text-[10px]">
+                    {mpConnected ? "Only you here" : "Connecting…"}
                   </div>
-                  <span className="text-white/80 text-xs flex-1 truncate">{rp.name}</span>
-                </div>
-              ))}
-              {/* Offline placeholder when no remote players */}
-              {renderPlayers.length === 0 && (
-                <div className="px-2 py-2 text-center text-white/25 text-[10px]">
-                  {mpConnected ? "Only you here" : "Connecting..."}
-                </div>
-              )}
-            </div>
-            <div className="px-3 py-1.5 border-t border-white/5 text-[10px] text-white/30 text-center">
-              Tab to hide / to chat
+                )}
+              </div>
+
+              <div className="px-3 py-1.5 border-t border-white/5 text-[10px] text-white/25 text-center">
+                Tab to toggle · / to chat
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── CHAT PANEL (anchored right under the Chat button) ── */}
       {chatOpen && (

@@ -46,18 +46,18 @@ All scripts run **server-side** inside a secure VM sandbox. The only global is *
 13. [Entity Lifetime & Validity](#entity-lifetime--validity)
 14. [Rebur.Players — Player Entities](#reburplayers)
 15. [Player Entity](#player-entity)
-16. [Player GUI (per-player)](#player-gui)
-17. [Player Data](#player-data)
-18. [Player Input (per-player)](#player-input)
-19. [Rebur.State — Shared Session State](#reburstate)
-20. [Rebur.DataStore — Persistent Storage](#reburdatastore)
-21. [Rebur.Gui — Global HUD](#reburgui)
-22. [Rebur.Sound — Audio](#rebursound)
-23. [Rebur.Tween — Property Animation](#reburtween)
-24. [Rebur.Camera — Camera Control](#reburcamera)
-25. [Rebur.Input — Global Keyboard & Mouse](#reburinput)
-26. [Rebur.Physics — Global Physics & Gravity Fields](#reburphysics)
-27. [Rebur.RunService — Game Loop](#reburrunservice)
+16. [GUI System — Editor & Script](#gui-system)
+17. [Player GUI (per-player)](#player-gui)
+18. [Player Data](#player-data)
+19. [Player Input (per-player)](#player-input)
+20. [Rebur.State — Shared Session State](#reburstate)
+21. [Rebur.DataStore — Persistent Storage](#reburdatastore)
+22. [Rebur.Gui — Script-Driven HUD](#reburgui)
+23. [Sound System — Editor & Script](#sound-system)
+24. [Rebur.Tween — Property Animation](#reburtween)
+25. [Rebur.Camera — Camera Control](#reburcamera)
+26. [Rebur.Input — Global Keyboard & Mouse](#reburinput)
+27. [Rebur.Physics — Global Physics & Gravity Fields](#reburphysics)
 28. [Rebur.Network — Multiplayer Messaging](#reburnetwork)
 29. [Rebur.Tags — Tag System](#reburtags)
 30. [Rebur.Math — Game Math Utilities](#reburmath)
@@ -65,93 +65,119 @@ All scripts run **server-side** inside a secure VM sandbox. The only global is *
 32. [Rebur.Labels — World-Space 3D Text](#reburlabels)
 33. [Rebur.Scene — Scene Transitions & Restart](#reburscene)
 34. [Rebur.Debug — Runtime Visualisation](#reburdebug)
-35. [Rebur.Gui — Visual GUI Designer](#reburgui-designer)
-36. [Rebur.Workspace.raycast — Raycasting](#raycasting)
-37. [Particles — Particle Emitters & Events](#particles)
-38. [Timers](#timers)
-39. [Logging](#logging)
-40. [Vector3 & Color3](#vector3--color3)
-41. [Quick Start Examples](#quick-start-examples)
+35. [Rebur.Workspace.raycast — Raycasting](#raycasting)
+36. [Particles — Particle Emitters & Events](#particles)
+37. [Timers](#timers)
+38. [Logging](#logging)
+39. [Vector3 & Color3](#vector3--color3)
+40. [Quick Start Examples](#quick-start-examples)
 
 ---
 
 ## Architecture
+
+The editor hierarchy is the single source of truth for your game world. Every container you see in the explorer maps directly to a Rebur API.
+
+\`\`\`
 Rebur ← single global
-├── Workspace ← live 3D world: rendered + simulated entities
-│   ├── 3D Objects (Cube, Sphere, Light, etc.)
-│   ├── GUI Elements (screen-space HUD when at root level)
-│   ├── Audio (Sound objects — global when at root, spatial when under a part)
-│   └── Nested Objects
-│       ├── GUI Elements (world-space UI attached to parent)
-│       └── Audio (spatial — plays at parent's world position)
-├── Lighting ← environment settings + light entities
-├── Assets
-│   ├── Shared ← assets replicated to all clients
-│   └── Server ← server-only assets, never sent to clients
+├── Workspace ← live 3D world (everything rendered + simulated)
+│   ├── 3D Objects — Cube, Sphere, Cylinder, Plane, Light
+│   ├── GUI Objects — guiText, guiButton, guiFrame, guiImage
+│   │   ├── At Workspace root → screen-space 2D overlay
+│   │   └── Child of a 3D object → world-space (attached in 3D)
+│   ├── Sound Objects
+│   │   ├── At Workspace root → global audio (full volume everywhere)
+│   │   └── Child of a 3D object → spatial (attenuates with distance)
+│   ├── Folders → organise large scenes
+│   └── Scripts (Server + Client)
+├── Lighting ← global environment settings + light entities
 ├── Players ← active player entities
-├── State ← shared session key-value store (resets each session)
-├── DataStore ← persistent cross-session storage
-├── Sound ← audio playback API (Rebur.Sound.*)
-├── Tween ← property animation
-├── Camera ← camera control
-├── Input ← global keyboard/mouse events (all players)
-├── Physics ← global physics settings & gravity fields
-├── RunService ← game loop
-├── Network ← server ↔ clients messaging
-├── Tags ← entity tagging
-├── Math ← helper math functions
-├── Timer ← named countdowns
-├── Labels ← world-space 3D text labels
-├── Scene ← scene transitions / restart
-└── Debug ← runtime debug drawing
+│   ├── StarterInventory ← items given to each player on join
+│   └── StarterCharacter ← character template + scripts (Server + Client)
+├── Assets ← reusable templates & shared files
+│   ├── Shared ← replicated to all clients (ClientScript allowed)
+│   └── Server ← server-only, never sent to clients (ServerScript only)
+├── ServerScripts ← global server scripts: game manager, round system, etc.
+├── Teams ← team definitions — Rebur.Teams.*
+├── Chat ← chat config — Rebur.Chat.*
+└── Network ← event definitions — Rebur.Network.*
+\`\`\`
 
-player ← a PlayerEntity (also an Entity)
-├── player.gui ← per-player private HUD
-├── player.data ← per-player persistent data store
-└── player.input ← per-player held keys + edge events
+Script-accessible namespaces (not hierarchy containers — these are API-only):
 
-**GUI System (Unified):**
-- **Screen-space GUI:** GUI elements added directly to Workspace (no parent) render as 2D overlays on the screen.
-- **World-space GUI:** GUI elements added as children of 3D objects render as planes in the 3D world, attached to their parent.
-- **Nested GUI:** GUI elements can be nested inside other GUI elements, inheriting the parent's space (screen or world).
+\`\`\`
+Rebur.State      ← shared session key-value store (resets each session)
+Rebur.DataStore  ← persistent cross-session storage
+Rebur.Gui        ← script-driven HUD (complements editor-placed GUI objects)
+Rebur.Sound      ← audio playback by object name
+Rebur.Tween      ← property animation
+Rebur.Camera     ← camera control
+Rebur.Input      ← global keyboard/mouse events (all players)
+Rebur.Physics    ← global physics settings & gravity fields
+Rebur.Network    ← server ↔ clients messaging
+Rebur.Tags       ← entity tagging
+Rebur.Math       ← game math helpers
+Rebur.Timer      ← named countdowns
+Rebur.Labels     ← world-space billboard text
+Rebur.Scene      ← transitions & restart
+Rebur.Debug      ← runtime visual debug drawing
+\`\`\`
+
+**Per-player APIs (accessed via the player object):**
+
+\`\`\`
+player.gui   ← private HUD visible only to that player
+player.data  ← persistent per-player storage
+player.input ← per-player held keys + edge events
+\`\`\`
 
 **Key rules:**
-- \`Rebur\` is the **primary** engine global — all subsystems hang off it.
+- \`Rebur\` is the only engine global — all subsystems hang off it.
 - A small safe **utility global set** is also exposed: \`after\`, \`every\`, \`wait\`, \`Vector3\`, \`Color3\`, \`log\`, \`warn\`, \`error\`, \`random\`, \`randInt\`, \`pick\`. Everything else requires \`Rebur.\`.
 - All entities (including players) share the same base API — players are entities with \`isPlayer = true\`.
-- Cross-container interaction is **explicit** — there is no hidden magic coupling.
+- The hierarchy drives both what renders and what scripts can reference. Add something in the editor → find it with \`Rebur.Workspace.find("Name")\`.
 
 ---
 
 ## Script Contexts
 
-Rebur scripts execute in a **server-side** context. The server is the authority on all game state, which prevents cheating and keeps the model simple.
+There are two script types. Add either via the **"+"** button on any container that allows it.
 
-### Current: Server Scripts (all scripts today)
+### ServerScript
 
-- Run on the server, have full access to all \`Rebur.*\` APIs.
-- Entity positions, physics, collisions — all authoritative here.
+Runs on the server. Has full write-access to all \`Rebur.*\` APIs. The server is the authority on physics, collisions, player state, and game logic.
 
-### Client-Bound APIs (currently server-proxied)
+**Place in:** Workspace (and any nested objects), Players/StarterCharacter, Assets/Server, ServerScripts.
 
-Some APIs are conceptually per-player/client but are bridged through the server:
+### ClientScript
 
-| API | Concept | Current behaviour |
-|-----|---------|-------------------|
-| \`Rebur.Input\` | Per-player keyboard/mouse | Server receives player input events, forwarded to scripts |
-| \`Rebur.Camera\` | Per-player camera | Server sets camera params, pushed to each client |
-| \`Rebur.Network.send()\` | Server → clients | Server can send to specific players or broadcast |
-| \`player.gui\` | Per-player UI | Server calls it, engine routes to the correct client |
-| \`player.input\` | Per-player held keys | Server tracks per-player key states |
+Runs in each player's browser. Ideal for local visual effects, camera effects, and immediate HUD updates.
 
-> \`Rebur.Input.on("press", (player, key) => {})\` fires on the server when **any** player presses a key. The callback always tells you which player acted.
+**Place in:** Workspace (and any nested objects), Players/StarterCharacter, Assets/Shared.
 
-### ClientScript (Client-Side)
+### Where scripts can go
 
-A \`ClientScript\` runs in each player's browser. It is ideal for local HUD updates, camera effects, and immediate input handling. Place them in **GUI** or **StarterCharacter** containers.
-- Conceptually similar to Server scripts but runs on the client.
-- Use for high-frequency UI updates or local-only visual effects.
-- Accesses the same \`Rebur\` global, but some authoritative APIs (like Physics) are read-only.
+| Container | ServerScript | ClientScript |
+|-----------|:---:|:---:|
+| Workspace (and children) | ✓ | ✓ |
+| Players/StarterCharacter | ✓ | ✓ |
+| Assets/Shared | — | ✓ |
+| Assets/Server | ✓ | — |
+| ServerScripts | ✓ | — |
+
+### Client-Bridged APIs
+
+Some APIs are conceptually per-player but are callable from both script types:
+
+| API | Description |
+|-----|-------------|
+| \`Rebur.Input\` | Key/mouse events — callback always receives \`(player, ...)\` |
+| \`Rebur.Camera\` | Camera params pushed to each client |
+| \`Rebur.Network\` | Server ↔ clients messaging |
+| \`player.gui\` | Per-player HUD — routed to the correct client |
+| \`player.input\` | Per-player held keys + edge events |
+
+> \`Rebur.Input.on("press", (player, key) => {})\` fires when **any** player presses a key. The callback tells you which player acted.
 
 ---
 
@@ -647,6 +673,37 @@ player.body.velocity = { x: 10, y: 0, z: 0 };
 player.body.isKinematic = true;
 \`\`\`
 
+## GUI System — Editor & Script
+
+There is **one unified GUI system**. You can create GUI two ways — both render identically in Play Mode.
+
+### 1. Editor-placed GUI (static design)
+
+Add GUI objects to **Workspace** via the "+" button in the Hierarchy:
+- **guiText** — a text label
+- **guiButton** — a clickable button
+- **guiFrame** — a container / background panel
+- **guiImage** — an image / icon
+
+**Positioning:**
+- **At Workspace root (no parent)** → renders as a **screen-space 2D overlay** on every player's screen.
+- **Child of a 3D object** → renders as a **world-space panel** attached to that object in 3D space.
+
+Configure text, color, size, and corner radius in the **Properties panel**.
+Find and update these objects from scripts using \`Rebur.Workspace.find("MyLabel")\`.
+
+\`\`\`js
+// Update an editor-placed guiText label from a script
+const scoreLabel = Rebur.Workspace.find("ScoreLabel");
+if (scoreLabel) scoreLabel.properties.text = "Score: 42";
+\`\`\`
+
+### 2. Script-driven GUI (dynamic)
+
+Use \`Rebur.Gui\` (all players see it) or \`player.gui\` (per-player) to create and update HUD elements at runtime. See **Rebur.Gui** and **Player GUI** sections below.
+
+---
+
 ## Player GUI (per-player)
 player.gui — private HUD visible only to that player. API identical to Rebur.Gui.
 
@@ -791,35 +848,34 @@ Rebur.DataStore.delete("key");
 Rebur.DataStore.keys();       // string[]
 \`\`\`
 
-## Rebur.Gui
-Global HUD (all players see). API identical to player.gui.
+## Rebur.Gui — Script-Driven HUD
+Global HUD — all players see it. Use \`player.gui\` for per-player. Both APIs are identical.
+
+This is the **script-driven** half of the unified GUI system. For editor-placed static GUI, see **GUI System — Editor & Script** above.
 
 ### GUI Element Types
-- **text**: Display labels.
-- **button**: Clickable elements with callbacks.
-- **bar**: Progress/health bars.
-- **image**: Display textures/icons.
-- **frame**: Containers for other elements with backgrounds and borders.
+- **text** — labels and score displays
+- **button** — clickable elements with callbacks
+- **bar** — progress/health bars
+- **image** — textures and icons
+- **frame** — background panels that contain other elements
 
 ### GUI Methods
 \`\`\`js
 // Create elements
-Rebur.Gui.text("id", "Hello", { anchor: "center", color: "#ffffff" });
+Rebur.Gui.text("id", "Hello!", { anchor: "topLeft", x: 20, y: 20, color: "#ffffff" });
 Rebur.Gui.button("btn", "Click Me", { anchor: "bottomCenter", y: -50 }, () => log("Clicked!"));
-Rebur.Gui.frame("bg", { width: 300, height: 200, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10 });
+Rebur.Gui.bar("hp", 80, 100, { anchor: "bottomLeft", x: 20, y: 20, width: 200, height: 14, color: "#22c55e" });
+Rebur.Gui.image("icon", "shield.png", { anchor: "topRight", x: -20, y: 20, width: 32, height: 32 });
+Rebur.Gui.frame("panel", { anchor: "center", width: 300, height: 200, backgroundColor: "rgba(0,0,0,0.5)", borderRadius: 10 });
 
-// Styling Options
-// anchor: "topLeft", "topCenter", "topRight", "centerLeft", "center", "centerRight", "bottomLeft", "bottomCenter", "bottomRight"
-// x, y: Offsets from anchor
-// width, height: Size in pixels
-// zIndex: Stacking order
-// opacity: 0-1
-// borderRadius: Corner rounding
-// borderWidth, borderColor: Border styling
-// shadow: boolean (drop shadow)
+// Anchor values: "topLeft" "topCenter" "topRight"
+//                "centerLeft" "center" "centerRight"
+//                "bottomLeft" "bottomCenter" "bottomRight"
+// Short aliases: "tl" "tc" "tr" "cl" "cc" "cr" "bl" "bc" "br"
 
-Rebur.Gui.clear("id"); // Remove specific element
-Rebur.Gui.clear();     // Remove all global GUI
+Rebur.Gui.clear("id"); // remove one element
+Rebur.Gui.clear();     // remove all global GUI
 \`\`\`
 
 ## Rebur.Workspace.raycast — Raycasting
@@ -865,14 +921,25 @@ Rebur.Workspace.emitParticles({ x: 0, y: 5, z: 0 }, {
 entity.emitParticles({ effectType: "smoke", count: 10 });
 \`\`\`
 
-## Rebur.Sound
+## Sound System — Editor & Script
 
-Sound objects live in the **Workspace hierarchy** — add them via the "+" button in the editor.
+Like GUI, there is **one unified sound system**. Sounds are objects in the **Workspace hierarchy** — no separate sound container exists.
 
-- **Global audio**: Sound placed directly under Workspace root → plays everywhere at full volume (background music, UI sounds).
-- **Spatial audio**: Sound placed under a 3D part → volume attenuates with distance from that part's position. Set **Max Distance** in the properties panel.
+### 1. Editor-placed Sound (declarative)
 
-Configure each Sound's **Audio URL**, **Volume**, **Loop**, and **Auto Play** from its Properties panel.
+Add a **Sound** object to Workspace via the "+" button. Configure in the Properties panel:
+- **Audio URL** — a URL to an audio file (.mp3, .ogg, .wav)
+- **Volume** — 0 to 1
+- **Loop** — repeat continuously
+- **Auto Play** — plays automatically when the game starts
+
+**Positioning:**
+- **At Workspace root** → global audio (full volume everywhere — background music, ambient)
+- **Child of a 3D object** → spatial audio (attenuates with distance from that object). Set **Max Distance** in Properties.
+
+### 2. Script-triggered Sound
+
+Reference a Sound object by name and trigger it from a script:
 
 \`\`\`js
 // Trigger a sound by its name (respects Global vs Spatial automatically)
