@@ -162,15 +162,22 @@ export class GameRoom {
       // If this is a GUI object, add it to the GUI elements map
       if (o.type?.startsWith("gui")) {
         const guiKind = o.type.replace("gui", "").toLowerCase() || "frame";
+        // Convert from editor coordinates (0-1 range) to percentage-based positioning
+        // Editor uses: left = (positionX + 0.5) * 100, top = (positionY + 0.5) * 100
+        const guiX = (px + 0.5) * 100;
+        const guiY = (py + 0.5) * 100;
+        const guiWidth = sx * 100;
+        const guiHeight = sy * 100;
+        
         this.scriptRunner.guiElements.set(o.id, {
           id: o.id,
           kind: guiKind as "text" | "button" | "image" | "bar" | "frame",
           text: o.name,
-          x: px * 100,
-          y: py * 100,
-          width: sx * 100,
-          height: sy * 100,
-          anchor: "topLeft",
+          x: guiX,
+          y: guiY,
+          width: guiWidth,
+          height: guiHeight,
+          anchor: "center",
           color: o.color ?? "#ffffff",
           fontSize: 14,
           backgroundColor: o.color ?? "#3b82f6",
