@@ -54,23 +54,24 @@ All scripts run **server-side** inside a secure VM sandbox. The only global is *
 21. [Rebur.DataStore — Persistent Storage](#reburdatastore)
 22. [Rebur.Gui — Script-Driven HUD](#reburgui)
 23. [Sound System — Editor & Script](#sound-system)
-24. [Rebur.Tween — Property Animation](#reburtween)
-25. [Rebur.Camera — Camera Control](#reburcamera)
-26. [Rebur.Input — Global Keyboard & Mouse](#reburinput)
-27. [Rebur.Physics — Global Physics & Gravity Fields](#reburphysics)
-28. [Rebur.Network — Multiplayer Messaging](#reburnetwork)
-29. [Rebur.Tags — Tag System](#reburtags)
-30. [Rebur.Math — Game Math Utilities](#reburmath)
-31. [Rebur.Timer — Named Countdowns](#reburtimer)
-32. [Rebur.Labels — World-Space 3D Text](#reburlabels)
-33. [Rebur.Scene — Scene Transitions & Restart](#reburscene)
-34. [Rebur.Debug — Runtime Visualisation](#reburdebug)
-35. [Rebur.Workspace.raycast — Raycasting](#raycasting)
-36. [Particles — Particle Emitters & Events](#particles)
-37. [Timers](#timers)
-38. [Logging](#logging)
-39. [Vector3 & Color3](#vector3--color3)
-40. [Quick Start Examples](#quick-start-examples)
+24. [Rebur.Teams — Team System](#reburteams)
+25. [Rebur.Tween — Property Animation](#reburtween)
+26. [Rebur.Camera — Camera Control](#reburcamera)
+27. [Rebur.Input — Global Keyboard & Mouse](#reburinput)
+28. [Rebur.Physics — Global Physics & Gravity Fields](#reburphysics)
+29. [Rebur.Network — Multiplayer Messaging](#reburnetwork)
+30. [Rebur.Tags — Tag System](#reburtags)
+31. [Rebur.Math — Game Math Utilities](#reburmath)
+32. [Rebur.Timer — Named Countdowns](#reburtimer)
+33. [Rebur.Labels — World-Space 3D Text](#reburlabels)
+34. [Rebur.Scene — Scene Transitions & Restart](#reburscene)
+35. [Rebur.Debug — Runtime Visualisation](#reburdebug)
+36. [Rebur.Workspace.raycast — Raycasting](#raycasting)
+37. [Particles — Particle Emitters & Events](#particles)
+38. [Timers](#timers)
+39. [Logging](#logging)
+40. [Vector3 & Color3](#vector3--color3)
+41. [Quick Start Examples](#quick-start-examples)
 
 ---
 
@@ -109,7 +110,7 @@ Script-accessible namespaces (not hierarchy containers — these are API-only):
 Rebur.State      ← shared session key-value store (resets each session)
 Rebur.DataStore  ← persistent cross-session storage
 Rebur.Gui        ← script-driven HUD (complements editor-placed GUI objects)
-Rebur.Sound      ← audio playback by object name
+Rebur.Teams      ← team creation and assignment
 Rebur.Tween      ← property animation
 Rebur.Camera     ← camera control
 Rebur.Input      ← global keyboard/mouse events (all players)
@@ -937,26 +938,83 @@ Add a **Sound** object to Workspace via the "+" button. Configure in the Propert
 - **At Workspace root** → global audio (full volume everywhere — background music, ambient)
 - **Child of a 3D object** → spatial audio (attenuates with distance from that object). Set **Max Distance** in Properties.
 
-### 2. Script-triggered Sound
+### 2. Script-controlled Sound
 
-Reference a Sound object by name and trigger it from a script:
+Sound objects are Workspace entities — find them by name and call methods on them:
 
 \`\`\`js
-// Trigger a sound by its name (respects Global vs Spatial automatically)
-Rebur.Sound.play("collect", { volume: 0.8, loop: false });
+// Find a sound and play it
+const sfx = Rebur.Workspace.find("CoinCollect");
+sfx.play();
 
-// Positional 3D sound at an explicit world position (overrides hierarchy position)
-Rebur.Sound.playAt("explosion", { x: 10, y: 5, z: 0 }, { maxDistance: 30 });
+// Adjust volume before playing
+sfx.volume = 0.5;  // 0–1
+sfx.loop = false;
+sfx.play();
 
-// Sound for a specific player only
-Rebur.Sound.playForPlayer(player, "notification", { volume: 1.0 });
+// Stop a looping sound (e.g. background music)
+const bgm = Rebur.Workspace.find("BackgroundMusic");
+bgm.loop = true;
+bgm.volume = 0.3;
+bgm.play();
+// ... later:
+bgm.stop();
 
-// Stop a looping sound
-Rebur.Sound.stop("collect");
-
-// Fade volume over time
-Rebur.Sound.fade("music", 0, 2); // fade to 0 over 2s
+// Play a sound when a player touches an object
+const coin = Rebur.Workspace.find("Coin");
+const ping = Rebur.Workspace.find("PingSound");
+coin.on("touched", (player) => {
+  ping.play();
+  coin.destroy();
+});
 \`\`\`
+
+## Rebur.Teams — Team System
+
+Divide players into named teams. Teams are visible in the in-game leaderboard (Tab).
+
+\`\`\`js
+// Create teams at game start
+Rebur.on("start", () => {
+  Rebur.Teams.create("Red",  { color: "#ef4444" });
+  Rebur.Teams.create("Blue", { color: "#3b82f6" });
+});
+
+// Assign a player to a team when they join
+Rebur.on("playerJoined", (player) => {
+  // Distribute evenly between teams
+  const red  = Rebur.Teams.getPlayers("Red").length;
+  const blue = Rebur.Teams.getPlayers("Blue").length;
+  Rebur.Teams.addPlayer(player, red <= blue ? "Red" : "Blue");
+});
+
+// Move a player to a different team
+Rebur.Teams.addPlayer(player, "Blue");
+
+// Check which team a player is on
+const teamName = Rebur.Teams.getTeam(player); // "Red" | "Blue" | null
+
+// List all players on a team
+const reds = Rebur.Teams.getPlayers("Red"); // ScriptPlayerState[]
+
+// Get all defined teams
+const all = Rebur.Teams.all(); // [{ name, color }, ...]
+
+// Remove player from all teams
+Rebur.Teams.removePlayer(player);
+\`\`\`
+
+### Team API reference
+| Method | Returns | Description |
+| :--- | :--- | :--- |
+| \`create(name, { color })\` | team | Define a new team with a display color |
+| \`get(name)\` | team\|null | Get a team by name |
+| \`all()\` | team[] | All defined teams |
+| \`addPlayer(player, name)\` | void | Assign player to a team |
+| \`removePlayer(player)\` | void | Remove player from their team |
+| \`getTeam(player)\` | string\|null | Which team is this player on? |
+| \`getPlayers(name)\` | player[] | All players currently on a team |
+| \`clear()\` | void | Remove all teams and assignments |
 
 ## Rebur.Tween
 \`\`\`js
@@ -1276,7 +1334,8 @@ function explodeAt(position, radius, damage) {
       if (t.health <= 0) t.destroy();
     }
   }
-  Rebur.Sound.playAt("explosion", position, { maxDistance: 40 });
+  const boom = Rebur.Workspace.find("ExplosionSound");
+  if (boom) boom.play();
 }
 \`\`\`
 

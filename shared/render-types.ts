@@ -59,6 +59,8 @@ export interface RenderPlayer {
       rotation: Vec3;
     } | null;
   };
+  team?: string;
+  teamColor?: string;
 }
 
 // ── GUI Elements ──────────────────────────────────────────────────────────────

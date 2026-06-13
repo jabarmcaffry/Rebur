@@ -822,6 +822,8 @@ export class GameRoom {
   }
 
   private _toRenderPlayer(p: PlayerState): RenderPlayer {
+    const teamName = this.scriptRunner.playerTeamAssignments.get(p.id);
+    const teamColor = teamName ? this.scriptRunner.teams.get(teamName)?.color : undefined;
     return {
       id: p.id,
       name: p.name,
@@ -834,6 +836,8 @@ export class GameRoom {
       maxHealth: p.maxHealth,
       colors: { shirt: p.shirtColor, skin: p.skinColor, pants: p.pantsColor },
       motors: {},
+      team: teamName,
+      teamColor,
     };
   }
 

@@ -1083,7 +1083,8 @@ export default function PlayMode({
 
       {/* ── LEADERBOARD (right side) — anchored just below the top bar ── */}
       {showLeaderboard && (() => {
-        const allPlayers = [
+        type LBPlayer = { key: string; name: string; health: number; maxHealth: number; color: string; isLocal: boolean; team?: string; teamColor?: string; };
+        const allPlayers: LBPlayer[] = [
           {
             key: "local",
             name: username,
@@ -1099,9 +1100,58 @@ export default function PlayMode({
             maxHealth: rp.maxHealth ?? 100,
             color: rp.colors?.shirt ?? "#3b82f6",
             isLocal: false,
+            team: rp.team,
+            teamColor: rp.teamColor,
           })),
         ];
-        const rankEmoji = (i: number) => i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`;
+
+        const hasTeams = allPlayers.some(p => p.team);
+
+        // group by team; ungrouped go under ""
+        const groups: Map<string, LBPlayer[]> = new Map();
+        if (hasTeams) {
+          for (const p of allPlayers) {
+            const key = p.team ?? "";
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(p);
+          }
+        } else {
+          groups.set("", allPlayers);
+        }
+
+        const renderRow = (p: LBPlayer, rank: number) => {
+          const hpPct = Math.max(0, Math.min(100, (p.health / (p.maxHealth || 100)) * 100));
+          const hpColor = hpPct > 60 ? "#22c55e" : hpPct > 25 ? "#eab308" : "#ef4444";
+          return (
+            <div
+              key={p.key}
+              className={`rounded-lg px-2 pt-1.5 pb-1 ${p.isLocal ? "bg-white/10 border border-white/15" : "hover:bg-white/5"}`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] w-4 text-right text-white/30 shrink-0 tabular-nums">{rank}</span>
+                <div
+                  className="w-5 h-5 rounded shrink-0 flex items-center justify-center text-[9px] font-black text-white"
+                  style={{ backgroundColor: p.teamColor ?? p.color }}
+                >
+                  {p.name.charAt(0).toUpperCase()}
+                </div>
+                <span className={`text-[11px] flex-1 truncate font-medium leading-none ${p.isLocal ? "text-white" : "text-white/80"}`}>
+                  {p.name}
+                  {p.isLocal && <span className="text-white/35 font-normal ml-1 text-[10px]">you</span>}
+                </span>
+                <span className="text-[10px] text-white/45 tabular-nums shrink-0">{Math.round(p.health)}</span>
+              </div>
+              <div className="mt-1 ml-[22px] h-[3px] rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${hpPct}%`, backgroundColor: hpColor }}
+                />
+              </div>
+            </div>
+          );
+        };
+
+        let globalRank = 0;
         return (
           <div className="absolute right-2 z-50 w-60" style={{ top: "48px" }}>
             <div className="rounded-xl overflow-hidden border border-white/10 bg-black/80 backdrop-blur-xl shadow-2xl">
@@ -1116,40 +1166,28 @@ export default function PlayMode({
 
               {/* Player rows */}
               <div className="p-1.5 space-y-0.5 max-h-72 overflow-y-auto">
-                {allPlayers.map((p, i) => {
-                  const hpPct = Math.max(0, Math.min(100, (p.health / (p.maxHealth || 100)) * 100));
-                  const hpColor = hpPct > 60 ? "#22c55e" : hpPct > 25 ? "#eab308" : "#ef4444";
-                  return (
-                    <div
-                      key={p.key}
-                      className={`rounded-lg px-2 pt-1.5 pb-1 ${p.isLocal ? "bg-white/10 border border-white/15" : "hover:bg-white/5"}`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] w-5 text-center shrink-0 leading-none">
-                          {rankEmoji(i)}
+                {Array.from(groups.entries()).map(([teamName, members]) => (
+                  <div key={teamName || "__none"}>
+                    {hasTeams && teamName && (
+                      <div
+                        className="flex items-center gap-1.5 px-2 py-1 mt-0.5 rounded"
+                        style={{ backgroundColor: `${members[0]?.teamColor ?? "#3b82f6"}22` }}
+                      >
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: members[0]?.teamColor ?? "#3b82f6" }} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: members[0]?.teamColor ?? "#3b82f6" }}>
+                          {teamName}
                         </span>
-                        <div
-                          className="w-5 h-5 rounded shrink-0 flex items-center justify-center text-[9px] font-black text-white"
-                          style={{ backgroundColor: p.color }}
-                        >
-                          {p.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className={`text-[11px] flex-1 truncate font-medium leading-none ${p.isLocal ? "text-white" : "text-white/80"}`}>
-                          {p.name}
-                          {p.isLocal && <span className="text-white/35 font-normal ml-1 text-[10px]">you</span>}
-                        </span>
-                        <span className="text-[10px] text-white/45 tabular-nums shrink-0">{Math.round(p.health)}</span>
+                        <span className="text-[10px] text-white/30 ml-auto">{members.length}</span>
                       </div>
-                      {/* HP bar */}
-                      <div className="mt-1 ml-[26px] h-[3px] rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${hpPct}%`, backgroundColor: hpColor }}
-                        />
+                    )}
+                    {hasTeams && !teamName && members.length > 0 && (
+                      <div className="px-2 py-0.5">
+                        <span className="text-[10px] text-white/25 uppercase tracking-wider">No Team</span>
                       </div>
-                    </div>
-                  );
-                })}
+                    )}
+                    {members.map(p => renderRow(p, ++globalRank))}
+                  </div>
+                ))}
 
                 {allPlayers.length <= 1 && (
                   <div className="py-2 text-center text-white/25 text-[10px]">

@@ -146,6 +146,8 @@ export class ScriptRunner {
   
   soundQueue: any[] = [];
   particleEvents: ParticleEvent[] = [];
+  teams = new Map<string, { name: string; color: string }>();
+  playerTeamAssignments = new Map<string, string>(); // playerId → teamName
   debugDraws: DebugDraw[] = [];
   networkMessages: any[] = [];
   networkToPlayer: any[] = [];
@@ -371,7 +373,17 @@ export class ScriptRunner {
             ...options,
             objectId: obj.id
           });
-        }
+        },
+        play(opts?: any) {
+          runner.soundQueue.push({ soundId: obj.audioUrl ?? obj.name, entityId: obj.id, options: { volume: obj.properties?.volume ?? 1, loop: obj.properties?.loop ?? false, ...opts } });
+        },
+        stop() {
+          runner.soundQueue.push({ soundId: obj.name, entityId: obj.id, action: "stop" });
+        },
+        get volume() { return obj.properties?.volume ?? 1; },
+        set volume(v: number) { if (!obj.properties) (obj as any).properties = {}; obj.properties!.volume = Math.max(0, Math.min(1, +v)); },
+        get loop() { return obj.properties?.loop ?? false; },
+        set loop(v: boolean) { if (!obj.properties) (obj as any).properties = {}; obj.properties!.loop = Boolean(v); }
       };
       return ep;
     };
@@ -604,12 +616,25 @@ export class ScriptRunner {
           }
         })
       },
-      Sound: {
-        play: (id: string, opts?: any) => runner.soundQueue.push({ soundId: id, options: opts }),
-        playAt: (id: string, pos: any, opts?: any) => runner.soundQueue.push({ soundId: id, position: pos, options: opts }),
-        playForPlayer: (p: any, id: string, opts?: any) => runner.soundQueue.push({ soundId: id, targetPlayerId: p.id, options: opts }),
-        stop: (id: string) => {},
-        fade: (id: string, v: number, s: number) => {}
+      Teams: {
+        create: (name: string, opts?: { color?: string }) => {
+          const team = { name, color: opts?.color ?? "#3b82f6" };
+          runner.teams.set(name, team);
+          return team;
+        },
+        get: (name: string) => runner.teams.get(name) ?? null,
+        all: () => Array.from(runner.teams.values()),
+        addPlayer: (player: any, teamName: string) => {
+          runner.playerTeamAssignments.set(player.id, teamName);
+        },
+        removePlayer: (player: any) => {
+          runner.playerTeamAssignments.delete(player.id);
+        },
+        getTeam: (player: any) => runner.playerTeamAssignments.get(player.id) ?? null,
+        getPlayers: (teamName: string) => Array.from(runner.players.values())
+          .filter(p => runner.playerTeamAssignments.get(p.id) === teamName)
+          .map(p => makePlayerProxy(p)),
+        clear: () => { runner.teams.clear(); runner.playerTeamAssignments.clear(); }
       },
       Tween: reburTween,
       Camera: {
