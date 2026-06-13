@@ -69,6 +69,9 @@ import {
   Tag,
   Dna,
   Zap,
+  Grid3X3,
+  Hammer,
+  CopyPlus,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -221,6 +224,112 @@ function flattenContainers(cs: ContainerDef[]): ContainerDef[] {
 }
 const ALL_CONTAINERS = flattenContainers(CONTAINERS);
 
+// ── Helpers used inside the R3F Canvas ──────────────────────────────────────
+
+function findNonGuiAncestorIn(objects: any[], objId: string | null | undefined): any | null {
+  if (!objId) return null;
+  const parent = objects.find((x: any) => x.id === objId);
+  if (!parent) return null;
+  if (!parent.type?.startsWith("gui")) return parent;
+  return findNonGuiAncestorIn(objects, parent.parentId);
+}
+
+interface ObjectWithTCProps {
+  o: any;
+  mode: string;
+  snapEnabled: boolean;
+  snapSize: number;
+  onSave: (pos: any, rot: any, scale: any) => void;
+  onClick: () => void;
+  onDraggingStart: () => void;
+  onDraggingEnd: () => void;
+}
+
+const ObjectWithTC = React.memo(function ObjectWithTC({
+  o, mode, snapEnabled, snapSize, onSave, onClick, onDraggingStart, onDraggingEnd,
+}: ObjectWithTCProps) {
+  const groupRef = useRef<THREE.Group>(null!);
+  const tcRef = useRef<any>(null);
+  // Keep latest callback values in a ref so the event listener doesn't go stale
+  const cbRef = useRef({ snapEnabled, snapSize, onSave, onDraggingStart, onDraggingEnd });
+  cbRef.current = { snapEnabled, snapSize, onSave, onDraggingStart, onDraggingEnd };
+
+  useEffect(() => {
+    const tc = tcRef.current;
+    if (!tc) return;
+    const onDraggingChanged = (e: any) => {
+      if (e.value) {
+        cbRef.current.onDraggingStart();
+      } else {
+        cbRef.current.onDraggingEnd();
+        if (groupRef.current) {
+          groupRef.current.updateMatrixWorld(true);
+          const wp = new THREE.Vector3();
+          const wq = new THREE.Quaternion();
+          const ws = new THREE.Vector3();
+          groupRef.current.matrixWorld.decompose(wp, wq, ws);
+          const we = new THREE.Euler().setFromQuaternion(wq);
+          const { snapEnabled: snap, snapSize: sz, onSave: save } = cbRef.current;
+          const sv = (v: number) => snap ? Math.round(v / sz) * sz : v;
+          save(
+            { x: sv(wp.x), y: sv(wp.y), z: sv(wp.z) },
+            { x: we.x, y: we.y, z: we.z },
+            { x: ws.x, y: ws.y, z: ws.z },
+          );
+        }
+      }
+    };
+    tc.addEventListener("dragging-changed", onDraggingChanged);
+    return () => tc.removeEventListener("dragging-changed", onDraggingChanged);
+  }, []); // attach once on mount, use cbRef for latest values
+
+  const props = (o.properties ?? {}) as Record<string, any>;
+  return (
+    <TransformControls ref={tcRef} mode={mode as any}>
+      <group
+        ref={groupRef}
+        position={[o.positionX, o.positionY, o.positionZ]}
+        rotation={[o.rotationX, o.rotationY, o.rotationZ] as any}
+        scale={[o.scaleX, o.scaleY, o.scaleZ]}
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+      >
+        <mesh>
+          {o.primitiveType === "sphere" ? <sphereGeometry /> :
+           o.primitiveType === "cylinder" ? <cylinderGeometry args={[0.5, 0.5, 1]} /> :
+           o.primitiveType === "plane" ? <planeGeometry /> :
+           <boxGeometry />}
+          <meshStandardMaterial
+            color={o.color ?? "#a3a3a3"}
+            transparent
+            opacity={Math.max(0.1, 1 - (props.transparency || 0))}
+          />
+        </mesh>
+      </group>
+    </TransformControls>
+  );
+});
+
+function PlacementHandler({ snapEnabled, snapSize, onPlace }: {
+  snapEnabled: boolean;
+  snapSize: number;
+  onPlace: (pos: { x: number; y: number; z: number }) => void;
+}) {
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, 0, 0]}
+      onClick={(e) => {
+        e.stopPropagation();
+        const sv = (v: number) => snapEnabled ? Math.round(v / snapSize) * snapSize : v;
+        onPlace({ x: sv(e.point.x), y: 0.5, z: sv(e.point.z) });
+      }}
+    >
+      <planeGeometry args={[1000, 1000]} />
+      <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 const SCRIPT_SNIPPETS: { label: string; code: string }[] = [
   {
     label: "On key press",
@@ -288,6 +397,15 @@ export default function Editor() {
   const [dragItem, setDragItem] = useState<{ kind: "object" | "script"; id: string } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [hierarchySearch, setHierarchySearch] = useState("");
+  // Build / snap state
+  const [snapEnabled, setSnapEnabled] = useState(false);
+  const [snapSize, setSnapSize] = useState(1);
+  const [buildPrimitive, setBuildPrimitive] = useState<string | null>(null);
+  const [orbitEnabled, setOrbitEnabled] = useState(true);
+  // Responsive
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 768 : false
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -458,16 +576,42 @@ export default function Editor() {
     return (p[key] ?? fallback) as T;
   };
 
-  // Handle keyboard shortcuts for transform modes
+  // Responsive: track mobile breakpoint
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // Handle keyboard shortcuts for transform modes + build tools
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't steal shortcuts when typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "m" || e.key === "M") setTransformMode("translate");
       if (e.key === "r" || e.key === "R") setTransformMode("rotate");
       if (e.key === "s" || e.key === "S") setTransformMode("scale");
+      if (e.key === "Escape") setBuildPrimitive(null);
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        setSelectedId((curId) => {
+          if (!curId) return curId;
+          const sel = objects.find((o) => o.id === curId);
+          if (!sel) return curId;
+          createObjectMutation.mutate({
+            ...sel,
+            id: undefined as any,
+            name: sel.name + "_copy",
+            positionX: sel.positionX + (snapEnabled ? snapSize : 1),
+            positionZ: sel.positionZ + (snapEnabled ? snapSize : 1),
+          } as any);
+          return curId;
+        });
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [objects, snapEnabled, snapSize, createObjectMutation]);
 
   // Handle transform updates from the 3D canvas
   const handleTransformUpdate = (newPos: any, newRot: any, newScale: any) => {
@@ -544,6 +688,7 @@ export default function Editor() {
     containerName: string,
     primitiveType: "cube" | "sphere" | "cylinder" | "plane" | "light",
     parentId?: string | null,
+    initialPosition?: { x: number; y: number; z: number },
   ) => {
     const isLight = primitiveType === "light";
     const baseName = primitiveType.charAt(0).toUpperCase() + primitiveType.slice(1);
@@ -557,11 +702,23 @@ export default function Editor() {
       primitiveType: isLight ? null : primitiveType,
       container: containerName,
       parentId: parentId ?? null,
-      positionX: 0,
-      positionY: isLight ? 3 : 0.5,
-      positionZ: 0,
+      positionX: initialPosition?.x ?? 0,
+      positionY: initialPosition?.y ?? (isLight ? 3 : 0.5),
+      positionZ: initialPosition?.z ?? 0,
       color: isLight ? "#ffffaa" : "#a3a3a3",
     } as Partial<GameObject>);
+  };
+
+  const duplicateSelected = () => {
+    if (!selected) return;
+    const offset = snapEnabled ? snapSize : 1;
+    createObjectMutation.mutate({
+      ...selected,
+      id: undefined as any,
+      name: selected.name + "_copy",
+      positionX: selected.positionX + offset,
+      positionZ: selected.positionZ + offset,
+    } as any);
   };
 
   const moveHierarchyItem = (target: { container: string; parentId?: string | null }) => {
@@ -1360,14 +1517,14 @@ export default function Editor() {
 
       <main className="flex-1 flex overflow-hidden flex-col md:flex-row">
         {/* Mobile Hierarchy Sheet */}
-        <Sheet open={isHierarchyOpen && window.innerWidth < 768} onOpenChange={setHierarchyOpen}>
-          <SheetContent side="left" className="w-64 p-0 md:hidden">
+        <Sheet open={isMobile && isHierarchyOpen} onOpenChange={setHierarchyOpen}>
+          <SheetContent side="left" className="w-[85vw] max-w-80 p-0">
             <HierarchyPanel isMobile={true} />
           </SheetContent>
         </Sheet>
 
         {/* Desktop Hierarchy Panel */}
-        {isHierarchyOpen && <HierarchyPanel />}
+        {!isMobile && isHierarchyOpen && <HierarchyPanel />}
         
         <div className="flex-1 flex flex-col min-w-0 bg-muted/10 relative">
           <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col">
@@ -1400,12 +1557,7 @@ export default function Editor() {
                   <div className="flex items-center gap-0.5 ml-2 pl-2 border-l border-border">
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button
-                          variant={transformMode === "translate" ? "default" : "ghost"}
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setTransformMode("translate")}
-                        >
+                        <Button variant={transformMode === "translate" ? "default" : "ghost"} size="icon" className="h-7 w-7" onClick={() => setTransformMode("translate")}>
                           <MoveIcon className="w-3.5 h-3.5" />
                         </Button>
                       </TooltipTrigger>
@@ -1413,12 +1565,7 @@ export default function Editor() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button
-                          variant={transformMode === "rotate" ? "default" : "ghost"}
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setTransformMode("rotate")}
-                        >
+                        <Button variant={transformMode === "rotate" ? "default" : "ghost"} size="icon" className="h-7 w-7" onClick={() => setTransformMode("rotate")}>
                           <RotateCcw className="w-3.5 h-3.5" />
                         </Button>
                       </TooltipTrigger>
@@ -1426,16 +1573,53 @@ export default function Editor() {
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button
-                          variant={transformMode === "scale" ? "default" : "ghost"}
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => setTransformMode("scale")}
-                        >
+                        <Button variant={transformMode === "scale" ? "default" : "ghost"} size="icon" className="h-7 w-7" onClick={() => setTransformMode("scale")}>
                           <Maximize className="w-3.5 h-3.5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>Scale (S)</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={duplicateSelected}>
+                          <CopyPlus className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Duplicate (Ctrl+D)</TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
+                {activeTab === "scene" && (
+                  <div className="flex items-center gap-0.5 ml-1 pl-2 border-l border-border">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant={snapEnabled ? "default" : "ghost"} size="icon" className="h-7 w-7" onClick={() => setSnapEnabled(!snapEnabled)}>
+                          <Grid3X3 className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Snap to Grid</TooltipContent>
+                    </Tooltip>
+                    {snapEnabled && (
+                      <Select value={snapSize.toString()} onValueChange={(v) => setSnapSize(parseFloat(v))}>
+                        <SelectTrigger className="h-7 w-14 text-xs px-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0.25">0.25</SelectItem>
+                          <SelectItem value="0.5">0.5</SelectItem>
+                          <SelectItem value="1">1</SelectItem>
+                          <SelectItem value="2">2</SelectItem>
+                          <SelectItem value="4">4</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant={buildPrimitive ? "default" : "ghost"} size="icon" className="h-7 w-7" onClick={() => setBuildPrimitive(buildPrimitive ? null : "cube")}>
+                          <Hammer className="w-3.5 h-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Build Mode — click to place parts</TooltipContent>
                     </Tooltip>
                   </div>
                 )}
@@ -1452,62 +1636,115 @@ export default function Editor() {
 
             <div className="flex-1 overflow-hidden relative">
               <TabsContent value="scene" className="h-full m-0 p-0 relative">
-                <Canvas shadows camera={{ position: [5, 5, 5], fov: 50 }}>
+                <Canvas
+                  shadows
+                  camera={{ position: [5, 5, 5], fov: 50 }}
+                  style={{ cursor: buildPrimitive ? "crosshair" : "default" }}
+                >
                   <ambientLight intensity={0.5} />
                   <pointLight position={[10, 10, 10]} castShadow />
-                  <Grid infiniteGrid fadeDistance={50} sectionSize={1} />
+                  <Grid infiniteGrid fadeDistance={50} sectionSize={snapEnabled ? snapSize : 1} />
+
+                  {/* Render all non-selected objects normally */}
                   {objects.map((o) => {
+                    if (o.id === selectedId) return null;
                     const isGUI = o.type?.startsWith("gui");
-                    const isSelected = o.id === selectedId;
-                    // Helper: find first non-GUI ancestor
-                    const findNonGuiAncestor = (objId: string | null | undefined): typeof objects[0] | null => {
-                      if (!objId) return null;
-                      const parent = objects.find(x => x.id === objId);
-                      if (!parent) return null;
-                      if (!parent.type?.startsWith("gui")) return parent;
-                      return findNonGuiAncestor(parent.parentId);
-                    };
-                    // Render world-space GUI (GUI with a 3D ancestor) in 3D
-                    // Skip screen-space GUI (GUI with no 3D ancestor)
-                    if (isGUI && !findNonGuiAncestor(o.parentId)) return null;
+                    if (isGUI && !findNonGuiAncestorIn(objects, o.parentId)) return null;
+                    if (o.type === "audio" || o.type === "uiElement" || o.type === "folder" || o.type === "model") return null;
+                    const props = (o.properties ?? {}) as Record<string, any>;
                     return (
                       <group key={o.id} position={[o.positionX, o.positionY, o.positionZ]}>
-                        {isGUI ? (
-                          // World-space GUI rendered as a plane
-                          <mesh
-                            position={[0, 0, 0]}
-                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                          >
-                            <planeGeometry args={[1, 1]} />
-                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 0.8} />
-                          </mesh>
-                        ) : (
-                          // 3D object
-                          <mesh
-                            position={[0, 0, 0]}
-                            rotation={[o.rotationX, o.rotationY, o.rotationZ]}
-                            scale={[o.scaleX, o.scaleY, o.scaleZ]}
-                            onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
-                          >
-                            {o.primitiveType === "sphere" ? <sphereGeometry /> : o.primitiveType === "cylinder" ? <cylinderGeometry /> : o.primitiveType === "plane" ? <planeGeometry /> : <boxGeometry />}
-                            <meshStandardMaterial color={o.color} transparent opacity={1 - (o.properties as any)?.transparency || 1} />
-                          </mesh>
-                        )}
-                        {isSelected && (
-                          <TransformControls mode={transformMode} onObjectChange={() => {}} position={[0, 0, 0]}>
-                            <mesh>
-                              <boxGeometry args={[0.1, 0.1, 0.1]} />
-                              <meshStandardMaterial color="#ffff00" wireframe />
-                            </mesh>
-                          </TransformControls>
-                        )}
+                        <mesh
+                          rotation={[o.rotationX, o.rotationY, o.rotationZ]}
+                          scale={[o.scaleX, o.scaleY, o.scaleZ]}
+                          onClick={(e) => { e.stopPropagation(); setSelectedId(o.id); setSelectedScriptId(null); }}
+                        >
+                          {isGUI ? <planeGeometry args={[1, 1]} /> :
+                           o.primitiveType === "sphere" ? <sphereGeometry /> :
+                           o.primitiveType === "cylinder" ? <cylinderGeometry args={[0.5, 0.5, 1]} /> :
+                           o.primitiveType === "plane" ? <planeGeometry /> :
+                           <boxGeometry />}
+                          <meshStandardMaterial
+                            color={o.color ?? "#a3a3a3"}
+                            transparent
+                            opacity={Math.max(0.05, 1 - (props.transparency || 0))}
+                          />
+                        </mesh>
                       </group>
                     );
                   })}
-                  <OrbitControls makeDefault />
+
+                  {/* Selected object with proper TransformControls — drag saves world position */}
+                  {selected && selected.type !== "audio" && selected.type !== "uiElement" &&
+                   selected.type !== "folder" && selected.type !== "model" &&
+                   !selected.type?.startsWith("gui") && (
+                    <ObjectWithTC
+                      key={`tc-${selected.id}-${selected.positionX},${selected.positionY},${selected.positionZ}`}
+                      o={selected}
+                      mode={transformMode}
+                      snapEnabled={snapEnabled}
+                      snapSize={snapSize}
+                      onSave={handleTransformUpdate}
+                      onClick={() => {}}
+                      onDraggingStart={() => setOrbitEnabled(false)}
+                      onDraggingEnd={() => setOrbitEnabled(true)}
+                    />
+                  )}
+
+                  {/* Build-mode placement handler — invisible ground plane captures clicks */}
+                  {buildPrimitive && (
+                    <PlacementHandler
+                      snapEnabled={snapEnabled}
+                      snapSize={snapSize}
+                      onPlace={(pos) => {
+                        addPrimitiveTo("Workspace", buildPrimitive as any, null, pos);
+                      }}
+                    />
+                  )}
+
+                  <OrbitControls makeDefault enabled={orbitEnabled} />
                 </Canvas>
+
+                {/* Build Palette — Bloxburg-style floating part picker */}
+                {buildPrimitive && (
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 bg-card/95 backdrop-blur-sm border border-border rounded-2xl shadow-2xl p-3 pointer-events-auto">
+                    <div className="flex items-center gap-2 mb-2.5 px-1">
+                      <Hammer className="w-3.5 h-3.5 text-primary" />
+                      <span className="text-xs font-bold text-primary">Build Mode</span>
+                      <span className="text-[10px] text-muted-foreground">Click anywhere in the scene to place • Esc to exit</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {[
+                        { type: "cube", icon: Box, label: "Cube" },
+                        { type: "sphere", icon: Circle, label: "Sphere" },
+                        { type: "cylinder", icon: Cylinder, label: "Cylinder" },
+                        { type: "plane", icon: Square, label: "Plane" },
+                        { type: "light", icon: Lightbulb, label: "Light" },
+                      ].map(({ type, icon: Icon, label }) => (
+                        <button
+                          key={type}
+                          onClick={() => setBuildPrimitive(type)}
+                          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-[11px] font-medium transition-all ${
+                            buildPrimitive === type
+                              ? "bg-primary text-primary-foreground shadow-sm"
+                              : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <Icon className="w-5 h-5" />
+                          <span>{label}</span>
+                        </button>
+                      ))}
+                      <div className="w-px h-10 bg-border mx-0.5" />
+                      <button
+                        onClick={() => setBuildPrimitive(null)}
+                        className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl text-[11px] font-medium hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
+                      >
+                        <X className="w-5 h-5" />
+                        <span>Exit</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {/* 2D GUI Overlay - Screen-space UI only */}
                 <div className="absolute inset-0 pointer-events-none">
                   {objects.map((o) => {
@@ -1616,15 +1853,39 @@ export default function Editor() {
         </div>
 
         {/* Mobile Properties Sheet */}
-        <Sheet open={isPropertiesOpen && window.innerWidth < 768} onOpenChange={setPropertiesOpen}>
-          <SheetContent side="right" className="w-72 p-0 md:hidden">
+        <Sheet open={isMobile && isPropertiesOpen} onOpenChange={setPropertiesOpen}>
+          <SheetContent side="right" className="w-[85vw] max-w-80 p-0">
             <PropertiesPanel isMobile={true} />
           </SheetContent>
         </Sheet>
 
         {/* Desktop Properties Panel */}
-        {isPropertiesOpen && <PropertiesPanel />}
+        {!isMobile && isPropertiesOpen && <PropertiesPanel />}
       </main>
+
+      {/* Mobile bottom navigation — Replit-style tab bar */}
+      {isMobile && (
+        <nav className="flex md:hidden items-center border-t border-border bg-card shrink-0 safe-bottom">
+          {([
+            { icon: Layers, label: "Explorer", action: () => setHierarchyOpen(true), active: false },
+            { icon: Box, label: "Scene", action: () => setActiveTab("scene"), active: activeTab === "scene" },
+            { icon: Code2, label: "Scripts", action: () => setActiveTab("script"), active: activeTab === "script" },
+            { icon: BookOpen, label: "Docs", action: () => setActiveTab("docs"), active: activeTab === "docs" },
+            { icon: SettingsIcon, label: "Props", action: () => setPropertiesOpen(true), active: false },
+          ] as const).map(({ icon: Icon, label, action, active }) => (
+            <button
+              key={label}
+              onClick={action}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 min-h-[52px] text-[10px] font-medium transition-colors ${
+                active ? "text-primary" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon className="w-[18px] h-[18px]" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
 
       {isPlayMode && (
         <PlayMode

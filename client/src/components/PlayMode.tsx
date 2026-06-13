@@ -504,12 +504,35 @@ export default function PlayMode({
     }
     clientRunnerRef.current = runner;
 
+    // Auto-play audio objects that have autoPlay enabled
+    const autoPlayAudios: HTMLAudioElement[] = [];
+    for (const obj of objects) {
+      if (obj.type === "audio") {
+        const props = (obj.properties ?? {}) as Record<string, any>;
+        if (props.autoPlay && props.audioUrl) {
+          try {
+            const audio = new Audio(props.audioUrl);
+            audio.volume = Math.max(0, Math.min(1, props.volume ?? 1));
+            audio.loop = props.loop ?? false;
+            audio.play().catch((err) => console.warn("[Sound] AutoPlay blocked:", err));
+            autoPlayAudios.push(audio);
+          } catch (err) {
+            console.warn("[Sound] AutoPlay error:", err);
+          }
+        }
+      }
+    }
+
     return () => {
       runner.destroy();
       clientRunnerRef.current = null;
       renderClient.disconnect();
+      for (const a of autoPlayAudios) {
+        a.pause();
+        a.src = "";
+      }
     };
-  }, [renderClient, scripts]);
+  }, [renderClient, scripts, objects]);
 
   // Game loop - send inputs and update state
   useEffect(() => {
