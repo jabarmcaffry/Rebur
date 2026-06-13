@@ -1174,8 +1174,74 @@ export default function PlayMode({
         </div>
       )}
 
-      {/* ── SCRIPT-DRIVEN GUI ── */}
+      {/* ── SCRIPT-DRIVEN GUI (via game.gui.text / game.gui.button in scripts) ── */}
       <GuiOverlay gui={guiElements} onGuiClick={handleGuiClick} />
+
+      {/* ── HIERARCHY GUI (guiText / guiButton / guiFrame objects placed in editor) ── */}
+      {(() => {
+        const guiObjs = objects.filter(o => o.type?.startsWith("gui"));
+        if (guiObjs.length === 0) return null;
+        // Only render screen-space GUI (objects with no non-GUI ancestor)
+        const hasNonGuiAncestor = (id: string | null | undefined): boolean => {
+          if (!id) return false;
+          const parent = objects.find(p => p.id === id);
+          if (!parent) return false;
+          if (!parent.type?.startsWith("gui")) return true;
+          return hasNonGuiAncestor(parent.parentId);
+        };
+        const screenGui = guiObjs.filter(o => !hasNonGuiAncestor(o.parentId));
+        if (screenGui.length === 0) return null;
+        return (
+          <div className="absolute inset-0 pointer-events-none" style={{ top: 48, zIndex: 9 }}>
+            {screenGui.map(o => {
+              const p = (o.properties ?? {}) as Record<string, any>;
+              const text = p.text ?? o.name;
+              const isBtn = o.type === "guiButton";
+              const isText = o.type === "guiText";
+              const opacity = Math.max(0, 1 - ((o.properties as any)?.transparency || 0));
+              const style: React.CSSProperties = {
+                position: "absolute",
+                left: `${(o.positionX + 0.5) * 100}%`,
+                top: `${(o.positionY + 0.5) * 100}%`,
+                width: `${Math.max(1, o.scaleX * 100)}%`,
+                height: `${Math.max(1, o.scaleY * 100)}%`,
+                transform: "translate(-50%, -50%)",
+                backgroundColor: isText ? undefined : o.color,
+                color: p.textColor ?? "#ffffff",
+                fontSize: `${p.fontSize ?? 14}px`,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                textAlign: "center",
+                borderRadius: `${p.cornerRadius ?? 4}px`,
+                opacity,
+                pointerEvents: isBtn ? "auto" : "none",
+                cursor: isBtn ? "pointer" : "default",
+                padding: isText ? 0 : "4px 8px",
+                overflow: "hidden",
+                textShadow: isText ? "0 1px 3px rgba(0,0,0,0.8)" : undefined,
+              };
+              if (isBtn) {
+                return (
+                  <button
+                    key={o.id}
+                    style={style}
+                    className="transition-opacity hover:opacity-80 active:scale-95"
+                  >
+                    {text}
+                  </button>
+                );
+              }
+              return (
+                <div key={o.id} style={style}>
+                  {(isText || o.type === "guiButton") ? text : null}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* ── MOBILE CONTROLS ── */}
       {isMobile && (

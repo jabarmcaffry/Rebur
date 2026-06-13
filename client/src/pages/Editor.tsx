@@ -406,6 +406,8 @@ export default function Editor() {
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 768 : false
   );
+  // Docs HTML (marked v18 parse is async)
+  const [docsHtml, setDocsHtml] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -581,6 +583,18 @@ export default function Editor() {
     const handler = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  // Parse docs markdown async (marked v18 returns Promise)
+  useEffect(() => {
+    (async () => {
+      try {
+        const html = await marked.parse(SCRIPTING_DOCS);
+        setDocsHtml(html as string);
+      } catch {
+        setDocsHtml("<p>Documentation failed to load.</p>");
+      }
+    })();
   }, []);
 
   // Handle keyboard shortcuts for transform modes + build tools
@@ -1530,29 +1544,32 @@ export default function Editor() {
           <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col">
             <div className="flex items-center justify-between px-2 border-b border-border bg-card/40 shrink-0 overflow-x-auto">
               <div className="flex items-center gap-2">
-                <TabsList className="bg-transparent h-9 p-0 gap-1">
-                  <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
-                {selectedScript && (
-                  <div className="flex items-center gap-0.5 bg-muted/50 rounded-md px-1">
-                    <TabsTrigger value="script" className="h-7 text-xs px-2 data-[state=active]:bg-muted">
-                      <FileCode className="w-3 h-3 mr-1" /> Scripts
-                    </TabsTrigger>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 hover:bg-muted"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedScriptId(null);
-                        if (activeTab === "script") setActiveTab("scene");
-                      }}
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
-                  </div>
+                {/* Tab triggers — hidden on mobile (bottom nav handles switching) */}
+                {!isMobile && (
+                  <TabsList className="bg-transparent h-9 p-0 gap-1">
+                    <TabsTrigger value="scene" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Scene</TabsTrigger>
+                    {selectedScript && (
+                      <div className="flex items-center gap-0.5 bg-muted/50 rounded-md px-1">
+                        <TabsTrigger value="script" className="h-7 text-xs px-2 data-[state=active]:bg-muted">
+                          <FileCode className="w-3 h-3 mr-1" /> Scripts
+                        </TabsTrigger>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 hover:bg-muted"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedScriptId(null);
+                            if (activeTab === "script") setActiveTab("scene");
+                          }}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                    <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Docs</TabsTrigger>
+                  </TabsList>
                 )}
-                <TabsTrigger value="docs" className="h-7 text-xs px-3 data-[state=active]:bg-muted">Docs</TabsTrigger>
-                </TabsList>
                 {activeTab === "scene" && selectedId && (
                   <div className="flex items-center gap-0.5 ml-2 pl-2 border-l border-border">
                     <Tooltip>
@@ -1624,14 +1641,7 @@ export default function Editor() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setHierarchyOpen(!isHierarchyOpen)}>
-                  <Menu className="w-3.5 h-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 md:hidden" onClick={() => setPropertiesOpen(!isPropertiesOpen)}>
-                  <PanelRight className="w-3.5 h-3.5" />
-                </Button>
-              </div>
+              {/* No right-side buttons needed — desktop has persistent panels, mobile has bottom nav */}
             </div>
 
             <div className="flex-1 overflow-hidden relative">
@@ -1844,7 +1854,11 @@ export default function Editor() {
               <TabsContent value="docs" className="h-full m-0 p-0 overflow-hidden flex flex-col">
                 <ScrollArea className="flex-1 w-full">
                   <div className="p-4 w-full">
-                    <div className="prose prose-invert prose-sm dark max-w-none" dangerouslySetInnerHTML={{ __html: marked.parse(SCRIPTING_DOCS) as string }} />
+                    {docsHtml ? (
+                      <div className="prose prose-invert prose-sm dark max-w-none" dangerouslySetInnerHTML={{ __html: docsHtml }} />
+                    ) : (
+                      <div className="text-muted-foreground text-sm py-8 text-center">Loading documentation…</div>
+                    )}
                   </div>
                 </ScrollArea>
               </TabsContent>
